@@ -1,0 +1,401 @@
+/// 不完全将棋 検証用 CLI（第一段階）
+///
+/// 一人が両陣営の着手を入力して一局を最後まで進める検証モード。
+/// 秘匿性なし・単一プロセス。ルールエンジンの正しさを人手で確かめるためのツール。
+use engine::board::Position;
+use engine::kifu::Kifu;
+use engine::movegen::legal_actions;
+use engine::resolve::{resolve, ResolutionEvent};
+use engine::serialize::{kifu_from_string, kifu_to_string, position_to_sfen};
+use engine::terminate::{check_king_death, check_status, GameEnd, GameStatus};
+use engine::types::{Action, PieceKind, Ply, Side};
+use std::io::{self, BufRead, Write};
+
+fn main() {
+    println!("不完全将棋 検証用 CLI — 第一段階");
+    println!("コマンド: :moves <s|g>  :board  :undo  :save <path>  :load <path>  :resign <s|g>  :quit");
+    println!();
+
+    let stdin = io::stdin();
+    let mut kifu = Kifu::new(Position::initial());
+
+    loop {
+        let pos = kifu.current();
+        print_board(&pos);
+
+        // 着手選択前の終了判定（確定的詰み）
+        let status = check_status(&pos);
+        match status {
+            GameStatus::SenteLoses => {
+                println!("先手（手前）が着手不能 — 確定的詰み。後手の勝ち。");
+                break;
+            }
+            GameStatus::GoteLoses => {
+                println!("後手（上手）が着手不能 — 確定的詰み。先手の勝ち。");
+                break;
+            }
+            GameStatus::Draw => {
+                println!("両者が着手不能 — 引き分け。");
+                break;
+            }
+            GameStatus::Ongoing => {}
+        }
+
+        // 先手の入力
+        let sente_act = match input_action(&mut stdin.lock(), &pos, Side::Sente, &mut kifu) {
+            InputResult::Action(a) => a,
+            InputResult::Resign => {
+                println!("先手が投了。後手の勝ち。");
+                break;
+            }
+            InputResult::Quit => break,
+            InputResult::Reload => continue,
+        };
+
+        // 後手の入力
+        let gote_act = match input_action(&mut stdin.lock(), &pos, Side::Gote, &mut kifu) {
+            InputResult::Action(a) => a,
+            InputResult::Resign => {
+                println!("後手が投了。先手の勝ち。");
+                break;
+            }
+            InputResult::Quit => break,
+            InputResult::Reload => continue,
+        };
+
+        // 解決
+        let res = resolve(&pos, sente_act, gote_act);
+        print_resolution(&res.event, sente_act, gote_act);
+
+        // 棋譜に追加
+        kifu.push(Ply {
+            sente: sente_act,
+            gote: gote_act,
+        });
+
+        // 玉の死の判定
+        if let Some(end) = check_king_death(&res.event) {
+            match end {
+                GameEnd::SenteLoses => println!("先手玉が取られた。後手の勝ち。"),
+                GameEnd::GoteLoses => println!("後手玉が取られた。先手の勝ち。"),
+                GameEnd::Draw => println!("両玉が同時に取られた。引き分け。"),
+            }
+            break;
+        }
+
+        // 千日手チェック
+        if engine::terminate::check_sennichite(&kifu) {
+            // TODO: 仕様書 §7（未確定）— 指し直しか引き分けかは要再検討。暫定引き分け。
+            println!("千日手成立（同一局面4回）。暫定引き分け。[要再検討 §7]");
+            break;
+        }
+    }
+
+    println!("対局終了。お疲れ様でした。");
+}
+
+enum InputResult {
+    Action(Action),
+    Resign,
+    Quit,
+    Reload,
+}
+
+fn input_action(
+    reader: &mut impl BufRead,
+    pos: &Position,
+    side: Side,
+    kifu: &mut Kifu,
+) -> InputResult {
+    let side_label = match side {
+        Side::Sente => "先手",
+        Side::Gote => "後手",
+    };
+    let legal = legal_actions(pos, side);
+
+    loop {
+        print!("{} の着手を入力 (USI例 7g7f, P*5e): ", side_label);
+        io::stdout().flush().unwrap();
+
+        let mut line = String::new();
+        if reader.read_line(&mut line).unwrap_or(0) == 0 {
+            return InputResult::Quit;
+        }
+        let input = line.trim();
+
+        if input.starts_with(':') {
+            match handle_command(input, pos, side, kifu) {
+                Some(r) => return r,
+                None => continue,
+            }
+        }
+
+        match Action::from_usi(input) {
+            None => {
+                println!("  入力形式が不正です。USI 形式で入力してください（例: 7g7f, P*5e）");
+            }
+            Some(action) => {
+                if legal.contains(&action) {
+                    return InputResult::Action(action);
+                } else {
+                    // 非合法の理由を診断して表示
+                    println!("  {} の合法手ではありません。", input);
+                    diagnose_illegal(pos, side, action);
+                    println!("  (:moves s または :moves g で合法手一覧を表示)");
+                }
+            }
+        }
+    }
+}
+
+fn handle_command(
+    input: &str,
+    pos: &Position,
+    side: Side,
+    kifu: &mut Kifu,
+) -> Option<InputResult> {
+    let parts: Vec<&str> = input.splitn(3, ' ').collect();
+    match parts[0] {
+        ":moves" => {
+            let target = if parts.len() >= 2 {
+                match parts[1] {
+                    "g" | "gote" => Side::Gote,
+                    _ => Side::Sente,
+                }
+            } else {
+                side
+            };
+            let actions = legal_actions(pos, target);
+            let label = match target { Side::Sente => "先手", Side::Gote => "後手" };
+            println!("  {} の合法手 ({} 手):", label, actions.len());
+            for a in &actions {
+                print!("  {}", a.to_usi());
+            }
+            println!();
+            None
+        }
+        ":board" => {
+            print_board(pos);
+            None
+        }
+        ":undo" => {
+            if kifu.plies.is_empty() {
+                println!("  取り消せる手がありません。");
+                None
+            } else {
+                kifu.undo();
+                println!("  1手戻りました。");
+                Some(InputResult::Reload)
+            }
+        }
+        ":save" => {
+            if parts.len() < 2 {
+                println!("  使い方: :save <ファイルパス>");
+                return None;
+            }
+            let path = parts[1];
+            let content = kifu_to_string(kifu);
+            match std::fs::write(path, content) {
+                Ok(_) => println!("  棋譜を {} に保存しました。", path),
+                Err(e) => println!("  保存エラー: {}", e),
+            }
+            None
+        }
+        ":load" => {
+            if parts.len() < 2 {
+                println!("  使い方: :load <ファイルパス>");
+                return None;
+            }
+            let path = parts[1];
+            match std::fs::read_to_string(path) {
+                Err(e) => println!("  読み込みエラー: {}", e),
+                Ok(content) => match kifu_from_string(&content) {
+                    None => println!("  棋譜のパースに失敗しました。"),
+                    Some(loaded) => {
+                        *kifu = loaded;
+                        println!("  棋譜を {} から読み込みました。", path);
+                        return Some(InputResult::Reload);
+                    }
+                },
+            }
+            None
+        }
+        ":resign" => {
+            let target = if parts.len() >= 2 {
+                match parts[1] {
+                    "g" | "gote" => Side::Gote,
+                    _ => Side::Sente,
+                }
+            } else {
+                side
+            };
+            match target {
+                Side::Sente => Some(InputResult::Resign),
+                Side::Gote => Some(InputResult::Resign),
+            }
+        }
+        ":quit" | ":exit" => Some(InputResult::Quit),
+        ":sfen" => {
+            println!("  {}", position_to_sfen(pos));
+            None
+        }
+        _ => {
+            println!("  不明なコマンド: {}", input);
+            None
+        }
+    }
+}
+
+fn diagnose_illegal(pos: &Position, side: Side, action: Action) {
+    // 疑似合法手（自玉の安全チェック前）に含まれるかで理由を大別
+    use engine::movegen::king_square;
+    match action {
+        Action::Drop { kind: PieceKind::Pawn, to } => {
+            // 二歩チェック
+            let file = to.file();
+            let has_own_pawn = pos.board.iter().any(|(sq, p)| {
+                p.side == side && p.kind == PieceKind::Pawn && sq.file() == file
+            });
+            if has_own_pawn {
+                println!("  理由: 二歩（同じ筋にすでに歩があります）");
+                return;
+            }
+        }
+        Action::Move { from, to, .. } => {
+            // 自分の駒があるか
+            if let Some(p) = pos.board.get(from) {
+                if p.side != side {
+                    println!("  理由: 自分の駒ではありません");
+                    return;
+                }
+            } else {
+                println!("  理由: 移動元に駒がありません");
+                return;
+            }
+            // 自玉が相手の利きに晒されるか
+            if king_square(pos, side).is_some() {
+                println!("  理由: その手を指すと自玉が取られる位置に残ります（王手放置または自殺手）");
+                return;
+            }
+            let _ = to;
+        }
+        _ => {}
+    }
+    println!("  理由: その手は合法手の範囲外です");
+}
+
+fn print_board(pos: &Position) {
+    println!();
+    println!("  手数: {}", pos.move_number);
+
+    // 後手の持ち駒
+    print!("後手持駒: ");
+    print_hand(&pos.hand_gote);
+    println!();
+
+    // 盤面（後手視点で段1が上）
+    println!("  ９ ８ ７ ６ ５ ４ ３ ２ １");
+    println!(" +--+--+--+--+--+--+--+--+--+");
+    for rank in 1u8..=9 {
+        let rank_char = (b'a' + rank - 1) as char;
+        print!("{}|", rank_char);
+        for file in (1u8..=9).rev() {
+            let sq = engine::types::Square::new(file, rank);
+            match pos.board.get(sq) {
+                None => print!(" . "),
+                Some(p) => {
+                    let c = piece_display_char(p);
+                    print!("{}", c);
+                }
+            }
+        }
+        println!("|");
+    }
+    println!(" +--+--+--+--+--+--+--+--+--+");
+
+    // 先手の持ち駒
+    print!("先手持駒: ");
+    print_hand(&pos.hand_sente);
+    println!("\n");
+}
+
+fn print_hand(hand: &engine::board::Hand) {
+    let mut any = false;
+    for (kind, cnt) in hand.iter() {
+        let c = piece_kind_ja(kind);
+        if cnt > 1 {
+            print!("{}{} ", c, cnt);
+        } else {
+            print!("{} ", c);
+        }
+        any = true;
+    }
+    if !any {
+        print!("なし");
+    }
+}
+
+fn piece_display_char(p: engine::types::Piece) -> String {
+    let name = match p.kind {
+        PieceKind::Pawn => "歩",
+        PieceKind::Lance => "香",
+        PieceKind::Knight => "桂",
+        PieceKind::Silver => "銀",
+        PieceKind::Gold => "金",
+        PieceKind::Bishop => "角",
+        PieceKind::Rook => "飛",
+        PieceKind::King => "玉",
+        PieceKind::ProPawn => "と",
+        PieceKind::ProLance => "杏",
+        PieceKind::ProKnight => "圭",
+        PieceKind::ProSilver => "全",
+        PieceKind::Horse => "馬",
+        PieceKind::Dragon => "龍",
+    };
+    match p.side {
+        Side::Sente => format!(" {}", name),   // 先手: 通常表示
+        Side::Gote => format!("v{}", name),    // 後手: v プレフィクス
+    }
+}
+
+fn piece_kind_ja(kind: PieceKind) -> &'static str {
+    match kind {
+        PieceKind::Pawn => "歩",
+        PieceKind::Lance => "香",
+        PieceKind::Knight => "桂",
+        PieceKind::Silver => "銀",
+        PieceKind::Gold => "金",
+        PieceKind::Bishop => "角",
+        PieceKind::Rook => "飛",
+        _ => "?",
+    }
+}
+
+fn print_resolution(event: &ResolutionEvent, sente: Action, gote: Action) {
+    println!("  --- 解決結果 ---");
+    println!("  先手: {} | 後手: {}", sente.to_usi(), gote.to_usi());
+    match event {
+        ResolutionEvent::Normal { sente_capture, gote_capture } => {
+            if let Some(k) = sente_capture {
+                println!("  先手が {} を取得", piece_kind_ja(*k));
+            }
+            if let Some(k) = gote_capture {
+                println!("  後手が {} を取得", piece_kind_ja(*k));
+            }
+            if sente_capture.is_none() && gote_capture.is_none() {
+                println!("  取得なし（空きマスへの移動、または逃げた駒）");
+            }
+        }
+        ResolutionEvent::Clash { sente_piece, gote_piece } => {
+            println!(
+                "  相討ち: 先手の {} と後手の {} が交換",
+                piece_kind_ja(*sente_piece),
+                piece_kind_ja(*gote_piece)
+            );
+        }
+        ResolutionEvent::SenteDied => println!("  先手玉が取られた！"),
+        ResolutionEvent::GoteDied => println!("  後手玉が取られた！"),
+        ResolutionEvent::BothDied => println!("  両玉が同時に取られた！"),
+    }
+    println!("  ----------------");
+}

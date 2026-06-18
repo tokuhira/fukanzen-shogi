@@ -1,0 +1,11 @@
+[package]
+name = "cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "fukanzen-shogi"
+path = "src/main.rs"
+
+[dependencies]
+engine = { path = "../engine" }
