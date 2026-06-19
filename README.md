@@ -28,7 +28,7 @@ This design rests on three structural goals:
 - **Escape (4.2):** If the target piece moved away simultaneously, it is not captured; the attacker occupies the vacated square.
 - **Clash on the same square (4.3):** If both pieces move to the same square, both are removed and each becomes the other player's captured holding — a mutual exchange.
 - **Swap clash (4.4):** If two pieces exchange positions (each moves to the other's origin), they clash identically, even though a naive destination-only check would see no collision.
-- **Sengoku Musou exception (4.7):** If one of the two swap pieces is a king, mutual destruction does not apply. The king unilaterally captures the enemy piece and advances to its former position; the enemy never reaches the king's origin. This exception only fires when the destination was safe at commitment time (enforced by the existing king-safety rule in `legal_actions`), so it exclusively counters *unguarded* pieces — a piece backed by a teammate's attack covers its square, making the king's move there illegal in the first place.
+- **Sengoku Musou exception (4.7):** If one of the two colliding pieces is a king, mutual destruction does not apply. The king unilaterally captures the enemy piece, and the king occupies the collision square. This exception covers both swap clashes (4.4) and same-square clashes (4.3). The same-square case arises when the king retreats to a safe empty square while the opponent simultaneously drops a piece there; the king wins and claims the dropped piece. This exception only fires when the king's destination was safe at commitment time (enforced by the existing king-safety rule in `legal_actions`), so it exclusively counters *unguarded* pieces.
 - **Path non-interference (4.6):** Sliding pieces (rook, bishop, lance, dragon, horse) pass through any square that an opponent piece simultaneously lands on mid-path. Only the final square is adjudicated.
 
 **King safety** becomes probabilistic. A king may not move to a square currently attacked by the opponent (the traditional prohibition is preserved at the moment of commitment). However, since the opponent also moves simultaneously, a square that was safe at commitment time may be occupied or attacked by move-end. A king's escape to a legal square is guaranteed safe for that turn; but declining to escape — responding with a capture or interposition instead — is a gamble whose outcome depends on what the opponent actually played.
@@ -43,7 +43,7 @@ The first phase delivers:
 
 - **A pure Rust rule engine** (`engine/`) — a library crate with zero I/O, no `async`, no RNG, no networking. Its public API is a set of pure functions: `legal_actions`, `resolve`, `check_status`, and serialization helpers.
 - **A verification CLI** (`cli/`) — a single-process tool where one person inputs moves for both sides in USI notation, used to manually verify that the engine behaves as specified.
-- **A regression test suite** — 29 tests covering all concrete examples from the implementation spec: collision cases (capture, escape, same-square clash, swap, path pass-through, drop clash, promoted-piece reversion, Sengoku Musou), move generation (king safety, check evasion, nifu, uchi-fu-dzume, backed-piece prevention), termination (definite mate, king's death, simultaneous king capture, draw conditions), serialization round-trips, and canonical initial-position verification against the spec's authoritative SFEN.
+- **A regression test suite** — 33 tests covering all concrete examples from the implementation spec: collision cases (capture, escape, same-square clash, swap, path pass-through, drop clash, promoted-piece reversion, Sengoku Musou swap and drop-clash), move generation (king safety, check evasion, nifu, uchi-fu-dzume, backed-piece prevention), termination (definite mate, king's death, simultaneous king capture, draw conditions, counter-play backfire, rook pass-through), serialization round-trips, and canonical initial-position verification against the spec's authoritative SFEN.
 
 USI notation is used throughout for moves (`7g7f`, `P*5e`, `2b3a+`). Position serialization follows SFEN with a fixed sentinel (`b`) in place of the turn field, which does not exist in this variant; the canonical initial position is defined by a single `INITIAL_SFEN` constant rather than hardcoded piece placement, making the spec document the single source of truth. Canonical serialization — deterministic board + holdings + move-number bytes — is ready for a SHA-256 layer to be added in a later phase. A separate content serialization (board + holdings only, no move number) is used for repetition detection.
 
@@ -81,7 +81,7 @@ The engine is designed from the start so that all of the above are *shells* arou
 - **逃げた駒（4.2）:** 移動先にいた相手の駒が同時に別マスへ移動していた場合、取得は発生しない。
 - **同一マスへの相討ち（4.3）:** 両駒が同一マスへ到達した場合、相討ちとなり双方向に持ち駒となる（交換）。
 - **スワップの相討ち（4.4）:** 互いに相手の旧位置を移動先とする正面衝突も相討ちとなる。「逃げずにぶつかれば刺し違える」。
-- **戦国無双特則（4.7）:** スワップの当事者の一方が玉の場合、相討ちを適用しない。玉は相手駒を一方的に取得して相手の旧位置へ進み、相手駒は玉の旧位置へ到達しない。着手確定時点での玉の侵入禁止（合法手生成の既存ロジック）により、この特則は後ろ盾のない駒に対してのみ発動する。支えのある駒の旧位置は相手の利きに入っており、玉はそもそもそこへ移動できない。
+- **戦国無双特則（4.7）:** 衝突の当事者の一方が玉の場合、相討ちを適用しない。玉は相手駒を一方的に取得して衝突マスを占める。スワップ（4.4）と同一マスへの相討ち（4.3）の両方に適用される。同一マス相討ちへの拡張は「玉が安全な空きマスへ退避しても、相手が持ち駒を打ち込めば以前は死んでいた」問題を解消する。着手確定時点での玉の侵入禁止（合法手生成の既存ロジック）により、この特則は後ろ盾のない駒に対してのみ発動する。
 - **経路の非干渉（4.6）:** 走り駒の経路途中に相手の駒が着地しても干渉しない。判定は最終マスでのみ行う。
 
 **玉の安全性は確率的になる。** 玉は、着手開始時点で相手の利きのあるマスへは移動できない（伝統的ルールをそのまま引き継ぐ）。ただしこれは着手確定時点の判定であり、相手も同時に動くため、安全だったマスが移動後に危険になりうる。安全なマスへの玉の逃げはそのターン必ず助かる。しかし合駒や反撃で応じることは賭けであり、相手が実際に玉へ向かっていれば取られる。
@@ -96,7 +96,7 @@ The engine is designed from the start so that all of the above are *shells* arou
 
 - **Rust ルールエンジン**（`engine/`）— I/O・非同期・乱数・ネットワーク依存を一切持たない純粋なライブラリクレート。公開 API は `legal_actions`・`resolve`・`check_status` と直列化関数群からなる純粋関数群。
 - **検証用 CLI**（`cli/`）— 一人が両陣営の着手を USI 記法で入力し、一局を最後まで進められる検証モード。秘匿性なし・単一プロセス。
-- **回帰テスト群** — 仕様書の具体例を写した 29 本のテスト（衝突解決・戦国無双特則・合法手生成・後ろ盾検証・終了判定・両玉同時取得・直列化・初期局面の正本 SFEN 照合）がすべて通過している。
+- **回帰テスト群** — 仕様書の具体例を写した 33 本のテスト（衝突解決・戦国無双特則（スワップ＋同一マス打ち込み）・合法手生成・後ろ盾検証・終了判定・取り合いの裏目・合駒貫き・両玉同時取得・直列化・初期局面の正本 SFEN 照合）がすべて通過している。
 
 着手記法は USI 準拠（例: `7g7f`、`P*5e`、`2b3a+`）。局面の SFEN 手番フィールドは固定値 `b`（不完全将棋に手番は存在しない）。初期局面は正本 SFEN 定数 `INITIAL_SFEN` をパースして生成し、仕様書が唯一の出典となる。正準直列化（盤面＋持ち駒＋手数）は第二段階でのハッシュ計算への前方互換として、千日手検出用の内容直列化（手数除く）と区別して設計済み。
 
@@ -112,10 +112,11 @@ The engine is designed from the start so that all of the above are *shells* arou
 
 ## Detailed Specification / 詳細仕様
 
-- [不完全将棋 ルール仕様 v0.3](docs/不完全将棋_ルール仕様_v0.3.md) — 現行仕様。戦国無双特則（§4.7）を追加
+- [不完全将棋 ルール仕様 v0.4](docs/不完全将棋_ルール仕様_v0.4.md) — 現行仕様。戦国無双特則（§4.7）をスワップ（4.4）と同一マス相討ち（4.3）の両方に拡張
+- [不完全将棋 ルール仕様 v0.3](docs/不完全将棋_ルール仕様_v0.3.md) — 戦国無双特則（§4.7）をスワップ限定で追加
 - [不完全将棋 ルール仕様 v0.2](docs/不完全将棋_ルール仕様_v0.2.md) — 初期局面の正本 SFEN と SFEN 手番フィールドの確定的な扱い（`b` 固定）を追記
 - [不完全将棋 ルール仕様 v0.1](docs/不完全将棋_ルール仕様_v0.1.md) — 初版ルール定義
-- [不完全将棋 実装指示書 — 第一段階](docs/不完全将棋_実装指示書_第一段階.md) — Phase 1 の設計・実装指針（仕様書 v0.3 対応）
+- [不完全将棋 実装指示書 — 第一段階](docs/不完全将棋_実装指示書_第一段階.md) — Phase 1 の設計・実装指針（仕様書 v0.4 対応）
 
 ---
 
