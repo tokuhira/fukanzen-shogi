@@ -482,14 +482,20 @@ fn piece_display_char(p: engine::types::Piece) -> String {
 
 fn piece_kind_ja(kind: PieceKind) -> &'static str {
     match kind {
-        PieceKind::Pawn => "歩",
-        PieceKind::Lance => "香",
-        PieceKind::Knight => "桂",
-        PieceKind::Silver => "銀",
-        PieceKind::Gold => "金",
-        PieceKind::Bishop => "角",
-        PieceKind::Rook => "飛",
-        _ => "?",
+        PieceKind::Pawn     => "歩",
+        PieceKind::Lance    => "香",
+        PieceKind::Knight   => "桂",
+        PieceKind::Silver   => "銀",
+        PieceKind::Gold     => "金",
+        PieceKind::Bishop   => "角",
+        PieceKind::Rook     => "飛",
+        PieceKind::King     => "玉",
+        PieceKind::ProPawn  => "と",
+        PieceKind::ProLance => "杏",
+        PieceKind::ProKnight => "圭",
+        PieceKind::ProSilver => "全",
+        PieceKind::Horse    => "馬",
+        PieceKind::Dragon   => "龍",
     }
 }
 
