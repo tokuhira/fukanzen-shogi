@@ -6,14 +6,16 @@ use engine::board::Position;
 use engine::kifu::Kifu;
 use engine::movegen::legal_actions;
 use engine::resolve::{resolve, ResolutionEvent};
-use engine::serialize::{kifu_from_string, kifu_to_string, position_to_sfen};
+use engine::serialize::{kifu_from_string, kifu_to_string, ply_to_string, position_to_sfen};
 use engine::terminate::{check_king_death, check_status, GameEnd, GameStatus};
 use engine::types::{Action, PieceKind, Ply, Side};
 use std::io::{self, BufRead, Write};
 
 fn main() {
     println!("不完全将棋 検証用 CLI — 第一段階");
-    println!("コマンド: :moves <s|g>  :board  :undo  :save <path>  :load <path>  :resign <s|g>  :quit");
+    println!("表示コマンド: :board  :kifu  :moves [s|g]  :sfen");
+    println!("進行コマンド: :quit  :resign [s|g]  :undo");
+    println!("補助コマンド: :load <path>  :save <path>");
     println!();
 
     let stdin = io::stdin();
@@ -176,7 +178,7 @@ fn handle_command(
                 match parse_side_arg(parts[1]) {
                     Some(s) => s,
                     None => {
-                        println!("  使い方: :moves <s|g>  （s=先手、g=後手）");
+                        println!("  使い方: :moves [s|g]  （s=先手、g=後手）");
                         return None;
                     }
                 }
@@ -243,7 +245,7 @@ fn handle_command(
                 match parse_side_arg(parts[1]) {
                     Some(s) => s,
                     None => {
-                        println!("  使い方: :resign <s|g>  （s=先手、g=後手）");
+                        println!("  使い方: :resign [s|g]  （s=先手、g=後手）");
                         return None;
                     }
                 }
@@ -255,6 +257,18 @@ fn handle_command(
         ":quit" | ":exit" => Some(InputResult::Quit),
         ":sfen" => {
             println!("  {}", position_to_sfen(pos));
+            None
+        }
+        ":kifu" => {
+            if kifu.plies.is_empty() {
+                println!("  着手なし（初期局面）");
+            } else {
+                println!("  棋譜（{}手）:", kifu.plies.len());
+                let start = kifu.initial_position.move_number;
+                for (i, ply) in kifu.plies.iter().enumerate() {
+                    println!("  {}", ply_to_string(start + i as u32, ply));
+                }
+            }
             None
         }
         _ => {

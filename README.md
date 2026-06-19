@@ -137,15 +137,20 @@ cargo run --bin fukanzen-shogi
 先手 の着手を入力 (USI例 7g7f, P*5e): 7g7f
 後手 の着手を入力 (USI例 7g7f, P*5e): 3c3d
 
-Commands:
-  :moves [s|g]          — list legal moves (default: current side)
+Display commands:
   :board                — redisplay the board
-  :undo                 — take back the last ply
-  :save <path>          — save game record to file
-  :load <path>          — load game record from file
-  :resign [s|g]         — resign (default: current side); s=Sente, g=Gote
+  :kifu                 — display the full move list so far
+  :moves [s|g]          — list legal moves (default: current side); s=Sente, g=Gote
   :sfen                 — display current position in SFEN notation
+
+Game commands:
   :quit                 — exit
+  :resign [s|g]         — resign (default: current side); s=Sente, g=Gote
+  :undo                 — take back the last ply
+
+File commands:
+  :load <path>          — load game record from file
+  :save <path>          — save game record to file
 ```
 
 Moves are entered in USI notation: `7g7f` (move from 7g to 7f), `P*5e` (drop a pawn at 5e), `2b3a+` (move with promotion).
