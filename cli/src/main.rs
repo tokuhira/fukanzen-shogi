@@ -20,6 +20,7 @@ fn main() {
 
     let stdin = io::stdin();
     let mut kifu = Kifu::new(Position::initial());
+    let mut game_result: Option<GameResult> = None;
 
     loop {
         let pos = kifu.current();
@@ -30,14 +31,17 @@ fn main() {
         match status {
             GameStatus::SenteLoses => {
                 println!("先手（手前）が着手不能 — 確定的詰み。後手の勝ち。");
+                game_result = Some(GameResult::GoteWins(WinReason::Checkmate));
                 break;
             }
             GameStatus::GoteLoses => {
                 println!("後手（上手）が着手不能 — 確定的詰み。先手の勝ち。");
+                game_result = Some(GameResult::SenteWins(WinReason::Checkmate));
                 break;
             }
             GameStatus::Draw => {
                 println!("両者が着手不能 — 引き分け。");
+                game_result = Some(GameResult::Draw(DrawReason::BothCheckmate));
                 break;
             }
             GameStatus::Ongoing => {}
@@ -61,14 +65,17 @@ fn main() {
         let (sente_act, gote_act) = match (sente_decision, gote_decision) {
             (Decision::Resign, Decision::Resign) => {
                 println!("両者が同時に投了。引き分け。");
+                game_result = Some(GameResult::Draw(DrawReason::BothResign));
                 break;
             }
             (Decision::Resign, Decision::Move(_)) => {
                 println!("先手が投了。後手の勝ち。");
+                game_result = Some(GameResult::GoteWins(WinReason::Resign));
                 break;
             }
             (Decision::Move(_), Decision::Resign) => {
                 println!("後手が投了。先手の勝ち。");
+                game_result = Some(GameResult::SenteWins(WinReason::Resign));
                 break;
             }
             (Decision::Move(s), Decision::Move(g)) => (s, g),
@@ -87,9 +94,18 @@ fn main() {
         // 玉の死の判定
         if let Some(end) = check_king_death(&res.event) {
             match end {
-                GameEnd::SenteLoses => println!("先手玉が取られた。後手の勝ち。"),
-                GameEnd::GoteLoses => println!("後手玉が取られた。先手の勝ち。"),
-                GameEnd::Draw => println!("両玉が同時に取られた。引き分け。"),
+                GameEnd::SenteLoses => {
+                    println!("先手玉が取られた。後手の勝ち。");
+                    game_result = Some(GameResult::GoteWins(WinReason::KingDied));
+                }
+                GameEnd::GoteLoses => {
+                    println!("後手玉が取られた。先手の勝ち。");
+                    game_result = Some(GameResult::SenteWins(WinReason::KingDied));
+                }
+                GameEnd::Draw => {
+                    println!("両玉が同時に取られた。引き分け。");
+                    game_result = Some(GameResult::Draw(DrawReason::BothKingDied));
+                }
             }
             break;
         }
@@ -98,10 +114,14 @@ fn main() {
         if engine::terminate::check_sennichite(&kifu) {
             // TODO: 仕様書 §7（未確定）— 指し直しか引き分けかは要再検討。暫定引き分け。
             println!("千日手成立（同一局面4回）。暫定引き分け。[要再検討 §7]");
+            game_result = Some(GameResult::Draw(DrawReason::Sennichite));
             break;
         }
     }
 
+    println!("─── 最終局面 ───");
+    print_board(&kifu.current());
+    print_kifu(&kifu, game_result.as_ref());
     println!("対局終了。お疲れ様でした。");
 }
 
@@ -115,6 +135,25 @@ enum InputResult {
     Decided(Decision),
     Quit,
     Reload,
+}
+
+enum WinReason {
+    Resign,
+    KingDied,
+    Checkmate,
+}
+
+enum DrawReason {
+    BothResign,
+    BothKingDied,
+    BothCheckmate,
+    Sennichite,
+}
+
+enum GameResult {
+    SenteWins(WinReason),
+    GoteWins(WinReason),
+    Draw(DrawReason),
 }
 
 fn input_action(
@@ -212,7 +251,7 @@ fn handle_command(
                 None
             } else {
                 kifu.undo();
-                println!("  1手戻りました。");
+                println!("  1組手戻りました。");
                 Some(InputResult::Reload)
             }
         }
@@ -273,20 +312,57 @@ fn handle_command(
             None
         }
         ":kifu" => {
-            if kifu.plies.is_empty() {
-                println!("  着手なし（初期局面）");
-            } else {
-                println!("  棋譜（{}手）:", kifu.plies.len());
-                let start = kifu.initial_position.move_number;
-                for (i, ply) in kifu.plies.iter().enumerate() {
-                    println!("  {}", ply_to_string(start + i as u32, ply));
-                }
-            }
+            print_kifu(kifu, None);
             None
         }
         _ => {
             println!("  不明なコマンド: {}", input);
             None
+        }
+    }
+}
+
+fn print_kifu(kifu: &Kifu, result: Option<&GameResult>) {
+    if kifu.plies.is_empty() {
+        println!("  着手なし（初期局面）");
+    } else {
+        println!("  棋譜（{}組手）:", kifu.plies.len());
+        let start = kifu.initial_position.move_number;
+        for (i, ply) in kifu.plies.iter().enumerate() {
+            println!("  {}", ply_to_string(start + i as u32, ply));
+        }
+    }
+    if let Some(r) = result {
+        println!("  {}", game_result_line(r, kifu.plies.len()));
+    }
+}
+
+fn game_result_line(result: &GameResult, n: usize) -> String {
+    match result {
+        GameResult::SenteWins(reason) => {
+            let r = match reason {
+                WinReason::Resign   => "後手投了",
+                WinReason::KingDied => "後手玉死",
+                WinReason::Checkmate => "後手着手不能",
+            };
+            format!("まで{}組手で先手の勝ち（{}）", n, r)
+        }
+        GameResult::GoteWins(reason) => {
+            let r = match reason {
+                WinReason::Resign   => "先手投了",
+                WinReason::KingDied => "先手玉死",
+                WinReason::Checkmate => "先手着手不能",
+            };
+            format!("まで{}組手で後手の勝ち（{}）", n, r)
+        }
+        GameResult::Draw(reason) => {
+            let r = match reason {
+                DrawReason::BothResign    => "両者投了",
+                DrawReason::BothKingDied  => "両玉死",
+                DrawReason::BothCheckmate => "両者着手不能",
+                DrawReason::Sennichite    => "千日手",
+            };
+            format!("まで{}組手で引き分け（{}）", n, r)
         }
     }
 }
@@ -331,7 +407,7 @@ fn diagnose_illegal(pos: &Position, side: Side, action: Action) {
 
 fn print_board(pos: &Position) {
     println!();
-    println!("  手数: {}", pos.move_number);
+    println!("  組手: {}", pos.move_number - 1);
 
     // 後手の持ち駒
     print!("後手持駒: ");
