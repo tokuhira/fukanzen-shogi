@@ -43,32 +43,35 @@ fn main() {
             GameStatus::Ongoing => {}
         }
 
-        // 先手の入力
-        let sente_act = match input_action(&mut stdin.lock(), &pos, Side::Sente, &mut kifu) {
-            InputResult::Action(a) => a,
-            InputResult::Resign(s) => {
-                match s {
-                    Side::Sente => println!("先手が投了。後手の勝ち。"),
-                    Side::Gote => println!("後手が投了。先手の勝ち。"),
-                }
-                break;
-            }
+        // 先手の決断を収集
+        let sente_decision = match input_action(&mut stdin.lock(), &pos, Side::Sente, &mut kifu) {
+            InputResult::Decided(d) => d,
             InputResult::Quit => break,
             InputResult::Reload => continue,
         };
 
-        // 後手の入力
-        let gote_act = match input_action(&mut stdin.lock(), &pos, Side::Gote, &mut kifu) {
-            InputResult::Action(a) => a,
-            InputResult::Resign(s) => {
-                match s {
-                    Side::Sente => println!("先手が投了。後手の勝ち。"),
-                    Side::Gote => println!("後手が投了。先手の勝ち。"),
-                }
-                break;
-            }
+        // 後手の決断を収集
+        let gote_decision = match input_action(&mut stdin.lock(), &pos, Side::Gote, &mut kifu) {
+            InputResult::Decided(d) => d,
             InputResult::Quit => break,
             InputResult::Reload => continue,
+        };
+
+        // 両決断を照合（仕様書 §5.3/5.4）
+        let (sente_act, gote_act) = match (sente_decision, gote_decision) {
+            (Decision::Resign, Decision::Resign) => {
+                println!("両者が同時に投了。引き分け。");
+                break;
+            }
+            (Decision::Resign, Decision::Move(_)) => {
+                println!("先手が投了。後手の勝ち。");
+                break;
+            }
+            (Decision::Move(_), Decision::Resign) => {
+                println!("後手が投了。先手の勝ち。");
+                break;
+            }
+            (Decision::Move(s), Decision::Move(g)) => (s, g),
         };
 
         // 解決
@@ -102,9 +105,14 @@ fn main() {
     println!("対局終了。お疲れ様でした。");
 }
 
+/// プレイヤーが一ターンに下す決断（着手または投了）
+enum Decision {
+    Move(Action),
+    Resign,
+}
+
 enum InputResult {
-    Action(Action),
-    Resign(Side),
+    Decided(Decision),
     Quit,
     Reload,
 }
@@ -144,7 +152,7 @@ fn input_action(
             }
             Some(action) => {
                 if legal.contains(&action) {
-                    return InputResult::Action(action);
+                    return InputResult::Decided(Decision::Move(action));
                 } else {
                     // 非合法の理由を診断して表示
                     println!("  {} の合法手ではありません。", input);
@@ -241,18 +249,23 @@ fn handle_command(
             None
         }
         ":resign" => {
-            let target = if parts.len() >= 2 {
+            if parts.len() >= 2 {
                 match parse_side_arg(parts[1]) {
-                    Some(s) => s,
                     None => {
                         println!("  使い方: :resign [s|g]  （s=先手、g=後手）");
                         return None;
                     }
+                    Some(s) if s != side => {
+                        let side_label = match side { Side::Sente => "先手", Side::Gote => "後手" };
+                        let other_label = match s { Side::Sente => "先手", Side::Gote => "後手" };
+                        println!("  現在は{}の入力フェーズです。{}の投了はその入力フェーズで行ってください。",
+                            side_label, other_label);
+                        return None;
+                    }
+                    Some(_) => {} // 現在の陣営と一致、続行
                 }
-            } else {
-                side
-            };
-            Some(InputResult::Resign(target))
+            }
+            Some(InputResult::Decided(Decision::Resign))
         }
         ":quit" | ":exit" => Some(InputResult::Quit),
         ":sfen" => {
