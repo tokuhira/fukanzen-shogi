@@ -127,78 +127,10 @@ impl Position {
         )
     }
 
-    /// 初期局面を生成する
+    /// 初期局面を生成する。正本 SFEN をパースして構築する。
     pub fn initial() -> Self {
-        let mut board = Board::empty();
-
-        // 後手（上手前、段1–3）の初期配置
-        // 段1: 香桂銀金玉金銀桂香（ファイル9から1）
-        let back_order = [
-            PieceKind::Lance,
-            PieceKind::Knight,
-            PieceKind::Silver,
-            PieceKind::Gold,
-            PieceKind::King,
-            PieceKind::Gold,
-            PieceKind::Silver,
-            PieceKind::Knight,
-            PieceKind::Lance,
-        ];
-        for (i, &kind) in back_order.iter().enumerate() {
-            let file = 9 - i as u8; // 9,8,7,...,1
-            board.set(
-                Square::new(file, 1),
-                Some(Piece::new(kind, Side::Gote)),
-            );
-        }
-        // 段2: 飛（8二＝ファイル8）、角（2二＝ファイル2）— 正本 SFEN: 1r5b1
-        board.set(Square::new(8, 2), Some(Piece::new(PieceKind::Rook, Side::Gote)));
-        board.set(Square::new(2, 2), Some(Piece::new(PieceKind::Bishop, Side::Gote)));
-        // 段3: 歩 全筋
-        for file in 1u8..=9 {
-            board.set(
-                Square::new(file, 3),
-                Some(Piece::new(PieceKind::Pawn, Side::Gote)),
-            );
-        }
-
-        // 先手（下手前、段7–9）の初期配置
-        // 段9: 香桂銀金玉金銀桂香（ファイル1から9）
-        let back_order_sente = [
-            PieceKind::Lance,
-            PieceKind::Knight,
-            PieceKind::Silver,
-            PieceKind::Gold,
-            PieceKind::King,
-            PieceKind::Gold,
-            PieceKind::Silver,
-            PieceKind::Knight,
-            PieceKind::Lance,
-        ];
-        for (i, &kind) in back_order_sente.iter().enumerate() {
-            let file = i as u8 + 1; // 1,2,3,...,9
-            board.set(
-                Square::new(file, 9),
-                Some(Piece::new(kind, Side::Sente)),
-            );
-        }
-        // 段8: 角（8八＝ファイル8）、飛（2八＝ファイル2）— 正本 SFEN: 1B5R1
-        board.set(Square::new(8, 8), Some(Piece::new(PieceKind::Bishop, Side::Sente)));
-        board.set(Square::new(2, 8), Some(Piece::new(PieceKind::Rook, Side::Sente)));
-        // 段7: 歩 全筋
-        for file in 1u8..=9 {
-            board.set(
-                Square::new(file, 7),
-                Some(Piece::new(PieceKind::Pawn, Side::Sente)),
-            );
-        }
-
-        Position {
-            board,
-            hand_sente: Hand::empty(),
-            hand_gote: Hand::empty(),
-            move_number: 1,
-        }
+        crate::serialize::sfen_to_position(crate::serialize::INITIAL_SFEN)
+            .expect("INITIAL_SFEN は正本であり常にパース可能")
     }
 }
 
