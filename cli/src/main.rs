@@ -408,7 +408,7 @@ fn diagnose_illegal(pos: &Position, side: Side, action: Action) {
 
 fn print_board(pos: &Position) {
     println!();
-    println!("  組手: {}", pos.move_number - 1);
+    println!("  組手数: {}", pos.move_number - 1);
 
     // 後手の持ち駒
     print!("後手持駒: ");
