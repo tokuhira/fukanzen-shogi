@@ -368,11 +368,8 @@ fn game_result_line(result: &GameResult, n: usize) -> String {
 }
 
 fn diagnose_illegal(pos: &Position, side: Side, action: Action) {
-    // 疑似合法手（自玉の安全チェック前）に含まれるかで理由を大別
-    use engine::movegen::king_square;
     match action {
         Action::Drop { kind: PieceKind::Pawn, to } => {
-            // 二歩チェック
             let file = to.file();
             let has_own_pawn = pos.board.iter().any(|(sq, p)| {
                 p.side == side && p.kind == PieceKind::Pawn && sq.file() == file
@@ -382,8 +379,7 @@ fn diagnose_illegal(pos: &Position, side: Side, action: Action) {
                 return;
             }
         }
-        Action::Move { from, to, .. } => {
-            // 自分の駒があるか
+        Action::Move { from, to, promote } => {
             if let Some(p) = pos.board.get(from) {
                 if p.side != side {
                     println!("  理由: 自分の駒ではありません");
@@ -393,12 +389,17 @@ fn diagnose_illegal(pos: &Position, side: Side, action: Action) {
                 println!("  理由: 移動元に駒がありません");
                 return;
             }
-            // 自玉が相手の利きに晒されるか
-            if king_square(pos, side).is_some() {
-                println!("  理由: その手を指すと自玉が取られる位置に残ります（王手放置または自殺手）");
-                return;
+            // 成り忘れ: promote:false で非合法だが promote:true なら合法 → 成りが必須
+            if !promote {
+                let with_promote = Action::Move { from, to, promote: true };
+                if legal_actions(pos, side).contains(&with_promote) {
+                    println!(
+                        "  理由: この移動は成りが必須です（{} と入力してください）",
+                        with_promote.to_usi()
+                    );
+                    return;
+                }
             }
-            let _ = to;
         }
         _ => {}
     }

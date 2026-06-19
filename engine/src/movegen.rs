@@ -404,6 +404,30 @@ mod tests {
         assert!(!nifu, "二歩が合法手に現れた");
     }
 
+    /// テスト4.7-5: 後ろ盾のある駒のマスへは玉が侵入できない（戦国無双は発動しない）
+    ///
+    /// 後手銀を後手飛が横から支えている → 5四が後手の利きに入る →
+    /// 先手玉の 5五→5四 は合法手に現れない。
+    #[test]
+    fn sengoku_musou_backed_prevents_king_move() {
+        let mut pos = empty_pos();
+        let king_sq   = Square::new(5, 5); // 先手玉 5五
+        let silver_sq = Square::new(5, 4); // 後手銀 5四
+        let rook_sq   = Square::new(9, 4); // 後手飛 9四 → 5四（銀）を横から支える
+
+        pos.board.set(king_sq,   Some(Piece::new(PieceKind::King,   Side::Sente)));
+        pos.board.set(silver_sq, Some(Piece::new(PieceKind::Silver, Side::Gote)));
+        pos.board.set(rook_sq,   Some(Piece::new(PieceKind::Rook,   Side::Gote)));
+        pos.board.set(Square::new(9, 1), Some(Piece::new(PieceKind::King, Side::Gote)));
+
+        let actions = legal_actions(&pos, Side::Sente);
+        // 5四は後手飛の利きに入るため、玉の 5五→5四 は合法手に現れない
+        let king_to_silver = actions.iter().any(|a| {
+            matches!(a, Action::Move { from, to, .. } if *from == king_sq && *to == silver_sq)
+        });
+        assert!(!king_to_silver, "後ろ盾のある 5四 への玉の手が合法手に現れた");
+    }
+
     #[test]
     fn initial_legal_actions_count() {
         // 初期局面での先手の合法手数（伝統的将棋と同一）
