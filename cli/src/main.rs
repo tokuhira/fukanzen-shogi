@@ -154,6 +154,15 @@ fn input_action(
     }
 }
 
+/// "s"/"sente" → Sente、"g"/"gote" → Gote、それ以外は None（エラー）
+fn parse_side_arg(arg: &str) -> Option<Side> {
+    match arg {
+        "s" | "sente" => Some(Side::Sente),
+        "g" | "gote" => Some(Side::Gote),
+        _ => None,
+    }
+}
+
 fn handle_command(
     input: &str,
     pos: &Position,
@@ -164,9 +173,12 @@ fn handle_command(
     match parts[0] {
         ":moves" => {
             let target = if parts.len() >= 2 {
-                match parts[1] {
-                    "g" | "gote" => Side::Gote,
-                    _ => Side::Sente,
+                match parse_side_arg(parts[1]) {
+                    Some(s) => s,
+                    None => {
+                        println!("  使い方: :moves <s|g>  （s=先手、g=後手）");
+                        return None;
+                    }
                 }
             } else {
                 side
@@ -228,9 +240,12 @@ fn handle_command(
         }
         ":resign" => {
             let target = if parts.len() >= 2 {
-                match parts[1] {
-                    "g" | "gote" => Side::Gote,
-                    _ => Side::Sente,
+                match parse_side_arg(parts[1]) {
+                    Some(s) => s,
+                    None => {
+                        println!("  使い方: :resign <s|g>  （s=先手、g=後手）");
+                        return None;
+                    }
                 }
             } else {
                 side
