@@ -44,8 +44,11 @@ fn main() {
         // 先手の入力
         let sente_act = match input_action(&mut stdin.lock(), &pos, Side::Sente, &mut kifu) {
             InputResult::Action(a) => a,
-            InputResult::Resign => {
-                println!("先手が投了。後手の勝ち。");
+            InputResult::Resign(s) => {
+                match s {
+                    Side::Sente => println!("先手が投了。後手の勝ち。"),
+                    Side::Gote => println!("後手が投了。先手の勝ち。"),
+                }
                 break;
             }
             InputResult::Quit => break,
@@ -55,8 +58,11 @@ fn main() {
         // 後手の入力
         let gote_act = match input_action(&mut stdin.lock(), &pos, Side::Gote, &mut kifu) {
             InputResult::Action(a) => a,
-            InputResult::Resign => {
-                println!("後手が投了。先手の勝ち。");
+            InputResult::Resign(s) => {
+                match s {
+                    Side::Sente => println!("先手が投了。後手の勝ち。"),
+                    Side::Gote => println!("後手が投了。先手の勝ち。"),
+                }
                 break;
             }
             InputResult::Quit => break,
@@ -96,7 +102,7 @@ fn main() {
 
 enum InputResult {
     Action(Action),
-    Resign,
+    Resign(Side),
     Quit,
     Reload,
 }
@@ -229,10 +235,7 @@ fn handle_command(
             } else {
                 side
             };
-            match target {
-                Side::Sente => Some(InputResult::Resign),
-                Side::Gote => Some(InputResult::Resign),
-            }
+            Some(InputResult::Resign(target))
         }
         ":quit" | ":exit" => Some(InputResult::Quit),
         ":sfen" => {
