@@ -1,22 +1,28 @@
 /// USI/SFEN 入出力と正準直列化（第二段階のハッシュへの前方互換）。
 ///
-/// SFEN の「手番」フィールドは不完全将棋に存在しないため、センチネル "-" を固定で置く。
+/// SFEN の「手番」フィールドは不完全将棋に存在しないため、固定値 "b" を置いて無視する
+/// （仕様書 v0.2 §3）。千日手検出および正準直列化では手番フィールドを内容に含めない。
 /// ハッシュ用正準直列化: 盤面＋持ち駒＋手数（§5.7）。
 /// 千日手用内容直列化: 盤面＋持ち駒のみ（手数を除く）（§6.5）。
 use crate::board::{Hand, Position};
 use crate::types::{Piece, PieceKind, Side, Square};
+
+/// 平手の初期局面を表す正本 SFEN（仕様書 v0.2 §3）。
+/// 手番フィールドは "b" 固定（意味を持たず無視される）。
+pub const INITIAL_SFEN: &str =
+    "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1";
 
 // -------------------------------------------------------------------------
 // SFEN 形式
 // -------------------------------------------------------------------------
 
 /// Position を SFEN 文字列へ変換。
-/// フォーマット: "<盤面> - <持ち駒> <手数>"
-/// 手番フィールドは "-"（センチネル、不完全将棋に手番は存在しない）
+/// フォーマット: "<盤面> b <持ち駒> <手数>"
+/// 手番フィールドは "b" 固定（不完全将棋に手番は存在しない。仕様書 v0.2 §3）
 pub fn position_to_sfen(pos: &Position) -> String {
     let board_str = board_to_sfen(pos);
     let hand_str = hand_to_sfen(pos);
-    format!("{} - {} {}", board_str, hand_str, pos.move_number)
+    format!("{} b {} {}", board_str, hand_str, pos.move_number)
 }
 
 /// 盤面部分の SFEN 文字列（段1〜9、筋9〜1の順）
@@ -111,10 +117,11 @@ pub fn canonical_bytes(pos: &Position) -> Vec<u8> {
 }
 
 /// 千日手判定用の内容直列化（盤面＋持ち駒のみ、手数を除く）。
+/// 手番フィールドも含めない（不完全将棋に手番は存在しない。仕様書 v0.2 §3）。
 pub fn content_bytes(pos: &Position) -> Vec<u8> {
     let board_str = board_to_sfen(pos);
     let hand_str = hand_to_sfen(pos);
-    format!("{} - {}", board_str, hand_str).into_bytes()
+    format!("{} {}", board_str, hand_str).into_bytes()
 }
 
 // -------------------------------------------------------------------------
@@ -168,14 +175,15 @@ pub fn kifu_from_string(s: &str) -> Option<crate::kifu::Kifu> {
     Some(kifu)
 }
 
-/// SFEN 文字列から Position をパース（簡易実装）
+/// SFEN 文字列から Position をパース。
+/// 手番フィールド（parts[1]）は "b" 固定のセンチネルとして無視する（仕様書 v0.2 §3）。
 pub fn sfen_to_position(s: &str) -> Option<Position> {
     let parts: Vec<&str> = s.splitn(4, ' ').collect();
     if parts.len() < 4 {
         return None;
     }
     let board_str = parts[0];
-    // parts[1] は "-" のセンチネル（手番なし）
+    // parts[1] は手番フィールド（"b" 固定、不完全将棋では意味を持たず無視する）
     let hand_str = parts[2];
     let move_number: u32 = parts[3].parse().ok()?;
 
@@ -308,11 +316,41 @@ mod tests {
 
     #[test]
     fn content_excludes_move_number() {
-        let mut pos1 = Position::initial();
+        let pos1 = Position::initial();
         let mut pos2 = Position::initial();
         pos2.move_number = 99;
         assert_eq!(content_bytes(&pos1), content_bytes(&pos2));
         assert_ne!(canonical_bytes(&pos1), canonical_bytes(&pos2));
+    }
+
+    #[test]
+    fn initial_sfen_matches_canonical() {
+        // 仕様書 v0.2 §3 の正本 SFEN と一致することを確認
+        let pos = Position::initial();
+        let sfen = position_to_sfen(&pos);
+        assert_eq!(
+            sfen, INITIAL_SFEN,
+            "初期局面 SFEN が正本と一致しません\n got: {}\n want: {}",
+            sfen, INITIAL_SFEN
+        );
+    }
+
+    #[test]
+    fn initial_sfen_parseable() {
+        // 正本 SFEN 文字列を直接パースできることを確認
+        let pos = sfen_to_position(INITIAL_SFEN).expect("INITIAL_SFEN のパースに失敗");
+        assert_eq!(pos.move_number, 1);
+        use crate::types::{Piece, PieceKind, Side, Square};
+        assert_eq!(
+            pos.board.get(Square::new(8, 2)),
+            Some(Piece::new(PieceKind::Rook, Side::Gote)),
+            "後手飛 at 8二"
+        );
+        assert_eq!(
+            pos.board.get(Square::new(2, 2)),
+            Some(Piece::new(PieceKind::Bishop, Side::Gote)),
+            "後手角 at 2二"
+        );
     }
 
     #[test]

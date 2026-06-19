@@ -151,9 +151,9 @@ impl Position {
                 Some(Piece::new(kind, Side::Gote)),
             );
         }
-        // 段2: 飛（ファイル2）、角（ファイル8）
-        board.set(Square::new(2, 2), Some(Piece::new(PieceKind::Rook, Side::Gote)));
-        board.set(Square::new(8, 2), Some(Piece::new(PieceKind::Bishop, Side::Gote)));
+        // 段2: 飛（8二＝ファイル8）、角（2二＝ファイル2）— 正本 SFEN: 1r5b1
+        board.set(Square::new(8, 2), Some(Piece::new(PieceKind::Rook, Side::Gote)));
+        board.set(Square::new(2, 2), Some(Piece::new(PieceKind::Bishop, Side::Gote)));
         // 段3: 歩 全筋
         for file in 1u8..=9 {
             board.set(
@@ -182,9 +182,9 @@ impl Position {
                 Some(Piece::new(kind, Side::Sente)),
             );
         }
-        // 段8: 角（ファイル2）、飛（ファイル8）
-        board.set(Square::new(2, 8), Some(Piece::new(PieceKind::Bishop, Side::Sente)));
-        board.set(Square::new(8, 8), Some(Piece::new(PieceKind::Rook, Side::Sente)));
+        // 段8: 角（8八＝ファイル8）、飛（2八＝ファイル2）— 正本 SFEN: 1B5R1
+        board.set(Square::new(8, 8), Some(Piece::new(PieceKind::Bishop, Side::Sente)));
+        board.set(Square::new(2, 8), Some(Piece::new(PieceKind::Rook, Side::Sente)));
         // 段7: 歩 全筋
         for file in 1u8..=9 {
             board.set(
@@ -209,24 +209,42 @@ mod tests {
     #[test]
     fn initial_position_pieces() {
         let pos = Position::initial();
-        // 先手玉
+        // 先手玉 5九
         assert_eq!(
             pos.board.get(Square::new(5, 9)),
             Some(Piece::new(PieceKind::King, Side::Sente))
         );
-        // 後手玉
+        // 後手玉 5一
         assert_eq!(
             pos.board.get(Square::new(5, 1)),
             Some(Piece::new(PieceKind::King, Side::Gote))
         );
-        // 先手歩
+        // 先手飛 2八・先手角 8八（正本 SFEN: 1B5R1）
+        assert_eq!(
+            pos.board.get(Square::new(2, 8)),
+            Some(Piece::new(PieceKind::Rook, Side::Sente))
+        );
+        assert_eq!(
+            pos.board.get(Square::new(8, 8)),
+            Some(Piece::new(PieceKind::Bishop, Side::Sente))
+        );
+        // 後手飛 8二・後手角 2二（正本 SFEN: 1r5b1）
+        assert_eq!(
+            pos.board.get(Square::new(8, 2)),
+            Some(Piece::new(PieceKind::Rook, Side::Gote))
+        );
+        assert_eq!(
+            pos.board.get(Square::new(2, 2)),
+            Some(Piece::new(PieceKind::Bishop, Side::Gote))
+        );
+        // 先手歩 7段
         for file in 1u8..=9 {
             assert_eq!(
                 pos.board.get(Square::new(file, 7)),
                 Some(Piece::new(PieceKind::Pawn, Side::Sente))
             );
         }
-        // 後手歩
+        // 後手歩 3段
         for file in 1u8..=9 {
             assert_eq!(
                 pos.board.get(Square::new(file, 3)),
