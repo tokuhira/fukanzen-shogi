@@ -42,9 +42,9 @@ The first phase delivers:
 
 - **A pure Rust rule engine** (`engine/`) — a library crate with zero I/O, no `async`, no RNG, no networking. Its public API is a set of pure functions: `legal_actions`, `resolve`, `check_status`, and serialization helpers.
 - **A verification CLI** (`cli/`) — a single-process tool where one person inputs moves for both sides in USI notation, used to manually verify that the engine behaves as specified.
-- **A regression test suite** — covering all concrete examples from the implementation spec: collision cases (capture, escape, same-square clash, swap, path pass-through, drop clash, promoted-piece reversion), move generation (king safety, check evasion, nifu, uchi-fu-dzume), termination (definite mate, king's death, draw conditions), and serialization round-trips.
+- **A regression test suite** — 23 tests covering all concrete examples from the implementation spec: collision cases (capture, escape, same-square clash, swap, path pass-through, drop clash, promoted-piece reversion), move generation (king safety, check evasion, nifu, uchi-fu-dzume), termination (definite mate, king's death, draw conditions), serialization round-trips, and canonical initial-position verification against the spec's authoritative SFEN.
 
-USI notation is used throughout for moves (`7g7f`, `P*5e`, `2b3a+`). Position serialization follows SFEN with a fixed sentinel in place of the turn field (which does not exist in this variant). Canonical serialization — deterministic board + holdings + move-number bytes — is ready for a SHA-256 layer to be added in a later phase.
+USI notation is used throughout for moves (`7g7f`, `P*5e`, `2b3a+`). Position serialization follows SFEN with a fixed sentinel (`b`) in place of the turn field, which does not exist in this variant; the canonical initial position is defined by a single `INITIAL_SFEN` constant rather than hardcoded piece placement, making the spec document the single source of truth. Canonical serialization — deterministic board + holdings + move-number bytes — is ready for a SHA-256 layer to be added in a later phase. A separate content serialization (board + holdings only, no move number) is used for repetition detection.
 
 ### Roadmap (future phases, not yet implemented)
 
@@ -94,9 +94,9 @@ The engine is designed from the start so that all of the above are *shells* arou
 
 - **Rust ルールエンジン**（`engine/`）— I/O・非同期・乱数・ネットワーク依存を一切持たない純粋なライブラリクレート。公開 API は `legal_actions`・`resolve`・`check_status` と直列化関数群からなる純粋関数群。
 - **検証用 CLI**（`cli/`）— 一人が両陣営の着手を USI 記法で入力し、一局を最後まで進められる検証モード。秘匿性なし・単一プロセス。
-- **回帰テスト群** — 仕様書の具体例を写した 21 本のテスト（衝突解決・合法手生成・終了判定・直列化）がすべて通過している。
+- **回帰テスト群** — 仕様書の具体例を写した 23 本のテスト（衝突解決・合法手生成・終了判定・直列化・初期局面の正本 SFEN 照合）がすべて通過している。
 
-着手記法は USI 準拠（例: `7g7f`、`P*5e`、`2b3a+`）。局面の正準直列化（盤面＋持ち駒＋手数のバイト列）は第二段階でのハッシュ計算への前方互換として設計済み。
+着手記法は USI 準拠（例: `7g7f`、`P*5e`、`2b3a+`）。局面の SFEN 手番フィールドは固定値 `b`（不完全将棋に手番は存在しない）。初期局面は正本 SFEN 定数 `INITIAL_SFEN` をパースして生成し、仕様書が唯一の出典となる。正準直列化（盤面＋持ち駒＋手数）は第二段階でのハッシュ計算への前方互換として、千日手検出用の内容直列化（手数除く）と区別して設計済み。
 
 ### 今後の計画（未実装）
 
@@ -110,8 +110,9 @@ The engine is designed from the start so that all of the above are *shells* arou
 
 ## Detailed Specification / 詳細仕様
 
-- [不完全将棋 ルール仕様 v0.1](docs/不完全将棋_ルール仕様_v0.1.md) — ゲームルールの完全な定義
-- [不完全将棋 実装指示書 — 第一段階](docs/不完全将棋_実装指示書_第一段階.md) — Phase 1 の設計・実装指針
+- [不完全将棋 ルール仕様 v0.2](docs/不完全将棋_ルール仕様_v0.2.md) — 現行仕様。初期局面の正本 SFEN と SFEN 手番フィールドの確定的な扱い（`b` 固定）を追記
+- [不完全将棋 ルール仕様 v0.1](docs/不完全将棋_ルール仕様_v0.1.md) — 初版ルール定義
+- [不完全将棋 実装指示書 — 第一段階 v1.1](docs/不完全将棋_実装指示書_第一段階.md) — Phase 1 の設計・実装指針（v1.1: 仕様書 v0.2 対応）
 
 ---
 
@@ -137,12 +138,13 @@ cargo run --bin fukanzen-shogi
 後手 の着手を入力 (USI例 7g7f, P*5e): 3c3d
 
 Commands:
-  :moves s / :moves g   — list legal moves for Sente / Gote
+  :moves [s|g]          — list legal moves (default: current side)
   :board                — redisplay the board
   :undo                 — take back the last ply
   :save <path>          — save game record to file
   :load <path>          — load game record from file
-  :resign s / :resign g — resign for the specified side
+  :resign [s|g]         — resign (default: current side); s=Sente, g=Gote
+  :sfen                 — display current position in SFEN notation
   :quit                 — exit
 ```
 
