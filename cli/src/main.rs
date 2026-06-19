@@ -482,20 +482,14 @@ fn piece_display_char(p: engine::types::Piece) -> String {
 
 fn piece_kind_ja(kind: PieceKind) -> &'static str {
     match kind {
-        PieceKind::Pawn     => "歩",
-        PieceKind::Lance    => "香",
-        PieceKind::Knight   => "桂",
-        PieceKind::Silver   => "銀",
-        PieceKind::Gold     => "金",
-        PieceKind::Bishop   => "角",
-        PieceKind::Rook     => "飛",
-        PieceKind::King     => "玉",
-        PieceKind::ProPawn  => "と",
-        PieceKind::ProLance => "杏",
-        PieceKind::ProKnight => "圭",
-        PieceKind::ProSilver => "全",
-        PieceKind::Horse    => "馬",
-        PieceKind::Dragon   => "龍",
+        PieceKind::Pawn   => "歩",
+        PieceKind::Lance  => "香",
+        PieceKind::Knight => "桂",
+        PieceKind::Silver => "銀",
+        PieceKind::Gold   => "金",
+        PieceKind::Bishop => "角",
+        PieceKind::Rook   => "飛",
+        _ => "?",
     }
 }
 
@@ -505,10 +499,10 @@ fn print_resolution(event: &ResolutionEvent, sente: Action, gote: Action) {
     match event {
         ResolutionEvent::Normal { sente_capture, gote_capture } => {
             if let Some(k) = sente_capture {
-                println!("  先手が {} を取得", piece_kind_ja(*k));
+                println!("  先手が {} を取得", piece_kind_ja(k.unpromoted()));
             }
             if let Some(k) = gote_capture {
-                println!("  後手が {} を取得", piece_kind_ja(*k));
+                println!("  後手が {} を取得", piece_kind_ja(k.unpromoted()));
             }
             if sente_capture.is_none() && gote_capture.is_none() {
                 println!("  取得なし（空きマスへの移動、または逃げた駒）");
@@ -517,8 +511,8 @@ fn print_resolution(event: &ResolutionEvent, sente: Action, gote: Action) {
         ResolutionEvent::Clash { sente_piece, gote_piece } => {
             println!(
                 "  相討ち: 先手の {} と後手の {} が交換",
-                piece_kind_ja(*sente_piece),
-                piece_kind_ja(*gote_piece)
+                piece_kind_ja(sente_piece.unpromoted()),
+                piece_kind_ja(gote_piece.unpromoted())
             );
         }
         ResolutionEvent::SenteDied => println!("  先手玉が取られた！"),
