@@ -39,7 +39,7 @@ This design rests on three structural goals:
 
 > **Open questions (spec §7):** Repetition (sennichite), continuous check, the precise reading of the pawn-drop checkmate prohibition under simultaneous commitment, and the notation for entering-king declarations are all listed as undecided in the current specification. They are *not* resolved by this implementation; placeholder behavior is marked with code comments.
 
-### This Repository — Phases 1 & 2
+### This Repository — Phases 1, 2 & 3
 
 **Phase 1 — Rule engine + verification CLI** delivers:
 
@@ -47,7 +47,7 @@ This design rests on three structural goals:
 - **A verification CLI** (`cli/`) — a single-process tool where one person inputs moves for both sides in USI notation, used to manually verify that the engine behaves as specified. Kept as a machine-readable pipe interface; not modified by later phases.
 - **A regression test suite** — 37 tests covering all concrete examples from the implementation spec: collision cases (capture, escape, same-square clash, swap, path pass-through, drop clash, promoted-piece reversion, Sengoku Musou swap and drop-clash, both-kings swap draw), move generation (king safety, check evasion, nifu, uchi-fu-dzume, backed-piece prevention, both-kings legal approach, asymmetric swap legality), termination (definite mate, king's death, simultaneous king capture, draw conditions, counter-play backfire, rook pass-through), serialization round-trips, and canonical initial-position verification against the spec's authoritative SFEN.
 
-USI notation is used throughout for moves (`7g7f`, `P*5e`, `2b3a+`). Position serialization follows SFEN with a fixed sentinel (`b`) in place of the turn field, which does not exist in this variant; the canonical initial position is defined by a single `INITIAL_SFEN` constant rather than hardcoded piece placement, making the spec document the single source of truth. Canonical serialization — deterministic board + holdings + move-number bytes — is ready for a SHA-256 layer to be added in a later phase. A separate content serialization (board + holdings only, no move number) is used for repetition detection.
+USI notation is used throughout for moves (`7g7f`, `P*5e`, `2b3a+`). Position serialization follows SFEN with a fixed sentinel (`b`) in place of the turn field, which does not exist in this variant; the canonical initial position is defined by a single `INITIAL_SFEN` constant rather than hardcoded piece placement, making the spec document the single source of truth. Canonical serialization — deterministic board + holdings + move-number bytes — feeds directly into the SHA-256 board-hash layer in Phase 3. A separate content serialization (board + holdings only, no move number) is used for repetition detection.
 
 **Phase 2 — TUI verification desk** adds:
 
@@ -58,11 +58,25 @@ USI notation is used throughout for moves (`7g7f`, `P*5e`, `2b3a+`). Position se
 - **Kumite counter** — turns are displayed as "第N組手" (kumite number) rather than individual half-moves, reflecting that each turn advances both sides simultaneously.
 - The engine crate is untouched; the TUI is strictly a new shell on top of the existing public API.
 
+**Phase 3 — Secret simultaneous commitment over TCP** adds:
+
+- **A pure protocol crate** (`protocol/`) — zero I/O, no networking, no RNG. Implements the commit-reveal-ack protocol as a self-contained state machine with five cryptographic properties:
+  - *Binding* — a commitment cannot be opened with a different move (SHA-256 of USI action string + nonce).
+  - *Hiding* — the commitment reveals nothing about the move; each nonce is freshly generated, making two commits for the same move indistinguishable.
+  - *Order* — a reveal is rejected unless both commits have been received, preventing "second-look" cheating.
+  - *Board-hash verification* — each reveal includes `SHA-256(canonical_bytes(position))`; a mismatch aborts the game rather than silently producing divergent boards.
+  - *Ack synchronization* — both sides must acknowledge each other's reveal before the turn advances, preventing one-move desync from message reordering.
+  - Plus: reconnect identity verification (`SHA-256(password)` checked against the stored hash from the game-start handshake) and move-history recovery (kifu position hashes are scanned to find the matching resume point). 20 tests covering all eight properties.
+- **A TCP network layer** (`tui/src/net.rs`) — 4-byte big-endian length prefix + `serde_json` body; reader in a background thread posting to `mpsc::Receiver<NetEvent>`; the main TUI loop drains it with `try_recv` in a 50 ms poll cycle.
+- **An online game state machine** (`tui/src/online.rs`) — `OnlinePhase` tracks `WaitingMyMove → WaitingPeerCommit → WaitingPeerReveal → WaitingPeerAck`; protocol steps auto-advance (commit is sent the moment a move is confirmed; reveal is sent the moment both commits arrive; ack is sent the moment the peer reveal passes verification). Disconnect handling attempts reconnection with identity and board-hash verification.
+- **CLI flags** on the existing TUI binary — `--listen PORT` (Sente, waits for connection) and `--connect HOST:PORT` (Gote, dials out), with a shared `--secret PASSWORD` for authentication. The binary without flags continues to run in the existing local verification mode.
+
+The `protocol/` crate has no dependency on `net.rs` or the TUI; it receives nonces as arguments so tests are fully deterministic. The engine crate remains untouched.
+
 ### Roadmap (future phases, not yet implemented)
 
-- **Phase 3:** Wasm compilation via `wasm-bindgen`; browser-based board UI; canonical hash exchange between clients for mutual board verification; commitment-reveal protocol for genuinely secret simultaneous commitment; disconnect recovery via move-history checkpointing.
 - **Phase 4:** CPU opponent (search + evaluation).
-- **Phase 5+:** Smartphone app; multi-language engine re-implementations with cross-diffing against the Rust reference.
+- **Phase 5+:** Wasm compilation; browser-based board UI; smartphone app; multi-language engine re-implementations with cross-diffing against the Rust reference.
 
 The engine is designed from the start so that all of the above are *shells* around an unchanged core. The engine itself will never gain I/O, networking, or randomness.
 
@@ -103,7 +117,7 @@ The engine is designed from the start so that all of the above are *shells* arou
 
 > **未確定事項（仕様書 §7）:** 千日手の成立時の扱い、連続王手の千日手の読み替え、打ち歩詰めの厳密な再形式化、入玉宣言法の読み替えはいずれも未確定です。本実装ではこれらを勝手に確定させず、暫定処理とコードコメントによる印として引き継いでいます。
 
-### このリポジトリ — 第一段階・第二段階
+### このリポジトリ — 第一段階・第二段階・第三段階
 
 **第一段階 — ルールエンジン＋検証用 CLI** の成果物:
 
@@ -111,7 +125,7 @@ The engine is designed from the start so that all of the above are *shells* arou
 - **検証用 CLI**（`cli/`）— 一人が両陣営の着手を USI 記法で入力し、一局を最後まで進められる検証モード。秘匿性なし・単一プロセス。機械可読の口として以後の段階でも無改変で温存する。
 - **回帰テスト群** — 仕様書の具体例を写した 37 本のテスト（衝突解決・戦国無双特則（スワップ＋同一マス打ち込み）・両玉スワップ引き分け（v0.5）・合法手生成・後ろ盾検証・両玉接近合法性・非対称スワップ・終了判定・取り合いの裏目・合駒貫き・両玉同時取得・直列化・初期局面の正本 SFEN 照合）がすべて通過している。
 
-着手記法は USI 準拠（例: `7g7f`、`P*5e`、`2b3a+`）。局面の SFEN 手番フィールドは固定値 `b`（不完全将棋に手番は存在しない）。初期局面は正本 SFEN 定数 `INITIAL_SFEN` をパースして生成し、仕様書が唯一の出典となる。正準直列化（盤面＋持ち駒＋手数）は第三段階でのハッシュ計算への前方互換として、千日手検出用の内容直列化（手数除く）と区別して設計済み。
+着手記法は USI 準拠（例: `7g7f`、`P*5e`、`2b3a+`）。局面の SFEN 手番フィールドは固定値 `b`（不完全将棋に手番は存在しない）。初期局面は正本 SFEN 定数 `INITIAL_SFEN` をパースして生成し、仕様書が唯一の出典となる。正準直列化（盤面＋持ち駒＋手数）は第三段階の盤面ハッシュ計算に直結する。千日手検出用の内容直列化（手数除く）とは区別して設計済み。
 
 **第二段階 — TUI 検証卓** の成果物:
 
@@ -122,11 +136,25 @@ The engine is designed from the start so that all of the above are *shells* arou
 - **組手カウンタ** — 情報欄のターン表示を「第N組手」に統一。1ターンで先後各1手が同時進むことを「組手」で表現する。
 - エンジンクレートは無改変。TUI は既存の公開 API のみを叩く新たな殻として追加した。
 
+**第三段階 — TCP 通信秘匿対戦** の成果物:
+
+- **純粋プロトコルクレート**（`protocol/`）— I/O・乱数なし。commit-reveal-ack プロトコルを状態機械として実装し、5 つの暗号的性質を 20 本のテストで保証する:
+  - *拘束性* — SHA-256(着手 USI || ノンス) によりコミット後に着手を変更できない
+  - *秘匿性* — ノンスが毎回異なるため、同一の着手でもコミット値は別物になる
+  - *順序* — 両者のコミットが揃うまでリビールを受理しない（後出し禁止）
+  - *盤面ハッシュ相互検証* — 各リビールに `SHA-256(canonical_bytes(局面))` を含め、不一致はアボートにより即時処理
+  - *Ack 同期* — 両者が互いのリビールを確認し合うまでターンを進めない（メッセージ順序差によるデシンクを防止）
+  - さらに再接続時の本人認証（対局開始時に交換した `SHA-256(パスワード)` との照合）と棋譜ハッシュ照合による再開点特定（RecoverySession）も実装済み。
+- **TCP 通信殻**（`tui/src/net.rs`）— 4 バイト big-endian 長さプレフィックス + serde_json ボディ。受信スレッドが `mpsc::Sender<NetEvent>` へ送り、TUI メインループが 50 ms ポーリングで `try_recv` する。
+- **オンライン状態機械**（`tui/src/online.rs`）— `OnlinePhase`（着手入力中 → コミット待ち → リビール待ち → Ack 待ち）を管理。プロトコルは自動進行（着手確定でコミット送信・両者コミットでリビール送信・リビール検証後に Ack 送信）。切断時は再接続と身元確認を試みる。
+- **CLI フラグ**（既存 TUI バイナリに追加）— `--listen PORT`（先手・待ち受け）と `--connect HOST:PORT`（後手・接続）、共有パスワードは `--secret PASSWORD`。フラグなしでは従来のローカル検証モードで起動する。
+
+`protocol/` クレートは `net.rs` や TUI への依存を持たない。ノンスを引数で受け取るため、すべてのテストが決定的に実行できる。エンジンクレートは無改変のまま。
+
 ### 今後の計画（未実装）
 
-- **第三段階:** Wasm 化・ブラウザ UI・コミットメント方式（commit-reveal）による秘匿同時着手・盤面ハッシュ相互検証・中断救済。
 - **第四段階:** CPU 対戦（探索・評価関数）。
-- **第五段階以降:** スマートフォンアプリ・多言語実装と差分テスト。
+- **第五段階以降:** Wasm 化・ブラウザ UI・スマートフォンアプリ・多言語実装と差分テスト。
 
 エンジンは「共通の核と交換可能な殻」の設計原則に基づき、これらはすべてエンジンの外側に積む予定である。エンジン本体にはいかなる I/O も追加しない。
 
@@ -141,6 +169,7 @@ The engine is designed from the start so that all of the above are *shells* arou
 - [不完全将棋 ルール仕様 v0.1](docs/不完全将棋_ルール仕様_v0.1.md) — 初版ルール定義
 - [不完全将棋 実装指示書 — 第一段階](docs/不完全将棋_実装指示書_第一段階.md) — Phase 1 の設計・実装指針（仕様書 v0.4 対応）
 - [不完全将棋 実装指示書 — 第二段階 TUI 検証卓](docs/不完全将棋_実装指示書_第二段階_TUI検証卓.md) — Phase 2 の設計・実装指針（ratatui による TUI 検証卓）
+- [不完全将棋 実装指示書 — 第三段階 TCP 通信秘匿対戦](docs/不完全将棋_実装指示書_第三段階_TCP通信秘匿対戦.md) — Phase 3 の設計・実装指針（commit-reveal-ack・TCP 通信・中断救済）
 
 ---
 
@@ -152,15 +181,23 @@ The engine is designed from the start so that all of the above are *shells* arou
 # Build all crates
 cargo build
 
-# Run all tests (engine regression suite — 37 tests)
+# Run all tests (engine: 37 tests, protocol: 20 tests)
 cargo test
 
 # Run the verification CLI (text I/O, machine-readable)
 cargo run --bin fukanzen-shogi
 
-# Run the TUI verification desk (full-screen, interactive)
+# Run the TUI verification desk — local mode (full-screen, interactive)
 cargo run --bin fukanzen-shogi-tui
+
+# Online battle — Sente side (listen on port 8765, shared password "mypass")
+cargo run --bin fukanzen-shogi-tui -- --listen 8765 --secret mypass
+
+# Online battle — Gote side (connect to Sente's machine, same password)
+cargo run --bin fukanzen-shogi-tui -- --connect 192.168.1.10:8765 --secret mypass
 ```
+
+In online mode both players enter their move on their own machine in the usual way. The commit-reveal-ack exchange happens automatically: the commit is sent the moment you confirm a move, the reveal is sent when both commits arrive, and the ack is sent once the peer's reveal passes verification. The turn resolves on both screens simultaneously after both acks are exchanged.
 
 ### TUI key bindings
 
