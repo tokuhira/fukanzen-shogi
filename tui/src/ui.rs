@@ -8,7 +8,7 @@ use ratatui::{
 use engine::board::Hand;
 use engine::types::{PieceKind, Side, Square};
 use crate::app::{
-    App, ClickAreas, FocusArea, GameOverKind, InputMode, Phase, Selection,
+    App, ClickAreas, FocusArea, GameOverKind, InputMode, OnlineProtocolPhase, Phase, Selection,
     game_over_text, piece_kind_ja, HAND_KINDS,
 };
 
@@ -91,7 +91,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     render_status(f, app, status_area);
     render_pending(f, app, pending_area);
     render_message(f, app, msg_area);
-    render_help_bar(f, help_area);
+    if app.online_status.is_some() {
+        render_help_bar_online(f, help_area);
+    } else {
+        render_help_bar(f, help_area);
+    }
 
     // オーバーレイ（後から描くほど前面）
     if matches!(app.phase, Phase::PromotionChoice { .. }) {
@@ -340,6 +344,70 @@ fn render_info(f: &mut Frame, app: &App, area: Rect) {
 // ─── ステータス行 ─────────────────────────────────────────────────────────────
 
 fn render_status(f: &mut Frame, app: &App, area: Rect) {
+    // オンラインモードは接続状態＋プロトコル状態を表示
+    if let Some(ref os) = app.online_status {
+        let side_label = match os.local_side {
+            Side::Sente => "先手",
+            Side::Gote  => "後手",
+        };
+        let (conn_sym, conn_style) = if os.connected {
+            ("●", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+        } else {
+            ("✗", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+        };
+        let conn_label = if os.connected { "接続中" } else { "切断中" };
+
+        let (proto_text, proto_style) = match &os.protocol {
+            OnlineProtocolPhase::MyTurn => (
+                "着手を入力してください".to_string(),
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            ),
+            OnlineProtocolPhase::PeerCommitPending => (
+                "コミット送信済 — 相手のコミット待ち".to_string(),
+                Style::default().fg(Color::Yellow),
+            ),
+            OnlineProtocolPhase::PeerRevealPending => (
+                "リビール送信済 — 相手のリビール待ち".to_string(),
+                Style::default().fg(Color::Yellow),
+            ),
+            OnlineProtocolPhase::PeerAckPending => (
+                "Ack 送信済 — 相手の確認待ち".to_string(),
+                Style::default().fg(Color::Yellow),
+            ),
+            OnlineProtocolPhase::Disconnected => (
+                "切断中 — 再接続を待っています  [q] 終了".to_string(),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            OnlineProtocolPhase::Aborted(reason) => (
+                format!("アボート: {}  [q] 終了", reason),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+        };
+
+        // ゲームオーバーは既存表示を優先
+        if let Phase::GameOver(kind) = &app.phase {
+            let line = Line::from(vec![
+                Span::styled("◆ ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("対局終了: {}", game_over_text(kind)),
+                    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                ),
+            ]);
+            f.render_widget(Paragraph::new(line), area);
+            return;
+        }
+
+        let line = Line::from(vec![
+            Span::styled(format!("[{} ", side_label), Style::default().fg(Color::DarkGray)),
+            Span::styled(conn_sym.to_string(), conn_style),
+            Span::styled(format!(" {}]  ", conn_label), Style::default().fg(Color::DarkGray)),
+            Span::styled(proto_text, proto_style),
+        ]);
+        f.render_widget(Paragraph::new(line), area);
+        return;
+    }
+
+    // ローカルモード
     let (phase_text, phase_style) = match &app.phase {
         Phase::SenteInput => (
             "先手 入力中".to_string(),
@@ -376,21 +444,48 @@ fn render_status(f: &mut Frame, app: &App, area: Rect) {
 // ─── 仮確定着手表示 ───────────────────────────────────────────────────────────
 
 fn render_pending(f: &mut Frame, app: &App, area: Rect) {
-    let sente_str = match app.sente_action {
-        Some(a) => a.to_usi(),
-        None => "未入力".to_string(),
-    };
-    let gote_str = match app.gote_action {
-        Some(a) => a.to_usi(),
-        None => "未入力".to_string(),
-    };
+    // オンラインモード: ピアの着手は reveal 前は ??? で秘匿
+    let (sente_str, sente_hidden, gote_str, gote_hidden) =
+        if let Some(ref os) = app.online_status {
+            let peer_revealed = os.peer_revealed;
+            let peer_placeholder = if peer_revealed { "未入力" } else { "???" };
+            match os.local_side {
+                Side::Sente => {
+                    let s = app.sente_action.map(|a| a.to_usi())
+                        .unwrap_or_else(|| "未入力".to_string());
+                    let g = app.gote_action.map(|a| a.to_usi())
+                        .unwrap_or_else(|| peer_placeholder.to_string());
+                    (s, false, g, !peer_revealed && app.gote_action.is_none())
+                }
+                Side::Gote => {
+                    let s = app.sente_action.map(|a| a.to_usi())
+                        .unwrap_or_else(|| peer_placeholder.to_string());
+                    let g = app.gote_action.map(|a| a.to_usi())
+                        .unwrap_or_else(|| "未入力".to_string());
+                    (s, !peer_revealed && app.sente_action.is_none(), g, false)
+                }
+            }
+        } else {
+            let s = app.sente_action.map(|a| a.to_usi()).unwrap_or_else(|| "未入力".to_string());
+            let g = app.gote_action.map(|a| a.to_usi()).unwrap_or_else(|| "未入力".to_string());
+            (s, false, g, false)
+        };
 
+    let hidden_style = Style::default().fg(Color::DarkGray);
     let line1 = Line::from(vec![
         Span::styled("先手: ", Style::default().fg(Color::Cyan)),
-        Span::raw(sente_str),
+        if sente_hidden {
+            Span::styled(sente_str, hidden_style)
+        } else {
+            Span::raw(sente_str)
+        },
         Span::raw("   "),
         Span::styled("後手: ", Style::default().fg(Color::LightRed)),
-        Span::raw(gote_str),
+        if gote_hidden {
+            Span::styled(gote_str, hidden_style)
+        } else {
+            Span::raw(gote_str)
+        },
     ]);
 
     let cursor_info = match app.focus {
@@ -432,6 +527,17 @@ fn render_message(f: &mut Frame, app: &App, area: Rect) {
 
 fn render_help_bar(f: &mut Frame, area: Rect) {
     let help = "[q]終了 [u]戻す [r]投了 [d/Tab]駒台 [s/S]保存 [l/L]読込 [f]SFEN [m]合法手 [?]ヘルプ";
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            help,
+            Style::default().fg(Color::DarkGray),
+        ))),
+        area,
+    );
+}
+
+fn render_help_bar_online(f: &mut Frame, area: Rect) {
+    let help = "[q]終了  着手: ↑↓←→移動 Enter/Space確定 Esc解除  [d/Tab]駒台  [f]SFEN [m]合法手";
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(
             help,

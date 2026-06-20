@@ -17,7 +17,7 @@ use protocol::{
     board_hash, hash_secret, Nonce, RecoverySession, SecretHash, TurnSession,
 };
 
-use crate::app::{App, Phase};
+use crate::app::{App, OnlineProtocolPhase, OnlineStatus, Phase};
 use crate::input;
 use crate::net::{
     self, Connection, NetEvent, NetMessage,
@@ -29,12 +29,20 @@ use crate::ui;
 
 // ─── 設定 ───────────────────────────────────────────────────────────────────
 
+/// 再接続バックグラウンドスレッドからの結果
+enum ReconnectEvent {
+    Success(Connection),
+    Failed(String),
+}
+
+#[derive(Clone)]
 pub struct OnlineConfig {
     pub local_side: Side,
     pub mode: ConnectMode,
     pub secret: Vec<u8>,
 }
 
+#[derive(Clone)]
 pub enum ConnectMode {
     Listen(u16),
     Connect(String),
@@ -100,18 +108,43 @@ pub fn run_online(
     let mut turn_session: Option<TurnSession> = None;
     let mut pending_peer_commit: Option<protocol::Commitment> = None;
     let mut kifu = Kifu::new(Position::initial());
+    // 再接続バックグラウンドスレッドからの通知チャネル
+    let mut reconnect_rx: Option<std::sync::mpsc::Receiver<ReconnectEvent>> = None;
+
+    // 初期状態を online_status に反映
+    sync_online_status(&mut app, &online_phase, config.local_side, true);
 
     loop {
-        // ── 描画 ──────────────────────────────────────────────────────────
-        let status_line = format!("[{}] {}",
-            if config.local_side == Side::Sente { "先手" } else { "後手" },
-            phase_label(&online_phase),
-        );
-        // メッセージエリアにプロトコル状態を付加
-        let orig_msg = app.message.clone();
-        app.message = format!("{} | {}", orig_msg, status_line);
+        // ── 描画（online_status は sync_online_status で常に最新） ────────
         terminal.draw(|f| ui::draw(f, &mut app))?;
-        app.message = orig_msg;
+
+        // ── 再接続結果の受け取り ─────────────────────────────────────────
+        if let Some(ref rx) = reconnect_rx {
+            if let Ok(event) = rx.try_recv() {
+                reconnect_rx = None;
+                match event {
+                    ReconnectEvent::Success(new_conn) => {
+                        conn = new_conn;
+                        online_phase = OnlinePhase::WaitingMyMove;
+                        turn_session = None;
+                        pending_peer_commit = None;
+                        app.sente_action = None;
+                        app.gote_action = None;
+                        match config.local_side {
+                            Side::Sente => { app.phase = Phase::SenteInput; }
+                            Side::Gote  => { app.phase = Phase::GoteInput; app.cursor_rank = 1; }
+                        }
+                        app.message = "再接続しました — 着手を入力してください".to_string();
+                        sync_online_status(&mut app, &online_phase, config.local_side, true);
+                    }
+                    ReconnectEvent::Failed(reason) => {
+                        online_phase = OnlinePhase::Aborted(format!("再接続失敗: {}", reason));
+                        app.message = format!("再接続失敗: {} [q]終了", reason);
+                        sync_online_status(&mut app, &online_phase, config.local_side, false);
+                    }
+                }
+            }
+        }
 
         if let OnlinePhase::Aborted(_reason) = &online_phase {
             // ゲーム終了 (アボート) — Q で抜ける
@@ -143,13 +176,28 @@ pub fn run_online(
         while let Ok(ev) = conn.events.try_recv() {
             match ev {
                 NetEvent::Disconnected => {
-                    online_phase = OnlinePhase::Disconnected;
-                    app.message = "接続が切断されました — 再接続を待っています...".to_string();
-                    // 再接続を試みる（同じポート/アドレスで再度接続）
-                    if let Ok(new_conn) = reconnect(&config, &kifu, &secret_hash, &peer_secret_hash) {
-                        conn = new_conn;
-                        online_phase = OnlinePhase::WaitingMyMove;
-                        app.message = "再接続しました".to_string();
+                    if online_phase != OnlinePhase::Disconnected {
+                        // 初回切断時のみスレッド起動（二重起動防止）
+                        online_phase = OnlinePhase::Disconnected;
+                        turn_session = None;
+                        pending_peer_commit = None;
+                        app.message = "接続が切断されました — 再接続中...".to_string();
+                        sync_online_status(&mut app, &online_phase, config.local_side, false);
+
+                        // バックグラウンドで再接続（TUI はブロックしない）
+                        let config2 = config.clone();
+                        let kifu2 = kifu.clone();
+                        let peer_hash2 = peer_secret_hash;
+                        let (tx, rx) = std::sync::mpsc::channel::<ReconnectEvent>();
+                        reconnect_rx = Some(rx);
+                        std::thread::spawn(move || {
+                            let result = reconnect(&config2, &kifu2, &peer_hash2);
+                            let ev = match result {
+                                Ok(conn) => ReconnectEvent::Success(conn),
+                                Err(e)   => ReconnectEvent::Failed(e.to_string()),
+                            };
+                            let _ = tx.send(ev);
+                        });
                     }
                 }
                 NetEvent::Message(msg) => {
@@ -166,6 +214,7 @@ pub fn run_online(
                         online_phase = OnlinePhase::Aborted(abort_reason.clone());
                         let _ = conn.send(&NetMessage::Abort { reason: abort_reason });
                     }
+                    sync_online_status(&mut app, &online_phase, config.local_side, true);
                 }
             }
         }
@@ -210,12 +259,9 @@ pub fn run_online(
         };
 
         if let Some(action) = my_action {
-            // ResolveReady などの場合は自分だけの着手が確定した瞬間
-            // 相手分は空なので通常の resolve_turn は呼ばない
-
             // UI を "待機中" に固定
             app.phase = Phase::ResolveReady;
-            app.message = format!("着手確定: {} — 相手のコミット待ち...", action.to_usi());
+            app.message = format!("着手確定: {}", action.to_usi());
 
             // commit-reveal セッション開始
             let pos = kifu.current();
@@ -231,6 +277,7 @@ pub fn run_online(
 
             turn_session = Some(session);
             online_phase = OnlinePhase::WaitingPeerCommit;
+            sync_online_status(&mut app, &online_phase, config.local_side, true);
 
             // 自分より先に相手のコミットが届いていた場合は即座に適用
             if let Some(pending) = pending_peer_commit.take() {
@@ -243,7 +290,7 @@ pub fn run_online(
                             board_hash: board_hash_to_hex(&reveal.board_hash),
                         });
                         online_phase = OnlinePhase::WaitingPeerReveal;
-                        app.message = "Reveal 送信済み — 相手の Reveal 待ち...".to_string();
+                        sync_online_status(&mut app, &online_phase, config.local_side, true);
                     }
                 }
             }
@@ -406,7 +453,6 @@ fn wait_game_start(conn: &mut Connection) -> io::Result<SecretHash> {
 fn reconnect(
     config: &OnlineConfig,
     kifu: &Kifu,
-    _local_secret_hash: &SecretHash,
     peer_secret_hash: &SecretHash,
 ) -> io::Result<Connection> {
     let mut conn = match &config.mode {
@@ -450,20 +496,28 @@ fn reconnect(
 
 // ─── ユーティリティ ─────────────────────────────────────────────────────────
 
-fn phase_label(phase: &OnlinePhase) -> &str {
-    match phase {
-        OnlinePhase::WaitingMyMove     => "着手入力中",
-        OnlinePhase::WaitingPeerCommit => "相手のコミット待ち",
-        OnlinePhase::WaitingPeerReveal => "相手のリビール待ち",
-        OnlinePhase::WaitingPeerAck    => "相手の確認待ち",
-        OnlinePhase::Disconnected      => "切断 — 再接続中...",
-        OnlinePhase::Aborted(_)        => "アボート (qで終了)",
-    }
-}
-
 fn random_nonce() -> Nonce {
     use rand::RngCore;
     let mut bytes = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut bytes);
     Nonce(bytes)
+}
+
+/// `OnlinePhase` の変化を `app.online_status` へ反映する。
+/// 毎回の状態遷移後に呼ぶこと。
+fn sync_online_status(app: &mut App, phase: &OnlinePhase, local_side: Side, connected: bool) {
+    let protocol = match phase {
+        OnlinePhase::WaitingMyMove     => OnlineProtocolPhase::MyTurn,
+        OnlinePhase::WaitingPeerCommit => OnlineProtocolPhase::PeerCommitPending,
+        OnlinePhase::WaitingPeerReveal => OnlineProtocolPhase::PeerRevealPending,
+        OnlinePhase::WaitingPeerAck    => OnlineProtocolPhase::PeerAckPending,
+        OnlinePhase::Disconnected      => OnlineProtocolPhase::Disconnected,
+        OnlinePhase::Aborted(r)        => OnlineProtocolPhase::Aborted(r.clone()),
+    };
+    // peer_revealed: ピアの着手が app に格納済みかで判定
+    let peer_revealed = match local_side {
+        Side::Sente => app.gote_action.is_some(),
+        Side::Gote  => app.sente_action.is_some(),
+    };
+    app.online_status = Some(OnlineStatus { local_side, protocol, connected, peer_revealed });
 }

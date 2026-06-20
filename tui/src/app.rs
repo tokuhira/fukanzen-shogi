@@ -8,6 +8,27 @@ use engine::serialize::{kifu_from_string, kifu_to_string, position_to_sfen};
 use engine::terminate::{check_king_death, check_sennichite, check_status, GameEnd, GameStatus};
 use engine::types::{Action, PieceKind, Ply, Side, Square};
 
+// ─── オンライン状態（ui.rs が参照する表示用構造体）────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OnlineProtocolPhase {
+    MyTurn,
+    PeerCommitPending,
+    PeerRevealPending,
+    PeerAckPending,
+    Disconnected,
+    Aborted(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct OnlineStatus {
+    pub local_side: Side,
+    pub protocol: OnlineProtocolPhase,
+    pub connected: bool,
+    /// peer の着手が reveal 済みか（false の間は ??? 表示）
+    pub peer_revealed: bool,
+}
+
 // ─── 公開定数 ────────────────────────────────────────────────────────────────
 
 pub const HAND_KINDS: [PieceKind; 7] = [
@@ -111,6 +132,8 @@ pub struct App {
     pub input_mode: InputMode,
     pub input_buffer: String,
     pub click_areas: ClickAreas,
+    /// オンライン対戦時のみ Some。ui.rs が接続/プロトコル状態を表示するために使う。
+    pub online_status: Option<OnlineStatus>,
 }
 
 impl App {
@@ -136,6 +159,7 @@ impl App {
             input_mode: InputMode::Normal,
             input_buffer: String::new(),
             click_areas: ClickAreas::default(),
+            online_status: None,
         }
     }
 
