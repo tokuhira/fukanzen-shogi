@@ -220,9 +220,7 @@ impl Action {
     pub fn from_usi(s: &str) -> Option<Self> {
         if s.contains('*') {
             // Drop
-            let mut parts = s.splitn(2, '*');
-            let kind_str = parts.next()?;
-            let sq_str = parts.next()?;
+            let (kind_str, sq_str) = s.split_once('*')?;
             let kind = parse_piece_kind_char(kind_str.chars().next()?)?;
             let to = Square::from_usi(sq_str)?;
             Some(Action::Drop { kind, to })

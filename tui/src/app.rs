@@ -649,10 +649,10 @@ fn build_resolution_text(
 
     let sente_used_king = sente_from
         .and_then(|sq| pos.board.get(sq))
-        .map_or(false, |p| p.kind == PieceKind::King);
+        .is_some_and(|p| p.kind == PieceKind::King);
     let gote_used_king = gote_from
         .and_then(|sq| pos.board.get(sq))
-        .map_or(false, |p| p.kind == PieceKind::King);
+        .is_some_and(|p| p.kind == PieceKind::King);
 
     // 戦国無双の真の救済判定:
     //   玉が駒を取った「かつ」相手がその玉を狙っていた場合のみ★
@@ -660,11 +660,11 @@ fn build_resolution_text(
     //   スワップ救済: 後手の行先 == 玉の元居たマス
     //   同一マス救済: 後手の行先 == 玉の移動先（打ち込み含む）
     let sente_musou = sente_used_king && (
-        sente_from.map_or(false, |f| gote.to_sq() == f)
+        sente_from.is_some_and(|f| gote.to_sq() == f)
         || gote.to_sq() == sente.to_sq()
     );
     let gote_musou = gote_used_king && (
-        gote_from.map_or(false, |f| sente.to_sq() == f)
+        gote_from.is_some_and(|f| sente.to_sq() == f)
         || sente.to_sq() == gote.to_sq()
     );
 

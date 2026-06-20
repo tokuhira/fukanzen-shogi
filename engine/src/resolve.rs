@@ -236,8 +236,8 @@ fn resolve_independent(pos: &Position, sente: Action, gote: Action) -> Resolutio
     // 2. 取得した駒を持ち駒へ（玉は持ち駒にならない）
     // sente_king_died: 後手が先手玉を取得 → gote_cap が先手玉
     // gote_king_died:  先手が後手玉を取得 → sente_cap が後手玉
-    let sente_king_died = gote_cap.map_or(false, |p| p.kind == PieceKind::King);
-    let gote_king_died = sente_cap.map_or(false, |p| p.kind == PieceKind::King);
+    let sente_king_died = gote_cap.is_some_and(|p| p.kind == PieceKind::King);
+    let gote_king_died  = sente_cap.is_some_and(|p| p.kind == PieceKind::King);
 
     if let Some(cap) = sente_cap {
         if cap.kind != PieceKind::King {

@@ -56,7 +56,7 @@ fn step_attacks(
         let r = from.rank() as i8 + dr;
         if (1..=9).contains(&f) && (1..=9).contains(&r) {
             let sq = Square::new(f as u8, r as u8);
-            if pos.board.get(sq).map_or(true, |p| p.side != side) {
+            if pos.board.get(sq).is_none_or(|p| p.side != side) {
                 result.push(sq);
             }
         }

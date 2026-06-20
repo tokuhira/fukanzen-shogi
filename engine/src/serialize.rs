@@ -150,10 +150,8 @@ pub fn ply_from_string(s: &str) -> Option<(u32, crate::types::Ply)> {
 pub fn kifu_to_string(kifu: &crate::kifu::Kifu) -> String {
     let mut lines = Vec::new();
     lines.push(format!("sfen {}", position_to_sfen(&kifu.initial_position)));
-    let mut move_number = kifu.initial_position.move_number;
-    for ply in &kifu.plies {
+    for (move_number, ply) in (kifu.initial_position.move_number..).zip(kifu.plies.iter()) {
         lines.push(ply_to_string(move_number, ply));
-        move_number += 1;
     }
     lines.join("\n")
 }
@@ -267,7 +265,7 @@ fn parse_hands(s: &str) -> Option<(Hand, Hand)> {
         if c.is_ascii_digit() {
             // 複数枚: 数字の後に駒文字
             let mut num_str = c.to_string();
-            while chars.peek().map_or(false, |ch| ch.is_ascii_digit()) {
+            while chars.peek().is_some_and(|ch| ch.is_ascii_digit()) {
                 num_str.push(chars.next().unwrap());
             }
             let count: u8 = num_str.parse().ok()?;
