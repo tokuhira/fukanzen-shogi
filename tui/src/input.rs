@@ -1,6 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use engine::types::{Side, Square};
-use crate::app::{App, FocusArea, InputMode, Phase, HAND_KINDS};
+use ratatui::layout::Rect;
+use engine::types::{PieceKind, Side, Square};
+use crate::app::{App, FocusArea, InputMode, Phase, Selection, HAND_KINDS};
 
 // ─── キー入力ハンドラ ─────────────────────────────────────────────────────────
 
@@ -163,63 +164,88 @@ fn handle_path_input(key: KeyEvent, app: &mut App) -> bool {
 
 // ─── マウス入力ハンドラ ──────────────────────────────────────────────────────
 
-/// 画面レイアウト定数（ui.rs のレイアウトと同期）
-/// 縦分割: [Min(13), Length(1), Length(2), Length(1), Length(1)]
-/// 横分割: [Length(33), Min(1)]
-const BOARD_PANEL_W: u16 = 33;
-const STATUS_ROWS: u16 = 1 + 2 + 1 + 1; // ステータス+仮着手+メッセージ+ヘルプ = 5行
-
-pub fn handle_mouse(mouse: MouseEvent, app: &mut App) {
+/// true を返すとアプリ終了（handle_key と同じ規約）
+pub fn handle_mouse(mouse: MouseEvent, app: &mut App) -> bool {
     if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
-        return;
+        return false;
     }
 
     let col = mouse.column;
     let row = mouse.row;
 
-    // 端末サイズを取得してメインエリアの高さを計算
+    // クリックが Rect 内に入っているか
+    let hit = |r: Rect| col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height;
+
+    // ─── フェーズ別にオーバーレイを優先処理 ─────────────────────────────────
+
+    // 成り選択ダイアログ（ポップアップが開いている間は他のクリックを無視）
+    if matches!(app.phase, Phase::PromotionChoice { .. }) {
+        if let Some(r) = app.click_areas.promote_yes { if hit(r) { app.apply_promotion(true);  return false; } }
+        if let Some(r) = app.click_areas.promote_no  { if hit(r) { app.apply_promotion(false); return false; } }
+        return false; // ダイアログ外クリックは無視
+    }
+
+    // ゲームオーバーダイアログ
+    if let Phase::GameOver(_) = &app.phase {
+        if let Some(r) = app.click_areas.gameover_undo { if hit(r) { app.undo();     return false; } }
+        if let Some(r) = app.click_areas.gameover_new  { if hit(r) { app.new_game(); return false; } }
+        if let Some(r) = app.click_areas.gameover_quit { if hit(r) { return true; } }
+        return false;
+    }
+
+    // ─── 通常操作 ────────────────────────────────────────────────────────────
+
+    // 解決ボタン（ResolveReady 時のステータス行）
+    if let Some(r) = app.click_areas.resolve {
+        if hit(r) { app.resolve_turn(); return false; }
+    }
+
+    // 駒台の持ち駒を直接クリックして選択
+    let matched_hand: Option<PieceKind> = match app.current_side() {
+        None => None,
+        Some(side) => {
+            let rects = if side == Side::Sente {
+                &app.click_areas.sente_hand
+            } else {
+                &app.click_areas.gote_hand
+            };
+            rects.iter().find(|(r, _)| hit(*r)).map(|(_, k)| *k)
+        }
+    };
+    if let Some(kind) = matched_hand {
+        // 選択済みの同じ駒をクリックしたら解除（盤面駒の挙動と対称）
+        if matches!(&app.selection, Selection::HandPiece(k) if *k == kind) {
+            app.clear_selection();
+            app.message = "選択解除".to_string();
+        } else {
+            app.select_hand_piece_direct(kind);
+        }
+        return false;
+    }
+
+    // ─── 盤面クリック ────────────────────────────────────────────────────────
+
+    // 盤面ブロック inner 領域: x=1, y=1, inner rows 0..11
+    // 縦分割: [Min(13), 1, 2, 1, 1] → main_area は y=0 から始まる
+    const STATUS_ROWS: u16 = 1 + 2 + 1 + 1;
     let (_, term_h) = crossterm::terminal::size().unwrap_or((80, 24));
     let main_h = term_h.saturating_sub(STATUS_ROWS);
 
-    // 盤面ブロック (borders=ALL): area(0, 0, 33, main_h)
-    // inner area: (1, 1, 31, main_h-2)
-    let bx = 1u16; // inner x
-    let by = 1u16; // inner y
+    let bx = 1u16;
+    let by = 1u16;
+    const BOARD_PANEL_W: u16 = 33;
 
-    if col < bx || col >= bx + BOARD_PANEL_W - 2 {
-        return; // 盤面パネル外
-    }
-    if row < by || row >= by + main_h.saturating_sub(2) {
-        return;
-    }
+    if col < bx || col >= bx + BOARD_PANEL_W - 2 { return false; }
+    if row < by || row >= by + main_h.saturating_sub(2) { return false; }
 
     let local_row = row - by;
 
-    // inner 内の行レイアウト:
-    //   row 0: 後手持駒
-    //   row 1: 列ヘッダ
-    //   row 2..10: 段 1..9
-    //   row 11: 先手持駒
     match local_row {
-        0 => {
-            // 後手持駒クリック
-            if app.current_side() == Some(Side::Gote) {
-                app.toggle_hand_focus();
-            }
-        }
-        11 => {
-            // 先手持駒クリック
-            if app.current_side() == Some(Side::Sente) {
-                app.toggle_hand_focus();
-            }
-        }
         r if (2..=10).contains(&r) => {
-            let rank = (r - 1) as u8; // row2→rank1 ... row10→rank9
-            let local_col = col.saturating_sub(bx + 2); // rank_label(2cols) を除く
-            let cell_idx = local_col / 3; // 各セル 3 display cols
-
+            let rank = (r - 1) as u8;
+            let local_col = col.saturating_sub(bx + 2);
+            let cell_idx = local_col / 3;
             if cell_idx < 9 {
-                // 表示上: cell_idx 0 = 筋9, cell_idx 8 = 筋1
                 let file = 9u8.saturating_sub(cell_idx as u8);
                 if (1..=9).contains(&file) {
                     let sq = Square::new(file, rank);
@@ -233,4 +259,6 @@ pub fn handle_mouse(mouse: MouseEvent, app: &mut App) {
         }
         _ => {}
     }
+
+    false
 }

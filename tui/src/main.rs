@@ -62,7 +62,9 @@ fn run_app(
                 }
             }
             Event::Mouse(mouse) => {
-                input::handle_mouse(mouse, app);
+                if input::handle_mouse(mouse, app) {
+                    return Ok(());
+                }
             }
             Event::Resize(_, _) => {
                 // 次ループで再描画するので何もしない

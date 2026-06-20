@@ -6,15 +6,15 @@ use ratatui::{
     Frame,
 };
 use engine::board::Hand;
-use engine::types::{Side, Square};
+use engine::types::{PieceKind, Side, Square};
 use crate::app::{
-    App, FocusArea, GameOverKind, InputMode, Phase, Selection,
+    App, ClickAreas, FocusArea, GameOverKind, InputMode, Phase, Selection,
     game_over_text, piece_kind_ja, HAND_KINDS,
 };
 
 // ─── 全画面描画エントリ ───────────────────────────────────────────────────────
 
-pub fn draw(f: &mut Frame, app: &App) {
+pub fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
 
     // 縦分割: メイン / ステータス / 仮着手表示 / メッセージ / ヘルプ行
@@ -27,15 +27,13 @@ pub fn draw(f: &mut Frame, app: &App) {
     ])
     .split(area);
 
-    let main_area   = vchunks[0];
-    let status_area = vchunks[1];
+    let main_area    = vchunks[0];
+    let status_area  = vchunks[1];
     let pending_area = vchunks[2];
-    let msg_area    = vchunks[3];
-    let help_area   = vchunks[4];
+    let msg_area     = vchunks[3];
+    let help_area    = vchunks[4];
 
     // 横分割: 盤面 | 情報パネル
-    // 盤面: rank_label(1) + space(1) + 9 cells × 3cols + block border(2) = 31 cols
-    // 見た目のゆとりのため 33 にする
     let board_panel_w = 33u16;
     let hchunks = Layout::horizontal([
         Constraint::Length(board_panel_w),
@@ -45,6 +43,48 @@ pub fn draw(f: &mut Frame, app: &App) {
 
     let board_area = hchunks[0];
     let info_area  = hchunks[1];
+
+    // ─── クリック領域を毎フレーム更新 ────────────────────────────────────────
+    app.click_areas = ClickAreas::default();
+
+    // 解決ボタン: ResolveReady のときステータス行全体をクリック可能にする
+    if matches!(app.phase, Phase::ResolveReady) {
+        app.click_areas.resolve = Some(status_area);
+    }
+
+    // 成り選択ポップアップのボタン領域（左半分=成る、右半分=成らない）
+    if matches!(app.phase, Phase::PromotionChoice { .. }) {
+        let pw = 38u16.min(area.width.saturating_sub(4));
+        let pp = centered_rect(pw, 5, area);
+        let ix  = pp.x + 1;
+        let iy  = pp.y + 1;
+        let iw  = pp.width.saturating_sub(2);
+        let btn_y = iy + 1; // inner row 0 = blank、row 1 = ボタン行
+        let half = iw / 2;
+        app.click_areas.promote_yes = Some(Rect::new(ix,        btn_y, half,      1));
+        app.click_areas.promote_no  = Some(Rect::new(ix + half, btn_y, iw - half, 1));
+    }
+
+    // ゲームオーバーポップアップのボタン行（inner rows 3/4/5）
+    if let Phase::GameOver(_) = &app.phase {
+        let pw = 44u16.min(area.width.saturating_sub(4));
+        let pp = centered_rect(pw, 8, area);
+        let ix = pp.x + 1;
+        let iy = pp.y + 1;
+        let iw = pp.width.saturating_sub(2);
+        app.click_areas.gameover_undo = Some(Rect::new(ix, iy + 3, iw, 1));
+        app.click_areas.gameover_new  = Some(Rect::new(ix, iy + 4, iw, 1));
+        app.click_areas.gameover_quit = Some(Rect::new(ix, iy + 5, iw, 1));
+    }
+
+    // 駒台の持ち駒領域（"先手持駒: " 等の接頭辞 10 cols の直後から各駒を配置）
+    {
+        let pos = app.current_pos();
+        let bix = board_area.x + 1; // board ブロック inner の x
+        let biy = board_area.y + 1; // board ブロック inner の y
+        app.click_areas.gote_hand  = hand_piece_rects(&pos.hand_gote,  bix, biy);
+        app.click_areas.sente_hand = hand_piece_rects(&pos.hand_sente, bix, biy + 11);
+    }
 
     render_board(f, app, board_area);
     render_info(f, app, info_area);
@@ -65,9 +105,26 @@ pub fn draw(f: &mut Frame, app: &App) {
     }
 }
 
+// ─── 駒台クリック領域計算 ─────────────────────────────────────────────────────
+
+fn hand_piece_rects(hand: &Hand, base_x: u16, base_y: u16) -> Vec<(Rect, PieceKind)> {
+    // "先手持駒: " / "後手持駒: " のプレフィックスは 10 display cols
+    let mut x = base_x + 10;
+    let mut v = Vec::new();
+    for kind in HAND_KINDS.iter().copied() {
+        let cnt = hand.count(kind);
+        if cnt == 0 { continue; }
+        // cnt>1 → "{漢字}{数字} " = 4 cols、cnt==1 → "{漢字} " = 3 cols
+        let w = if cnt > 1 { 4u16 } else { 3u16 };
+        v.push((Rect::new(x, base_y, w, 1), kind));
+        x += w;
+    }
+    v
+}
+
 // ─── 盤面描画 ─────────────────────────────────────────────────────────────────
 
-fn render_board(f: &mut Frame, app: &App, area: Rect) {
+fn render_board(f: &mut Frame, app: &mut App, area: Rect) {
     let pos = app.current_pos();
 
     let block = Block::default()
@@ -300,8 +357,8 @@ fn render_status(f: &mut Frame, app: &App, area: Rect) {
             )
         }
         Phase::ResolveReady => (
-            "解決待ち — [Enter]で両着手を同時解決".to_string(),
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            "▶ 両着手を同時解決 — Enter またはクリック".to_string(),
+            Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD),
         ),
         Phase::GameOver(kind) => (
             format!("対局終了: {}", game_over_text(kind)),
@@ -400,13 +457,24 @@ fn render_promotion_popup(f: &mut Frame, area: Rect) {
     let inner = block.inner(popup);
     f.render_widget(block, popup);
 
-    let line = Line::from(vec![
-        Span::styled("  [y]/[p] 成る  ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-        Span::styled("[n] 成らない  ", Style::default().fg(Color::White)),
-        Span::styled("[Esc] キャンセル", Style::default().fg(Color::DarkGray)),
+    // ボタン行: 左半分=成る（緑背景）、右半分=成らない（白背景）
+    let btn_line = Line::from(vec![
+        Span::styled(
+            " 成る (y/p) ",
+            Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("    "),
+        Span::styled(
+            " 成らない (n) ",
+            Style::default().fg(Color::Black).bg(Color::White),
+        ),
     ]);
+    let cancel_line = Line::from(Span::styled(
+        "  [Esc] キャンセル",
+        Style::default().fg(Color::DarkGray),
+    ));
     f.render_widget(
-        Paragraph::new(Text::from(vec![Line::raw(""), line])),
+        Paragraph::new(Text::from(vec![Line::raw(""), btn_line, cancel_line])),
         inner,
     );
 }
@@ -430,13 +498,19 @@ fn render_game_over_popup(f: &mut Frame, kind: &GameOverKind, area: Rect) {
     let result_style = Style::default()
         .fg(Color::Yellow)
         .add_modifier(Modifier::BOLD);
+    let btn = |arrow: &'static str, color: Color, text: &'static str| {
+        Line::from(vec![
+            Span::styled(arrow, Style::default().fg(color)),
+            Span::styled(text, Style::default().fg(Color::White)),
+        ])
+    };
     let lines: Vec<Line> = vec![
         Line::raw(""),
         Line::from(Span::styled(game_over_text(kind).to_string(), result_style)),
         Line::raw(""),
-        Line::from(Span::styled("[u] 最後の手を取り消して続行", Style::default().fg(Color::White))),
-        Line::from(Span::styled("[n] 新規対局", Style::default().fg(Color::White))),
-        Line::from(Span::styled("[q] 終了", Style::default().fg(Color::DarkGray))),
+        btn("▶ ", Color::Green,   "[u] 最後の手を取り消して続行"),
+        btn("▶ ", Color::Cyan,    "[n] 新規対局"),
+        Line::from(Span::styled("  [q] 終了", Style::default().fg(Color::DarkGray))),
     ];
     f.render_widget(Paragraph::new(Text::from(lines)), inner);
 }

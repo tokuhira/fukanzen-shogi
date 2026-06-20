@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use ratatui::layout::Rect;
 use engine::board::Position;
 use engine::kifu::Kifu;
 use engine::movegen::legal_actions;
@@ -71,6 +72,21 @@ pub enum InputMode {
     LoadPath,
 }
 
+// ─── クリック領域キャッシュ ───────────────────────────────────────────────────
+
+/// 毎フレーム ui::draw が更新する。input::handle_mouse がこれを参照する。
+#[derive(Default, Clone)]
+pub struct ClickAreas {
+    pub promote_yes:   Option<Rect>, // 成りボタン（左半分）
+    pub promote_no:    Option<Rect>, // 成らないボタン（右半分）
+    pub resolve:       Option<Rect>, // 解決ボタン（ResolveReady 時のステータス行）
+    pub gameover_undo: Option<Rect>, // ゲームオーバー: 一手戻す
+    pub gameover_new:  Option<Rect>, // ゲームオーバー: 新規対局
+    pub gameover_quit: Option<Rect>, // ゲームオーバー: 終了
+    pub sente_hand:    Vec<(Rect, PieceKind)>, // 先手持ち駒の各駒
+    pub gote_hand:     Vec<(Rect, PieceKind)>, // 後手持ち駒の各駒
+}
+
 // ─── App 状態 ─────────────────────────────────────────────────────────────────
 
 pub struct App {
@@ -94,6 +110,7 @@ pub struct App {
     pub all_moves_text: Vec<String>,
     pub input_mode: InputMode,
     pub input_buffer: String,
+    pub click_areas: ClickAreas,
 }
 
 impl App {
@@ -118,6 +135,7 @@ impl App {
             all_moves_text: Vec::new(),
             input_mode: InputMode::Normal,
             input_buffer: String::new(),
+            click_areas: ClickAreas::default(),
         }
     }
 
