@@ -644,15 +644,29 @@ fn build_resolution_text(
     let mut lines = Vec::new();
     lines.push(format!("先手: {}  後手: {}", sente.to_usi(), gote.to_usi()));
 
-    // 戦国無双判定（玉が動いて取得した場合）
-    let sente_used_king = sente
-        .from_sq()
+    let sente_from = sente.from_sq();
+    let gote_from  = gote.from_sq();
+
+    let sente_used_king = sente_from
         .and_then(|sq| pos.board.get(sq))
         .map_or(false, |p| p.kind == PieceKind::King);
-    let gote_used_king = gote
-        .from_sq()
+    let gote_used_king = gote_from
         .and_then(|sq| pos.board.get(sq))
         .map_or(false, |p| p.kind == PieceKind::King);
+
+    // 戦国無双の真の救済判定:
+    //   玉が駒を取った「かつ」相手がその玉を狙っていた場合のみ★
+    //   留まっている駒を取っただけなら通常取得。
+    //   スワップ救済: 後手の行先 == 玉の元居たマス
+    //   同一マス救済: 後手の行先 == 玉の移動先（打ち込み含む）
+    let sente_musou = sente_used_king && (
+        sente_from.map_or(false, |f| gote.to_sq() == f)
+        || gote.to_sq() == sente.to_sq()
+    );
+    let gote_musou = gote_used_king && (
+        gote_from.map_or(false, |f| sente.to_sq() == f)
+        || sente.to_sq() == gote.to_sq()
+    );
 
     match event {
         ResolutionEvent::Normal {
@@ -660,7 +674,7 @@ fn build_resolution_text(
             gote_capture,
         } => {
             if let Some(k) = sente_capture {
-                if sente_used_king {
+                if sente_musou {
                     lines.push(format!(
                         "★戦国無双: 先手玉が{}を斬り返した",
                         piece_kind_ja(k.unpromoted())
@@ -670,7 +684,7 @@ fn build_resolution_text(
                 }
             }
             if let Some(k) = gote_capture {
-                if gote_used_king {
+                if gote_musou {
                     lines.push(format!(
                         "★戦国無双: 後手玉が{}を斬り返した",
                         piece_kind_ja(k.unpromoted())
