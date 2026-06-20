@@ -313,14 +313,27 @@ fn is_legal_after_self_check(pos: &Position, side: Side, action: Action) -> bool
 // 打ち歩詰め判定
 // -------------------------------------------------------------------------
 
+/// 自玉安全チェックのみを行う合法手列挙（打ち歩詰めチェックを省略）。
+///
+/// is_uchi_fu_dzume の内部専用。打ち歩詰めチェックが相互再帰すると
+/// 持ち駒の歩枚数 P・Q に対して O(P × Q × …) の指数爆発が起きるため、
+/// 再帰側では1段階目のみ自玉安全チェックを行い、打ち歩詰めは再チェックしない。
+fn legal_actions_no_ufdzume(pos: &Position, side: Side) -> Vec<Action> {
+    pseudo_moves(pos, side)
+        .into_iter()
+        .filter(|&action| is_legal_after_self_check(pos, side, action))
+        .collect()
+}
+
 /// 歩を to に打ったとき相手を詰ます（打ち歩詰め）かどうか
 fn is_uchi_fu_dzume(pos: &Position, side: Side, to: Square) -> bool {
     let mut after = pos.clone();
     after.board.set(to, Some(Piece::new(PieceKind::Pawn, side)));
     after.hand_mut(side).remove(PieceKind::Pawn);
-    // 相手の合法手が0になれば打ち歩詰め
+    // 相手の合法手が0になれば打ち歩詰め。
+    // 再帰を断つため打ち歩詰め再チェックなしのシャロー版を使う。
     let opp = side.opposite();
-    legal_actions(&after, opp).is_empty()
+    legal_actions_no_ufdzume(&after, opp).is_empty()
 }
 
 // -------------------------------------------------------------------------
@@ -426,6 +439,65 @@ mod tests {
             matches!(a, Action::Move { from, to, .. } if *from == king_sq && *to == silver_sq)
         });
         assert!(!king_to_silver, "後ろ盾のある 5四 への玉の手が合法手に現れた");
+    }
+
+    /// テスト v0.5-approach: 両玉が3段離れた状態から互いに歩み寄る手は双方合法
+    /// → 解決後に両玉が隣接する（v0.5 §3 で正式に認められた状態）
+    #[test]
+    fn both_kings_can_approach_legally() {
+        let mut pos = empty_pos();
+        let sk = Square::new(5, 7); // 先手玉 5七
+        let gk = Square::new(5, 4); // 後手玉 5四（3段離れている）
+        pos.board.set(sk, Some(Piece::new(PieceKind::King, Side::Sente)));
+        pos.board.set(gk, Some(Piece::new(PieceKind::King, Side::Gote)));
+
+        // 着手開始時点: 各々の移動先は相手玉の利きの外にある
+        // 先手玉 5七→5六: 5六は後手玉 5四 の利き範囲外
+        // 後手玉 5四→5五: 5五は先手玉 5七 の利き範囲外
+        let sente_target = Square::new(5, 6);
+        let gote_target  = Square::new(5, 5);
+
+        let sente_actions = legal_actions(&pos, Side::Sente);
+        let gote_actions  = legal_actions(&pos, Side::Gote);
+
+        assert!(
+            sente_actions.iter().any(|a| matches!(a, Action::Move { from, to, .. } if *from == sk && *to == sente_target)),
+            "先手玉の 5七→5六 が合法手に現れない"
+        );
+        assert!(
+            gote_actions.iter().any(|a| matches!(a, Action::Move { from, to, .. } if *from == gk && *to == gote_target)),
+            "後手玉の 5四→5五 が合法手に現れない"
+        );
+        // 双方が歩み寄ると 5六 と 5五 で隣接（差は1段）
+        assert_eq!(sente_target.rank().abs_diff(gote_target.rank()), 1);
+    }
+
+    /// テスト v0.5-asymmetric: 後ろ盾ありの場合、玉スワップは非合法（非対称）
+    /// 後手玉に後ろ盾（後手飛）があるとき:
+    ///   裸の先手玉は後手玉マスへ侵入不可、後手玉だけが先手玉を取りに行ける
+    #[test]
+    fn both_kings_adjacent_asymmetric_swap() {
+        let mut pos = empty_pos();
+        let sk = Square::new(5, 6); // 先手玉 5六（裸）
+        let gk = Square::new(5, 5); // 後手玉 5五（隣接）
+        let gr = Square::new(1, 5); // 後手飛 1五 → 5五（後手玉）を横から後ろ盾
+        pos.board.set(sk, Some(Piece::new(PieceKind::King, Side::Sente)));
+        pos.board.set(gk, Some(Piece::new(PieceKind::King, Side::Gote)));
+        pos.board.set(gr, Some(Piece::new(PieceKind::Rook, Side::Gote)));
+
+        let sente_actions = legal_actions(&pos, Side::Sente);
+        let gote_actions  = legal_actions(&pos, Side::Gote);
+
+        // 先手玉の 5六→5五 は不可（後手飛の利きで守られている）
+        assert!(
+            !sente_actions.iter().any(|a| matches!(a, Action::Move { from, to, .. } if *from == sk && *to == gk)),
+            "後ろ盾のある 5五 への先手玉の手が合法手に現れた"
+        );
+        // 後手玉の 5五→5六 は可能（先手玉の後ろ盾なし → 戦国無双で一方的に取れる）
+        assert!(
+            gote_actions.iter().any(|a| matches!(a, Action::Move { from, to, .. } if *from == gk && *to == sk)),
+            "後手玉の 5五→5六（先手玉取得）が合法手に現れない"
+        );
     }
 
     #[test]

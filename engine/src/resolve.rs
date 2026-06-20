@@ -60,13 +60,17 @@ pub fn resolve(pos: &Position, sente: Action, gote: Action) -> Resolution {
     // ----------------------------------------------------------------
     // ケース2: スワップ（4.4）/ 戦国無双特則（4.7(i)）
     // 両者が移動（打ちでない）かつ互いに相手の旧位置へ向かう
-    // 片方が玉なら戦国無双: 玉が一方的に相手駒を取得して進む
+    // v0.5 §4.7 追加: 両当事者がともに玉のとき、双方の戦国無双が相殺して通常の相討ち（引き分け）
+    // 片方のみ玉なら戦国無双: 玉が一方的に相手駒を取得して進む
     // ----------------------------------------------------------------
     if let (Some(fs_sq), Some(fg_sq)) = (fs, fg) {
         if ts == fg_sq && tg == fs_sq {
             let sente_piece = get_moving_piece(pos, sente, Side::Sente);
             let gote_piece  = get_moving_piece(pos, gote,  Side::Gote);
-            return if sente_piece.kind == PieceKind::King {
+            return if sente_piece.kind == PieceKind::King && gote_piece.kind == PieceKind::King {
+                // 両玉スワップ: 戦国無双が相殺 → 通常の相討ち（両玉取られて引き分け）
+                resolve_clash(pos, sente, gote)
+            } else if sente_piece.kind == PieceKind::King {
                 resolve_king_wins(pos, sente, gote, Side::Sente)
             } else if gote_piece.kind == PieceKind::King {
                 resolve_king_wins(pos, gote, sente, Side::Gote)
@@ -155,7 +159,7 @@ fn resolve_king_wins(
     let enemy_piece = get_moving_piece(pos, enemy_act, enemy_side);
     debug_assert!(
         enemy_piece.kind != PieceKind::King,
-        "玉同士の衝突は玉の侵入禁止により合法手では発生しない"
+        "両玉スワップは resolve_clash へ分岐済み。この関数が呼ばれる時点で enemy は非玉"
     );
 
     let mut next = pos.clone();
@@ -628,6 +632,57 @@ mod tests {
         assert_eq!(res.next.board.get(king_sq), Some(Piece::new(PieceKind::Silver, Side::Gote)));
         // 先手金は 5四 へ（銀の旧位置）
         assert_eq!(res.next.board.get(silver_sq), Some(Piece::new(PieceKind::Gold, Side::Sente)));
+    }
+
+    /// テスト4.7-v0.5: 両玉スワップ → 相討ち引き分け（v0.5 §4.7 追加条項）
+    /// 双方の戦国無双が拮抗して相殺し、通常の相討ちに戻る → BothDied
+    #[test]
+    fn both_kings_swap_draws() {
+        let sk = Square::new(5, 5); // 先手玉 5五
+        let gk = Square::new(5, 4); // 後手玉 5四（隣接）
+        let pos = make_pos(&[
+            (sk, Piece::new(PieceKind::King, Side::Sente)),
+            (gk, Piece::new(PieceKind::King, Side::Gote)),
+        ]);
+        // 両玉が互いに相手のマスへスワップ
+        let sente_act = Action::Move { from: sk, to: gk, promote: false };
+        let gote_act  = Action::Move { from: gk, to: sk, promote: false };
+        let res = resolve(&pos, sente_act, gote_act);
+
+        // 両玉が取られ引き分け
+        assert!(matches!(res.event, ResolutionEvent::BothDied));
+        // 盤上はともに空（玉は持ち駒にならない）
+        assert_eq!(res.next.board.get(sk), None);
+        assert_eq!(res.next.board.get(gk), None);
+        assert_eq!(res.next.hand_sente.count(PieceKind::King), 0);
+        assert_eq!(res.next.hand_gote.count(PieceKind::King), 0);
+    }
+
+    /// 退行防止: 片方だけ玉のスワップ（v0.4 戦国無双）が壊れていないことを確認
+    /// 先手玉スワップで後手銀を取得する旧来の動作が維持される
+    #[test]
+    fn sengoku_musou_single_king_unaffected_after_v05() {
+        let sk = Square::new(5, 5); // 先手玉 5五
+        let sv = Square::new(5, 4); // 後手銀 5四（玉でない）
+        let gk = Square::new(9, 1); // 後手玉（別マス）
+        let pos = make_pos(&[
+            (sk, Piece::new(PieceKind::King,   Side::Sente)),
+            (sv, Piece::new(PieceKind::Silver, Side::Gote)),
+            (gk, Piece::new(PieceKind::King,   Side::Gote)),
+        ]);
+        // 先手玉スワップ: 先手玉 5五→5四、後手銀 5四→5五
+        let sente_act = Action::Move { from: sk, to: sv, promote: false };
+        let gote_act  = Action::Move { from: sv, to: sk, promote: false };
+        let res = resolve(&pos, sente_act, gote_act);
+
+        // 戦国無双: 先手玉が 5四 にいて銀を取得
+        assert_eq!(res.next.board.get(sv), Some(Piece::new(PieceKind::King, Side::Sente)));
+        assert_eq!(res.next.board.get(sk), None);
+        assert_eq!(res.next.hand_sente.count(PieceKind::Silver), 1);
+        assert!(matches!(
+            res.event,
+            ResolutionEvent::Normal { sente_capture: Some(PieceKind::Silver), gote_capture: None }
+        ));
     }
 
     /// テスト5.2-b: 合駒貫き（玉は死ぬ）

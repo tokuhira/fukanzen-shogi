@@ -709,7 +709,18 @@ fn build_resolution_text(
         }
         ResolutionEvent::SenteDied => lines.push("先手玉が取られた！".to_string()),
         ResolutionEvent::GoteDied => lines.push("後手玉が取られた！".to_string()),
-        ResolutionEvent::BothDied => lines.push("両玉が同時に取られた！".to_string()),
+        ResolutionEvent::BothDied => {
+            // 両玉スワップ（v0.5 §4.7）か通常の同時取得かを区別して表示
+            let is_king_swap = sente_used_king && gote_used_king
+                && sente_from.zip(gote_from).is_some_and(|(fs, fg)| {
+                    sente.to_sq() == fg && gote.to_sq() == fs
+                });
+            if is_king_swap {
+                lines.push("★両玉スワップ: 双方の戦国無双が相殺して引き分け！".to_string());
+            } else {
+                lines.push("両玉が同時に取られた！".to_string());
+            }
+        }
     }
     lines
 }
