@@ -1,0 +1,13 @@
+[package]
+name = "fukanzen-shogi-tui"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "fukanzen-shogi-tui"
+path = "src/main.rs"
+
+[dependencies]
+engine = { path = "../engine" }
+ratatui = "0.30"
+crossterm = { version = "0.28", features = ["event-stream"] }

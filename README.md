@@ -37,21 +37,28 @@ This design rests on three structural goals:
 
 > **Open questions (spec §7):** Repetition (sennichite), continuous check, the precise reading of the pawn-drop checkmate prohibition under simultaneous commitment, and the notation for entering-king declarations are all listed as undecided in the current specification. They are *not* resolved by this implementation; placeholder behavior is marked with code comments.
 
-### This Repository — Phase 1
+### This Repository — Phases 1 & 2
 
-The first phase delivers:
+**Phase 1 — Rule engine + verification CLI** delivers:
 
 - **A pure Rust rule engine** (`engine/`) — a library crate with zero I/O, no `async`, no RNG, no networking. Its public API is a set of pure functions: `legal_actions`, `resolve`, `check_status`, and serialization helpers.
-- **A verification CLI** (`cli/`) — a single-process tool where one person inputs moves for both sides in USI notation, used to manually verify that the engine behaves as specified.
+- **A verification CLI** (`cli/`) — a single-process tool where one person inputs moves for both sides in USI notation, used to manually verify that the engine behaves as specified. Kept as a machine-readable pipe interface; not modified by later phases.
 - **A regression test suite** — 33 tests covering all concrete examples from the implementation spec: collision cases (capture, escape, same-square clash, swap, path pass-through, drop clash, promoted-piece reversion, Sengoku Musou swap and drop-clash), move generation (king safety, check evasion, nifu, uchi-fu-dzume, backed-piece prevention), termination (definite mate, king's death, simultaneous king capture, draw conditions, counter-play backfire, rook pass-through), serialization round-trips, and canonical initial-position verification against the spec's authoritative SFEN.
 
 USI notation is used throughout for moves (`7g7f`, `P*5e`, `2b3a+`). Position serialization follows SFEN with a fixed sentinel (`b`) in place of the turn field, which does not exist in this variant; the canonical initial position is defined by a single `INITIAL_SFEN` constant rather than hardcoded piece placement, making the spec document the single source of truth. Canonical serialization — deterministic board + holdings + move-number bytes — is ready for a SHA-256 layer to be added in a later phase. A separate content serialization (board + holdings only, no move number) is used for repetition detection.
 
+**Phase 2 — TUI verification desk** adds:
+
+- **A full-screen TUI** (`tui/`) — built on [ratatui](https://ratatui.rs) + crossterm. One person operates both sides with cursor keys and mouse on a single screen, with no secrecy — pure verification mode.
+- **Interactive legal-move highlighting** — selecting any piece (on board or in hand) immediately highlights every legal destination for that piece. This makes engine correctness visually inspectable: king-safety exclusions, check-evasion filtering, Sengoku Musou non-application, and piece-drop constraints all appear as the presence or absence of yellow highlights.
+- **Simultaneous resolution UI** — build Sente's move, then Gote's move, then press Enter to resolve both atomically. The resolution result (captures, escapes, clashes, Sengoku Musou activations, king deaths) is displayed as text in the info panel.
+- The engine crate is untouched; the TUI is strictly a new shell on top of the existing public API.
+
 ### Roadmap (future phases, not yet implemented)
 
-- **Phase 2:** Wasm compilation via `wasm-bindgen`; browser-based board UI; canonical hash exchange between clients for mutual board verification; commitment-reveal protocol for genuinely secret simultaneous commitment; disconnect recovery via move-history checkpointing.
-- **Phase 3:** CPU opponent (search + evaluation).
-- **Phase 4+:** Smartphone app; multi-language engine re-implementations with cross-diffing against the Rust reference.
+- **Phase 3:** Wasm compilation via `wasm-bindgen`; browser-based board UI; canonical hash exchange between clients for mutual board verification; commitment-reveal protocol for genuinely secret simultaneous commitment; disconnect recovery via move-history checkpointing.
+- **Phase 4:** CPU opponent (search + evaluation).
+- **Phase 5+:** Smartphone app; multi-language engine re-implementations with cross-diffing against the Rust reference.
 
 The engine is designed from the start so that all of the above are *shells* around an unchanged core. The engine itself will never gain I/O, networking, or randomness.
 
@@ -90,21 +97,28 @@ The engine is designed from the start so that all of the above are *shells* arou
 
 > **未確定事項（仕様書 §7）:** 千日手の成立時の扱い、連続王手の千日手の読み替え、打ち歩詰めの厳密な再形式化、入玉宣言法の読み替えはいずれも未確定です。本実装ではこれらを勝手に確定させず、暫定処理とコードコメントによる印として引き継いでいます。
 
-### このリポジトリ — 第一段階
+### このリポジトリ — 第一段階・第二段階
 
-第一段階の成果物:
+**第一段階 — ルールエンジン＋検証用 CLI** の成果物:
 
 - **Rust ルールエンジン**（`engine/`）— I/O・非同期・乱数・ネットワーク依存を一切持たない純粋なライブラリクレート。公開 API は `legal_actions`・`resolve`・`check_status` と直列化関数群からなる純粋関数群。
-- **検証用 CLI**（`cli/`）— 一人が両陣営の着手を USI 記法で入力し、一局を最後まで進められる検証モード。秘匿性なし・単一プロセス。
+- **検証用 CLI**（`cli/`）— 一人が両陣営の着手を USI 記法で入力し、一局を最後まで進められる検証モード。秘匿性なし・単一プロセス。機械可読の口として以後の段階でも無改変で温存する。
 - **回帰テスト群** — 仕様書の具体例を写した 33 本のテスト（衝突解決・戦国無双特則（スワップ＋同一マス打ち込み）・合法手生成・後ろ盾検証・終了判定・取り合いの裏目・合駒貫き・両玉同時取得・直列化・初期局面の正本 SFEN 照合）がすべて通過している。
 
-着手記法は USI 準拠（例: `7g7f`、`P*5e`、`2b3a+`）。局面の SFEN 手番フィールドは固定値 `b`（不完全将棋に手番は存在しない）。初期局面は正本 SFEN 定数 `INITIAL_SFEN` をパースして生成し、仕様書が唯一の出典となる。正準直列化（盤面＋持ち駒＋手数）は第二段階でのハッシュ計算への前方互換として、千日手検出用の内容直列化（手数除く）と区別して設計済み。
+着手記法は USI 準拠（例: `7g7f`、`P*5e`、`2b3a+`）。局面の SFEN 手番フィールドは固定値 `b`（不完全将棋に手番は存在しない）。初期局面は正本 SFEN 定数 `INITIAL_SFEN` をパースして生成し、仕様書が唯一の出典となる。正準直列化（盤面＋持ち駒＋手数）は第三段階でのハッシュ計算への前方互換として、千日手検出用の内容直列化（手数除く）と区別して設計済み。
+
+**第二段階 — TUI 検証卓** の成果物:
+
+- **全画面 TUI**（`tui/`）— [ratatui](https://ratatui.rs)（ターミナル UI ライブラリ）と crossterm による全画面対話インターフェース。一人が先手・後手の両着手をカーソルとマウスで組み立て、同時解決する検証モード（秘匿なし・単一プロセス・単一画面）。
+- **合法手インタラクティブ提示**（本段階の目玉機能）— 盤上・駒台の駒を選ぶと、その駒の合法な移動先・打ち先が即座に黄色ハイライトされる。玉の侵入禁止・王手回避による絞り込み・戦国無双の非発動・打ち駒の制約などがハイライトの有無として目視確認できる。
+- **同時解決 UI** — 先手の着手を組み、後手の着手を組み、Enter で両着手を同時に `resolve` する三拍子の操作モデル。解決結果（取得・逃げ・相討ち・戦国無双発動・玉の死）をテキストでパネルに表示する。
+- エンジンクレートは無改変。TUI は既存の公開 API のみを叩く新たな殻として追加した。
 
 ### 今後の計画（未実装）
 
-- **第二段階:** Wasm 化・ブラウザ UI・コミットメント方式（commit-reveal）による秘匿同時着手・盤面ハッシュ相互検証・中断救済。
-- **第三段階:** CPU 対戦（探索・評価関数）。
-- **第四段階以降:** スマートフォンアプリ・多言語実装と差分テスト。
+- **第三段階:** Wasm 化・ブラウザ UI・コミットメント方式（commit-reveal）による秘匿同時着手・盤面ハッシュ相互検証・中断救済。
+- **第四段階:** CPU 対戦（探索・評価関数）。
+- **第五段階以降:** スマートフォンアプリ・多言語実装と差分テスト。
 
 エンジンは「共通の核と交換可能な殻」の設計原則に基づき、これらはすべてエンジンの外側に積む予定である。エンジン本体にはいかなる I/O も追加しない。
 
@@ -117,6 +131,7 @@ The engine is designed from the start so that all of the above are *shells* arou
 - [不完全将棋 ルール仕様 v0.2](docs/不完全将棋_ルール仕様_v0.2.md) — 初期局面の正本 SFEN と SFEN 手番フィールドの確定的な扱い（`b` 固定）を追記
 - [不完全将棋 ルール仕様 v0.1](docs/不完全将棋_ルール仕様_v0.1.md) — 初版ルール定義
 - [不完全将棋 実装指示書 — 第一段階](docs/不完全将棋_実装指示書_第一段階.md) — Phase 1 の設計・実装指針（仕様書 v0.4 対応）
+- [不完全将棋 実装指示書 — 第二段階 TUI 検証卓](docs/不完全将棋_実装指示書_第二段階_TUI検証卓.md) — Phase 2 の設計・実装指針（ratatui による TUI 検証卓）
 
 ---
 
@@ -128,14 +143,40 @@ The engine is designed from the start so that all of the above are *shells* arou
 # Build all crates
 cargo build
 
-# Run all tests
+# Run all tests (engine regression suite — 33 tests)
 cargo test
 
-# Run the verification CLI
+# Run the verification CLI (text I/O, machine-readable)
 cargo run --bin fukanzen-shogi
+
+# Run the TUI verification desk (full-screen, interactive)
+cargo run --bin fukanzen-shogi-tui
 ```
 
-**CLI usage:**
+### TUI key bindings
+
+| Key | Action |
+|-----|--------|
+| `↑↓←→` | Move cursor on board |
+| `Enter` / `Space` | Select piece or confirm destination |
+| `d` / `Tab` | Toggle hand-piece selection mode (then `←→` to cycle) |
+| `1`–`7` | Directly select hand piece (歩香桂銀金角飛) |
+| `y` / `p` | Promote (in promotion dialog) |
+| `n` | No promotion |
+| `Esc` | Cancel selection / dismiss dialog |
+| `Enter` (ResolveReady) | Resolve both moves simultaneously |
+| `u` | Undo (or reset current turn's input) |
+| `r` | Resign current side |
+| `s` / `S` | Save game record (default path / prompt for path) |
+| `l` / `L` | Load game record (default path / prompt for path) |
+| `f` | Display current position as SFEN |
+| `m` | List all legal moves for current side |
+| `?` | Toggle help overlay |
+| `q` | Quit |
+
+Mouse clicks on board squares are supported; clicking a hand piece area toggles hand-piece selection mode.
+
+### CLI usage
 
 ```
 先手 の着手を入力 (USI例 7g7f, P*5e): 7g7f
