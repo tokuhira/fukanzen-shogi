@@ -98,6 +98,7 @@ pub fn run_online(
 
     let mut online_phase = OnlinePhase::WaitingMyMove;
     let mut turn_session: Option<TurnSession> = None;
+    let mut pending_peer_commit: Option<protocol::Commitment> = None;
     let mut kifu = Kifu::new(Position::initial());
 
     loop {
@@ -156,6 +157,7 @@ pub fn run_online(
                         msg,
                         &mut online_phase,
                         &mut turn_session,
+                        &mut pending_peer_commit,
                         &mut app,
                         &mut conn,
                         &config.local_side,
@@ -229,6 +231,22 @@ pub fn run_online(
 
             turn_session = Some(session);
             online_phase = OnlinePhase::WaitingPeerCommit;
+
+            // 自分より先に相手のコミットが届いていた場合は即座に適用
+            if let Some(pending) = pending_peer_commit.take() {
+                let session = turn_session.as_mut().unwrap();
+                if session.receive_peer_commit(pending).is_ok() && session.both_committed() {
+                    if let Ok(reveal) = session.local_reveal() {
+                        let _ = conn.send(&NetMessage::Reveal {
+                            action_usi: reveal.action.to_usi(),
+                            nonce: nonce_to_hex(&reveal.nonce),
+                            board_hash: board_hash_to_hex(&reveal.board_hash),
+                        });
+                        online_phase = OnlinePhase::WaitingPeerReveal;
+                        app.message = "Reveal 送信済み — 相手の Reveal 待ち...".to_string();
+                    }
+                }
+            }
         }
     }
 
@@ -241,6 +259,7 @@ fn handle_net_message(
     msg: NetMessage,
     online_phase: &mut OnlinePhase,
     turn_session: &mut Option<TurnSession>,
+    pending_peer_commit: &mut Option<protocol::Commitment>,
     app: &mut App,
     conn: &mut Connection,
     local_side: &Side,
@@ -251,27 +270,29 @@ fn handle_net_message(
             let commit = commitment_from_hex(&commitment)
                 .ok_or_else(|| "不正な commitment hex".to_string())?;
 
-            let session = turn_session.as_mut()
-                .ok_or_else(|| "セッション未初期化で Commit 受信".to_string())?;
+            if let Some(session) = turn_session.as_mut() {
+                // 自分の着手確定後にコミットが届いた（通常ケース）
+                session.receive_peer_commit(commit)
+                    .map_err(|e| format!("commit 受信エラー: {:?}", e))?;
 
-            session.receive_peer_commit(commit)
-                .map_err(|e| format!("commit 受信エラー: {:?}", e))?;
-
-            if session.both_committed() {
-                // reveal 送信
-                let reveal = session.local_reveal()
-                    .map_err(|e| format!("reveal 生成エラー: {:?}", e))?;
-                conn.send(&NetMessage::Reveal {
-                    action_usi: reveal.action.to_usi(),
-                    nonce: nonce_to_hex(&reveal.nonce),
-                    board_hash: board_hash_to_hex(&reveal.board_hash),
-                }).map_err(|e| e.to_string())?;
-                *online_phase = OnlinePhase::WaitingPeerReveal;
-                app.message = "Reveal 送信済み — 相手の Reveal 待ち...".to_string();
+                if session.both_committed() {
+                    let reveal = session.local_reveal()
+                        .map_err(|e| format!("reveal 生成エラー: {:?}", e))?;
+                    conn.send(&NetMessage::Reveal {
+                        action_usi: reveal.action.to_usi(),
+                        nonce: nonce_to_hex(&reveal.nonce),
+                        board_hash: board_hash_to_hex(&reveal.board_hash),
+                    }).map_err(|e| e.to_string())?;
+                    *online_phase = OnlinePhase::WaitingPeerReveal;
+                    app.message = "Reveal 送信済み — 相手の Reveal 待ち...".to_string();
+                } else {
+                    app.message = "相手のコミット受信済み — 自分の着手を確定してください".to_string();
+                }
             } else {
-                // 相手より先に自分の commit が着ていなかった場合
-                // (WaitingPeerCommit ではなく、相手が先着した場合)
-                app.message = "相手の Commit 受信 — 自分の着手を確定してください".to_string();
+                // 自分の着手確定前に相手のコミットが届いた（先着ケース）
+                // → セッション生成まで保留し、着手確定後に適用する
+                *pending_peer_commit = Some(commit);
+                app.message = "相手のコミット受信済み — 着手を入力してください".to_string();
             }
         }
 
