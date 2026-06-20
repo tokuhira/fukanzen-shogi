@@ -1,8 +1,9 @@
-/// 不完全将棋 TUI 検証卓（第二段階）
+/// 不完全将棋 TUI（第三段階: 通信秘匿対戦対応）
 ///
-/// ratatui + crossterm による全画面 TUI。
-/// 一人が先手・後手の両着手をカーソル/マウスで組み立て、同時解決する検証モード。
-/// エンジンクレートの公開 API のみを使用し、engine/ は無改変。
+/// 引数なし          → ローカル検証モード（先後を1人が操作）
+/// --listen PORT      → 先手として PORT で接続待ち
+/// --connect ADDR     → 後手として ADDR (host:port) へ接続
+/// --secret SECRET    → 共有パスワード（通信モード時に必須）
 use std::io::{self, Stdout};
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event},
@@ -13,9 +14,12 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 
 mod app;
 mod input;
+mod net;
+mod online;
 mod ui;
 
 use app::App;
+use online::{ConnectMode, OnlineConfig};
 
 fn main() -> io::Result<()> {
     // パニック時も端末を復元する
@@ -32,8 +36,7 @@ fn main() -> io::Result<()> {
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new();
-    let result = run_app(&mut terminal, &mut app);
+    let result = run(&mut terminal);
 
     restore_terminal()?;
 
@@ -48,7 +51,73 @@ fn restore_terminal() -> io::Result<()> {
     execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture)
 }
 
-fn run_app(
+fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> io::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+
+    if let Some(config) = parse_online_args(&args) {
+        online::run_online(terminal, config)
+    } else {
+        let mut app = App::new();
+        run_local(terminal, &mut app)
+    }
+}
+
+fn parse_online_args(args: &[String]) -> Option<OnlineConfig> {
+    use engine::types::Side;
+
+    let mut listen_port: Option<u16> = None;
+    let mut connect_addr: Option<String> = None;
+    let mut secret: Option<String> = None;
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--listen" => {
+                i += 1;
+                if let Some(s) = args.get(i) {
+                    listen_port = s.parse().ok();
+                }
+            }
+            "--connect" => {
+                i += 1;
+                connect_addr = args.get(i).cloned();
+            }
+            "--secret" => {
+                i += 1;
+                secret = args.get(i).cloned();
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    if listen_port.is_none() && connect_addr.is_none() {
+        return None;
+    }
+
+    let secret_bytes = secret.unwrap_or_default().into_bytes();
+    if secret_bytes.is_empty() {
+        eprintln!("警告: --secret が指定されていません。空のパスワードで接続します。");
+    }
+
+    if let Some(port) = listen_port {
+        Some(OnlineConfig {
+            local_side: Side::Sente,
+            mode: ConnectMode::Listen(port),
+            secret: secret_bytes,
+        })
+    } else if let Some(addr) = connect_addr {
+        Some(OnlineConfig {
+            local_side: Side::Gote,
+            mode: ConnectMode::Connect(addr),
+            secret: secret_bytes,
+        })
+    } else {
+        None
+    }
+}
+
+fn run_local(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     app: &mut App,
 ) -> io::Result<()> {
@@ -66,9 +135,7 @@ fn run_app(
                     return Ok(());
                 }
             }
-            Event::Resize(_, _) => {
-                // 次ループで再描画するので何もしない
-            }
+            Event::Resize(_, _) => {}
             _ => {}
         }
     }
