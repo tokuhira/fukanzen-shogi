@@ -323,12 +323,12 @@ fn render_info(f: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::raw(""));
     }
 
-    // 手数
-    let move_num = app.kifu.current().move_number - 1;
+    // 組手数（move_number は SFEN の次手番号で 1 始まり → そのまま「第N組手目」）
+    let kumite_num = app.kifu.current().move_number;
     lines.push(Line::from(vec![
         Span::styled("第", Style::default().fg(Color::DarkGray)),
-        Span::raw(move_num.to_string()),
-        Span::styled("手", Style::default().fg(Color::DarkGray)),
+        Span::raw(kumite_num.to_string()),
+        Span::styled("組手", Style::default().fg(Color::DarkGray)),
     ]));
 
     f.render_widget(
