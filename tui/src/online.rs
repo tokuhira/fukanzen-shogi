@@ -455,9 +455,21 @@ fn reconnect(
     kifu: &Kifu,
     peer_secret_hash: &SecretHash,
 ) -> io::Result<Connection> {
+    // Connect 側は Listen 側の準備が整うまでリトライする
     let mut conn = match &config.mode {
         ConnectMode::Listen(port) => Connection::listen(*port)?,
-        ConnectMode::Connect(addr) => Connection::connect(addr)?,
+        ConnectMode::Connect(addr) => {
+            let deadline = std::time::Instant::now() + Duration::from_secs(60);
+            loop {
+                match Connection::connect(addr) {
+                    Ok(c) => break c,
+                    Err(_) if std::time::Instant::now() < deadline => {
+                        std::thread::sleep(Duration::from_millis(500));
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+        }
     };
 
     let current_hash = board_hash(&kifu.current());
