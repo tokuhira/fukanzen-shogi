@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use engine::types::{PieceKind, Side, Square};
 use crate::app::{App, FocusArea, InputMode, Phase, Selection, HAND_KINDS};
@@ -7,6 +7,11 @@ use crate::app::{App, FocusArea, InputMode, Phase, Selection, HAND_KINDS};
 
 /// true を返すとアプリ終了
 pub fn handle_key(key: KeyEvent, app: &mut App) -> bool {
+    // Windows CMD は Press / Repeat / Release の3種を発火するため Release を除外する
+    if key.kind == KeyEventKind::Release {
+        return false;
+    }
+
     // パス入力モード中は別ハンドラへ
     if app.input_mode != InputMode::Normal {
         return handle_path_input(key, app);

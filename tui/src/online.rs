@@ -158,8 +158,10 @@ pub fn run_online(
             if event::poll(Duration::from_millis(200))? {
                 match event::read()? {
                     Event::Key(k) => {
-                        use crossterm::event::KeyCode;
-                        if k.code == KeyCode::Char('q') || k.code == KeyCode::Char('Q') {
+                        use crossterm::event::{KeyCode, KeyEventKind};
+                        if k.kind != KeyEventKind::Release
+                            && (k.code == KeyCode::Char('q') || k.code == KeyCode::Char('Q'))
+                        {
                             break;
                         }
                     }
@@ -175,8 +177,10 @@ pub fn run_online(
             if event::poll(Duration::from_millis(200))? {
                 match event::read()? {
                     Event::Key(k) => {
-                        use crossterm::event::KeyCode;
-                        if k.code == KeyCode::Char('q') || k.code == KeyCode::Char('Q') {
+                        use crossterm::event::{KeyCode, KeyEventKind};
+                        if k.kind != KeyEventKind::Release
+                            && (k.code == KeyCode::Char('q') || k.code == KeyCode::Char('Q'))
+                        {
                             break;
                         }
                     }
@@ -246,8 +250,10 @@ pub fn run_online(
             // プロトコル待機中はキー入力を処理しない（q は抜け）
             if event::poll(Duration::from_millis(50))? {
                 if let Event::Key(k) = event::read()? {
-                    use crossterm::event::KeyCode;
-                    if k.code == KeyCode::Char('q') || k.code == KeyCode::Char('Q') {
+                    use crossterm::event::{KeyCode, KeyEventKind};
+                    if k.kind != KeyEventKind::Release
+                        && (k.code == KeyCode::Char('q') || k.code == KeyCode::Char('Q'))
+                    {
                         break;
                     }
                 }
@@ -260,11 +266,14 @@ pub fn run_online(
             let ev = event::read()?;
             match ev {
                 Event::Key(k) => {
-                    use crossterm::event::KeyCode;
-                    if k.code == KeyCode::Char('q') || k.code == KeyCode::Char('Q') {
+                    use crossterm::event::{KeyCode, KeyEventKind};
+                    if k.kind == KeyEventKind::Release {
+                        // Release は無視（Windows CMD チャタリング対策）
+                    } else if k.code == KeyCode::Char('q') || k.code == KeyCode::Char('Q') {
                         break;
+                    } else {
+                        input::handle_key(k, &mut app);
                     }
-                    input::handle_key(k, &mut app);
                 }
                 Event::Mouse(m) => {
                     if input::handle_mouse(m, &mut app) {

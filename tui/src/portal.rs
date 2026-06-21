@@ -1,7 +1,7 @@
 /// ポータルメニュー — 単体検証卓・通信対戦の選択と接続設定
 use std::io;
 
-use crossterm::event::{self, Event, KeyCode, KeyModifiers, MouseButton, MouseEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -126,6 +126,11 @@ pub fn run_portal(
             }
 
             Event::Key(key) => {
+                // Release は無視（Windows CMD チャタリング対策）
+                if key.kind == KeyEventKind::Release {
+                    continue;
+                }
+
                 // Ctrl+C は常に終了
                 if key.modifiers.contains(KeyModifiers::CONTROL)
                     && key.code == KeyCode::Char('c')
