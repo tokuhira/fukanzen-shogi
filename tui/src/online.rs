@@ -134,8 +134,9 @@ pub fn run_online(
                             Side::Sente => { app.phase = Phase::SenteInput; }
                             Side::Gote  => { app.phase = Phase::GoteInput; app.cursor_rank = 1; }
                         }
-                        app.message = "再接続しました — 着手を入力してください".to_string();
+                        app.message = "着手を入力してください".to_string();
                         sync_online_status(&mut app, &online_phase, config.local_side, true);
+                        notify_reconnect(&mut app, 4);
                     }
                     ReconnectEvent::Failed(reason) => {
                         online_phase = OnlinePhase::Aborted(format!("再接続失敗: {}", reason));
@@ -516,7 +517,7 @@ fn random_nonce() -> Nonce {
 }
 
 /// `OnlinePhase` の変化を `app.online_status` へ反映する。
-/// 毎回の状態遷移後に呼ぶこと。
+/// 既存の `reconnect_notice_until` は引き継ぐ（期限切れ確認は ui 側で行う）。
 fn sync_online_status(app: &mut App, phase: &OnlinePhase, local_side: Side, connected: bool) {
     let protocol = match phase {
         OnlinePhase::WaitingMyMove     => OnlineProtocolPhase::MyTurn,
@@ -526,10 +527,21 @@ fn sync_online_status(app: &mut App, phase: &OnlinePhase, local_side: Side, conn
         OnlinePhase::Disconnected      => OnlineProtocolPhase::Disconnected,
         OnlinePhase::Aborted(r)        => OnlineProtocolPhase::Aborted(r.clone()),
     };
-    // peer_revealed: ピアの着手が app に格納済みかで判定
     let peer_revealed = match local_side {
         Side::Sente => app.gote_action.is_some(),
         Side::Gote  => app.sente_action.is_some(),
     };
-    app.online_status = Some(OnlineStatus { local_side, protocol, connected, peer_revealed });
+    let reconnect_notice_until = app.online_status.as_ref()
+        .and_then(|s| s.reconnect_notice_until);
+    app.online_status = Some(OnlineStatus {
+        local_side, protocol, connected, peer_revealed, reconnect_notice_until,
+    });
+}
+
+/// 再接続成功時に呼ぶ。`duration` 秒間だけ通知を表示する。
+fn notify_reconnect(app: &mut App, duration_secs: u64) {
+    if let Some(ref mut os) = app.online_status {
+        os.reconnect_notice_until =
+            Some(std::time::Instant::now() + Duration::from_secs(duration_secs));
+    }
 }

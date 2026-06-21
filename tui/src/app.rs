@@ -27,6 +27,8 @@ pub struct OnlineStatus {
     pub connected: bool,
     /// peer の着手が reveal 済みか（false の間は ??? 表示）
     pub peer_revealed: bool,
+    /// 再接続成功通知の表示期限（Some の間はステータス行に通知を出す）
+    pub reconnect_notice_until: Option<std::time::Instant>,
 }
 
 // ─── 公開定数 ────────────────────────────────────────────────────────────────

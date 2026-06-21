@@ -397,12 +397,29 @@ fn render_status(f: &mut Frame, app: &App, area: Rect) {
             return;
         }
 
-        let line = Line::from(vec![
-            Span::styled(format!("[{} ", side_label), Style::default().fg(Color::DarkGray)),
-            Span::styled(conn_sym.to_string(), conn_style),
-            Span::styled(format!(" {}]  ", conn_label), Style::default().fg(Color::DarkGray)),
-            Span::styled(proto_text, proto_style),
-        ]);
+        // 再接続成功通知が期限内なら優先表示
+        let notice_active = os.reconnect_notice_until
+            .map(|t| t > std::time::Instant::now())
+            .unwrap_or(false);
+
+        let line = if notice_active {
+            Line::from(vec![
+                Span::styled(format!("[{} ", side_label), Style::default().fg(Color::DarkGray)),
+                Span::styled(conn_sym.to_string(), conn_style),
+                Span::styled(format!(" {}]  ", conn_label), Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    "再接続しました".to_string(),
+                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                ),
+            ])
+        } else {
+            Line::from(vec![
+                Span::styled(format!("[{} ", side_label), Style::default().fg(Color::DarkGray)),
+                Span::styled(conn_sym.to_string(), conn_style),
+                Span::styled(format!(" {}]  ", conn_label), Style::default().fg(Color::DarkGray)),
+                Span::styled(proto_text, proto_style),
+            ])
+        };
         f.render_widget(Paragraph::new(line), area);
         return;
     }
