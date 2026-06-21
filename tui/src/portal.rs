@@ -38,8 +38,42 @@ const MENU_LABELS: &[&str] = &[
     "終了",
 ];
 
+// ─── 前回接続情報（二局目以降のデフォルト値） ─────────────────────────────────
+
+pub struct LastConnection {
+    pub listen_port: String,  // Listen 側で使ったポート番号
+    pub connect_addr: String, // Connect 側で使ったアドレス（host:port）
+    pub secret: String,
+}
+
+/// モード選択に応じた入力フォームの初期値を決定する。
+/// 先後逆のときはポート番号を維持して自動調整する。
+fn make_form(listen: bool, last: Option<&LastConnection>) -> Screen {
+    let (addr_or_port, secret) = match last {
+        None => (String::new(), String::new()),
+        Some(l) => {
+            let secret = l.secret.clone();
+            let aop = if listen {
+                if !l.listen_port.is_empty() {
+                    // 前回も Listen → そのまま
+                    l.listen_port.clone()
+                } else {
+                    // 前回は Connect → アドレスからポート部分を抽出
+                    l.connect_addr.rsplit(':').next().unwrap_or("").to_string()
+                }
+            } else {
+                // Connect → 前回の接続先アドレスを再利用（前回 Listen なら空）
+                l.connect_addr.clone()
+            };
+            (aop, secret)
+        }
+    };
+    Screen::OnlineForm { listen, addr_or_port, secret, focused: 0, error: None }
+}
+
 pub fn run_portal(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    last: Option<&LastConnection>,
 ) -> io::Result<PortalResult> {
     let mut screen = Screen::Menu { selected: 0 };
     // draw() 内の f.area() を外へ持ち出してヒットテストに使う
@@ -71,14 +105,8 @@ pub fn run_portal(
                                     *selected = i;
                                     match i {
                                         0 => portal_result = Some(PortalResult::Local),
-                                        1 => next_screen = Some(Screen::OnlineForm {
-                                            listen: true, addr_or_port: String::new(),
-                                            secret: String::new(), focused: 0, error: None,
-                                        }),
-                                        2 => next_screen = Some(Screen::OnlineForm {
-                                            listen: false, addr_or_port: String::new(),
-                                            secret: String::new(), focused: 0, error: None,
-                                        }),
+                                        1 => next_screen = Some(make_form(true,  last)),
+                                        2 => next_screen = Some(make_form(false, last)),
                                         _ => portal_result = Some(PortalResult::Quit),
                                     }
                                     break;
@@ -122,20 +150,8 @@ pub fn run_portal(
                         }
                         KeyCode::Enter | KeyCode::Char(' ') => match *selected {
                             0 => portal_result = Some(PortalResult::Local),
-                            1 => next_screen = Some(Screen::OnlineForm {
-                                listen: true,
-                                addr_or_port: String::new(),
-                                secret: String::new(),
-                                focused: 0,
-                                error: None,
-                            }),
-                            2 => next_screen = Some(Screen::OnlineForm {
-                                listen: false,
-                                addr_or_port: String::new(),
-                                secret: String::new(),
-                                focused: 0,
-                                error: None,
-                            }),
+                            1 => next_screen = Some(make_form(true,  last)),
+                            2 => next_screen = Some(make_form(false, last)),
                             _ => portal_result = Some(PortalResult::Quit),
                         },
                         KeyCode::Char('q') | KeyCode::Char('Q') => {

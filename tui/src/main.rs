@@ -67,14 +67,37 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> io::Result<()> {
     }
 
     // ポータルメニュー — ゲーム終了後もここへ戻る
+    let mut last_conn: Option<portal::LastConnection> = None;
+
     loop {
-        match portal::run_portal(terminal)? {
+        match portal::run_portal(terminal, last_conn.as_ref())? {
             portal::PortalResult::Local => {
                 let mut app = App::new();
                 run_local(terminal, &mut app)?;
             }
             portal::PortalResult::Online(config) => {
+                // ゲーム開始前に接続情報を記録し、次回のデフォルト値に使う
+                let new_last = portal::LastConnection {
+                    listen_port: match &config.mode {
+                        ConnectMode::Listen(p) => p.to_string(),
+                        ConnectMode::Connect(_) => {
+                            last_conn.as_ref()
+                                .map(|l| l.listen_port.clone())
+                                .unwrap_or_default()
+                        }
+                    },
+                    connect_addr: match &config.mode {
+                        ConnectMode::Connect(a) => a.clone(),
+                        ConnectMode::Listen(_) => {
+                            last_conn.as_ref()
+                                .map(|l| l.connect_addr.clone())
+                                .unwrap_or_default()
+                        }
+                    },
+                    secret: String::from_utf8_lossy(&config.secret).to_string(),
+                };
                 online::run_online(terminal, config)?;
+                last_conn = Some(new_last);
             }
             portal::PortalResult::Quit => return Ok(()),
         }
