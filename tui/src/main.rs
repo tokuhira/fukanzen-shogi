@@ -4,7 +4,7 @@
 /// --listen PORT      → 先手として PORT で接続待ち
 /// --connect ADDR     → 後手として ADDR (host:port) へ接続
 /// --secret SECRET    → 共有パスワード（通信モード時に必須）
-use std::io::{self, Stdout};
+use std::io::{self, IsTerminal, Stdout};
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event},
     execute,
@@ -22,6 +22,12 @@ use app::App;
 use online::{ConnectMode, OnlineConfig};
 
 fn main() -> io::Result<()> {
+    // インタラクティブ端末専用
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        eprintln!("エラー: インタラクティブな端末が必要です。パイプやリダイレクト経由での実行はできません。");
+        std::process::exit(1);
+    }
+
     // パニック時も端末を復元する
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
