@@ -102,7 +102,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         render_promotion_popup(f, area);
     }
     if let Phase::GameOver(ref kind) = app.phase {
-        render_game_over_popup(f, kind, area);
+        render_game_over_popup(f, kind, area, app.online_status.is_some());
     }
     if app.show_help {
         render_help_popup(f, area);
@@ -604,9 +604,9 @@ fn render_promotion_popup(f: &mut Frame, area: Rect) {
 
 // ─── ゲームオーバーポップアップ ──────────────────────────────────────────────
 
-fn render_game_over_popup(f: &mut Frame, kind: &GameOverKind, area: Rect) {
+fn render_game_over_popup(f: &mut Frame, kind: &GameOverKind, area: Rect, online_mode: bool) {
+    let h = if online_mode { 6u16 } else { 8u16 };
     let w = 44u16.min(area.width.saturating_sub(4));
-    let h = 8u16;
     let popup = centered_rect(w, h, area);
 
     f.render_widget(Clear, popup);
@@ -621,20 +621,30 @@ fn render_game_over_popup(f: &mut Frame, kind: &GameOverKind, area: Rect) {
     let result_style = Style::default()
         .fg(Color::Yellow)
         .add_modifier(Modifier::BOLD);
-    let btn = |arrow: &'static str, color: Color, text: &'static str| {
-        Line::from(vec![
-            Span::styled(arrow, Style::default().fg(color)),
-            Span::styled(text, Style::default().fg(Color::White)),
-        ])
+
+    let lines: Vec<Line> = if online_mode {
+        vec![
+            Line::raw(""),
+            Line::from(Span::styled(game_over_text(kind).to_string(), result_style)),
+            Line::raw(""),
+            Line::from(Span::styled("  [q] ポータルへ戻る", Style::default().fg(Color::DarkGray))),
+        ]
+    } else {
+        let btn = |arrow: &'static str, color: Color, text: &'static str| {
+            Line::from(vec![
+                Span::styled(arrow, Style::default().fg(color)),
+                Span::styled(text, Style::default().fg(Color::White)),
+            ])
+        };
+        vec![
+            Line::raw(""),
+            Line::from(Span::styled(game_over_text(kind).to_string(), result_style)),
+            Line::raw(""),
+            btn("▶ ", Color::Green, "[u] 最後の手を取り消して続行"),
+            btn("▶ ", Color::Cyan,  "[n] 新規対局"),
+            Line::from(Span::styled("  [q] 終了", Style::default().fg(Color::DarkGray))),
+        ]
     };
-    let lines: Vec<Line> = vec![
-        Line::raw(""),
-        Line::from(Span::styled(game_over_text(kind).to_string(), result_style)),
-        Line::raw(""),
-        btn("▶ ", Color::Green,   "[u] 最後の手を取り消して続行"),
-        btn("▶ ", Color::Cyan,    "[n] 新規対局"),
-        Line::from(Span::styled("  [q] 終了", Style::default().fg(Color::DarkGray))),
-    ];
     f.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
 
