@@ -1,8 +1,24 @@
 /// TCP 通信殻。
 ///
-/// - 4 バイト big-endian 長さプレフィックス + serde_json ボディ
-/// - 受信スレッドが `mpsc::Sender<NetEvent>` へイベントを送る
-/// - メインスレッドは `try_recv` でノンブロッキングに受け取る
+/// ## レイヤー構造
+///
+/// ```text
+/// ┌─────────────────────────────────────────────────────┐
+/// │ トランスポート共通（将来も変わらない部分）              │
+/// │   NetMessage  — メッセージ語彙（何を送るか）           │
+/// │   NetEvent    — 受信イベント型                        │
+/// │   Connection  — 公開 API: .send() / .events          │
+/// ├─────────────────────────────────────────────────────┤
+/// │ TCP 固有（将来 WS や Unix socket へ差し替える部分）     │
+/// │   Connection::listen / connect — 接続確立             │
+/// │   reader_loop / send — 4 byte 長さプレフィックス       │
+/// └─────────────────────────────────────────────────────┘
+/// ```
+///
+/// 別トランスポートへ移行する場合: `NetMessage` / `NetEvent` と
+/// `Connection` の公開シグネチャ（`.send()` / `.events`）は保持したまま、
+/// `listen` / `connect` の確立ロジックと、`reader_loop` / `send` の
+/// フレーミング部分（`// [TCP framing]` コメント箇所）を置き換える。
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -11,6 +27,8 @@ use std::thread;
 use serde::{Deserialize, Serialize};
 
 use protocol::{BoardHash, Commitment, Nonce};
+
+// ─── トランスポート共通: メッセージ語彙・イベント型 ──────────────────────────
 
 /// ワイヤー上を流れるメッセージ
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,14 +73,18 @@ pub enum NetEvent {
     Disconnected,
 }
 
-/// TCP ストリームを包んだ接続ハンドル。
+// ─── トランスポート共通: 接続ハンドル（公開 API のみ共通; 実装は TCP 固有）──
+
+/// 接続ハンドル。
 ///
-/// 受信スレッドは `events` チャネルにメッセージを送り続ける。
-/// 送信は `send` メソッドで行う（メインスレッドから呼ぶ）。
+/// 呼び出し側から見た公開 API（`.send()` / `.events`）はトランスポート共通。
+/// 内部の `TcpStream` と受信スレッドが TCP 固有の実装。
 pub struct Connection {
     stream: TcpStream,
     pub events: Receiver<NetEvent>,
 }
+
+// ─── TCP 固有: 接続確立 ───────────────────────────────────────────────────────
 
 impl Connection {
     /// 指定ポートで待ち受けて最初の接続を受け入れる（ブロッキング）
@@ -85,10 +107,11 @@ impl Connection {
         Ok(Self { stream, events: rx })
     }
 
-    /// メッセージを送信する
+    /// メッセージを1つ送信する（公開 API はトランスポート共通）
     pub fn send(&mut self, msg: &NetMessage) -> std::io::Result<()> {
         let body = serde_json::to_vec(msg)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        // [TCP framing] 4 byte big-endian 長さプレフィックス
         let len = (body.len() as u32).to_be_bytes();
         self.stream.write_all(&len)?;
         self.stream.write_all(&body)?;
@@ -96,9 +119,11 @@ impl Connection {
     }
 }
 
+// ─── TCP 固有: フレーミングと受信ループ ──────────────────────────────────────
+
 fn reader_loop(mut stream: TcpStream, tx: Sender<NetEvent>) {
     loop {
-        // 4バイトの長さヘッダを読む
+        // [TCP framing] 4 byte big-endian 長さプレフィックスでメッセージ境界を判定
         let mut len_buf = [0u8; 4];
         if stream.read_exact(&mut len_buf).is_err() {
             let _ = tx.send(NetEvent::Disconnected);
@@ -128,7 +153,7 @@ fn reader_loop(mut stream: TcpStream, tx: Sender<NetEvent>) {
     }
 }
 
-// ─── hex ユーティリティ ───────────────────────────────────────────────────────
+// ─── トランスポート共通: hex ユーティリティ（NetMessage の JSON フィールド用）──
 
 pub fn to_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
