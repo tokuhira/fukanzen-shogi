@@ -110,6 +110,8 @@ pub fn run_online(
     let mut kifu = Kifu::new(Position::initial());
     // 再接続バックグラウンドスレッドからの通知チャネル
     let mut reconnect_rx: Option<std::sync::mpsc::Receiver<ReconnectEvent>> = None;
+    // 切断時点で着手が確定済みだったか（再接続後のロールバック通知に使う）
+    let mut move_rolled_back = false;
 
     // 初期状態を online_status に反映
     sync_online_status(&mut app, &online_phase, config.local_side, true);
@@ -134,7 +136,12 @@ pub fn run_online(
                             Side::Sente => { app.phase = Phase::SenteInput; }
                             Side::Gote  => { app.phase = Phase::GoteInput; app.cursor_rank = 1; }
                         }
-                        app.message = "着手を入力してください".to_string();
+                        app.message = if move_rolled_back {
+                            move_rolled_back = false;
+                            "着手をキャンセルしました — 再度入力してください".to_string()
+                        } else {
+                            "着手を入力してください".to_string()
+                        };
                         sync_online_status(&mut app, &online_phase, config.local_side, true);
                         notify_reconnect(&mut app, 4);
                     }
@@ -178,6 +185,13 @@ pub fn run_online(
             match ev {
                 NetEvent::Disconnected => {
                     if online_phase != OnlinePhase::Disconnected {
+                        // 切断時点で着手が確定済みかを記録（再接続後のロールバック通知用）
+                        let my_action = match config.local_side {
+                            Side::Sente => app.sente_action,
+                            Side::Gote  => app.gote_action,
+                        };
+                        move_rolled_back = turn_session.is_some() || my_action.is_some();
+
                         // 初回切断時のみスレッド起動（二重起動防止）
                         online_phase = OnlinePhase::Disconnected;
                         turn_session = None;
