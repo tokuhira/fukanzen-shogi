@@ -8,7 +8,7 @@ jobs:
   build-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Rust
         run: rustup default stable
@@ -17,7 +17,7 @@ jobs:
         run: cargo build --release -p fukanzen-shogi-tui --bin fukanzen-shogi-tui --target x86_64-pc-windows-msvc
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fukanzen-shogi-tui-windows-x64
           path: target/x86_64-pc-windows-msvc/release/fukanzen-shogi-tui.exe
