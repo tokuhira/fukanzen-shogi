@@ -1,7 +1,7 @@
 /// ポータルメニュー — 単体検証卓・通信対戦の選択と接続設定
 use std::io;
 
-use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyModifiers, MouseButton, MouseEventKind};
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -42,11 +42,61 @@ pub fn run_portal(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
 ) -> io::Result<PortalResult> {
     let mut screen = Screen::Menu { selected: 0 };
+    // draw() 内の f.area() を外へ持ち出してヒットテストに使う
+    let mut last_area = Rect::default();
 
     loop {
-        terminal.draw(|f| render(f, &screen))?;
+        terminal.draw(|f| {
+            last_area = f.area();
+            render(f, &screen);
+        })?;
 
         match event::read()? {
+            Event::Mouse(me) => {
+                if me.kind == MouseEventKind::Down(MouseButton::Left) {
+                    let col = me.column;
+                    let row = me.row;
+                    let hit = |r: Rect| {
+                        col >= r.x && col < r.x + r.width
+                            && row >= r.y && row < r.y + r.height
+                    };
+
+                    let mut next_screen: Option<Screen> = None;
+                    let mut portal_result: Option<PortalResult> = None;
+
+                    match &mut screen {
+                        Screen::Menu { selected } => {
+                            for (i, rect) in menu_item_rects(last_area).iter().enumerate() {
+                                if hit(*rect) {
+                                    *selected = i;
+                                    match i {
+                                        0 => portal_result = Some(PortalResult::Local),
+                                        1 => next_screen = Some(Screen::OnlineForm {
+                                            listen: true, addr_or_port: String::new(),
+                                            secret: String::new(), focused: 0, error: None,
+                                        }),
+                                        2 => next_screen = Some(Screen::OnlineForm {
+                                            listen: false, addr_or_port: String::new(),
+                                            secret: String::new(), focused: 0, error: None,
+                                        }),
+                                        _ => portal_result = Some(PortalResult::Quit),
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                        Screen::OnlineForm { focused, .. } => {
+                            let (f1, f2) = form_field_rects(last_area);
+                            if hit(f1) { *focused = 0; }
+                            else if hit(f2) { *focused = 1; }
+                        }
+                    }
+
+                    if let Some(s) = next_screen { screen = s; }
+                    if let Some(r) = portal_result { return Ok(r); }
+                }
+            }
+
             Event::Key(key) => {
                 // Ctrl+C は常に終了
                 if key.modifiers.contains(KeyModifiers::CONTROL)
@@ -177,6 +227,49 @@ fn try_submit(listen: bool, addr_or_port: &str, secret: &str) -> Result<OnlineCo
         mode,
         secret: secret.as_bytes().to_vec(),
     })
+}
+
+// ─── レイアウト計算（描画とヒットテストで共用） ─────────────────────────────────
+
+/// メニュー項目 4 つの Rect を返す（render_menu と同じ計算）
+fn menu_item_rects(area: Rect) -> [Rect; 4] {
+    let box_area = centered_rect(46, 12, area);
+    let inner = Block::default().borders(Borders::ALL).inner(box_area);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+    [chunks[1], chunks[2], chunks[3], chunks[5]]
+}
+
+/// フォームの入力フィールド 2 つの Rect を返す（render_form と同じ計算）
+fn form_field_rects(area: Rect) -> (Rect, Rect) {
+    let box_area = centered_rect(52, 11, area);
+    let inner = Block::default().borders(Borders::ALL).inner(box_area);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+    (chunks[2], chunks[5])
 }
 
 // ─── 描画 ────────────────────────────────────────────────────────────────────

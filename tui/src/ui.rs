@@ -65,16 +65,24 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         app.click_areas.promote_no  = Some(Rect::new(ix + half, btn_y, iw - half, 1));
     }
 
-    // ゲームオーバーポップアップのボタン行（inner rows 3/4/5）
+    // ゲームオーバーポップアップのボタン行
     if let Phase::GameOver(_) = &app.phase {
         let pw = 44u16.min(area.width.saturating_sub(4));
-        let pp = centered_rect(pw, 8, area);
-        let ix = pp.x + 1;
-        let iy = pp.y + 1;
-        let iw = pp.width.saturating_sub(2);
-        app.click_areas.gameover_undo = Some(Rect::new(ix, iy + 3, iw, 1));
-        app.click_areas.gameover_new  = Some(Rect::new(ix, iy + 4, iw, 1));
-        app.click_areas.gameover_quit = Some(Rect::new(ix, iy + 5, iw, 1));
+        if app.online_status.is_some() {
+            // オンライン: h=6、[q] のみ（inner row 3）
+            let pp = centered_rect(pw, 6, area);
+            let ix = pp.x + 1; let iy = pp.y + 1; let iw = pp.width.saturating_sub(2);
+            app.click_areas.gameover_undo = None;
+            app.click_areas.gameover_new  = None;
+            app.click_areas.gameover_quit = Some(Rect::new(ix, iy + 3, iw, 1));
+        } else {
+            // ローカル: h=8、[u]/[n]/[q]（inner rows 3/4/5）
+            let pp = centered_rect(pw, 8, area);
+            let ix = pp.x + 1; let iy = pp.y + 1; let iw = pp.width.saturating_sub(2);
+            app.click_areas.gameover_undo = Some(Rect::new(ix, iy + 3, iw, 1));
+            app.click_areas.gameover_new  = Some(Rect::new(ix, iy + 4, iw, 1));
+            app.click_areas.gameover_quit = Some(Rect::new(ix, iy + 5, iw, 1));
+        }
     }
 
     // 駒台の持ち駒領域（"先手持駒: " 等の接頭辞 10 cols の直後から各駒を配置）

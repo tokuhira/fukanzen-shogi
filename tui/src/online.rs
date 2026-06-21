@@ -260,7 +260,9 @@ pub fn run_online(
                     input::handle_key(k, &mut app);
                 }
                 Event::Mouse(m) => {
-                    input::handle_mouse(m, &mut app);
+                    if input::handle_mouse(m, &mut app) {
+                        return Ok(());
+                    }
                 }
                 Event::Resize(_, _) => {}
                 _ => {}
