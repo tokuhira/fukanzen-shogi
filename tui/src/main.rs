@@ -16,6 +16,7 @@ mod app;
 mod input;
 mod net;
 mod online;
+mod portal;
 mod ui;
 
 use app::App;
@@ -60,11 +61,23 @@ fn restore_terminal() -> io::Result<()> {
 fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> io::Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
+    // コマンドライン引数がある場合はポータルをスキップして直接起動（後方互換）
     if let Some(config) = parse_online_args(&args) {
-        online::run_online(terminal, config)
-    } else {
-        let mut app = App::new();
-        run_local(terminal, &mut app)
+        return online::run_online(terminal, config);
+    }
+
+    // ポータルメニュー — ゲーム終了後もここへ戻る
+    loop {
+        match portal::run_portal(terminal)? {
+            portal::PortalResult::Local => {
+                let mut app = App::new();
+                run_local(terminal, &mut app)?;
+            }
+            portal::PortalResult::Online(config) => {
+                online::run_online(terminal, config)?;
+            }
+            portal::PortalResult::Quit => return Ok(()),
+        }
     }
 }
 
