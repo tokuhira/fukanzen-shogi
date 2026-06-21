@@ -155,13 +155,16 @@ pub fn run_online(
         }
 
         if let OnlinePhase::Aborted(_reason) = &online_phase {
-            // ゲーム終了 (アボート) — Q で抜ける
             if event::poll(Duration::from_millis(200))? {
-                if let Event::Key(k) = event::read()? {
-                    use crossterm::event::KeyCode;
-                    if k.code == KeyCode::Char('q') || k.code == KeyCode::Char('Q') {
-                        break;
+                match event::read()? {
+                    Event::Key(k) => {
+                        use crossterm::event::KeyCode;
+                        if k.code == KeyCode::Char('q') || k.code == KeyCode::Char('Q') {
+                            break;
+                        }
                     }
+                    Event::Mouse(m) => { if input::handle_mouse(m, &mut app) { break; } }
+                    _ => {}
                 }
             }
             continue;
@@ -170,11 +173,15 @@ pub fn run_online(
         // ── ゲームオーバー ────────────────────────────────────────────────
         if let Phase::GameOver(_) = &app.phase {
             if event::poll(Duration::from_millis(200))? {
-                if let Event::Key(k) = event::read()? {
-                    use crossterm::event::KeyCode;
-                    if k.code == KeyCode::Char('q') || k.code == KeyCode::Char('Q') {
-                        break;
+                match event::read()? {
+                    Event::Key(k) => {
+                        use crossterm::event::KeyCode;
+                        if k.code == KeyCode::Char('q') || k.code == KeyCode::Char('Q') {
+                            break;
+                        }
                     }
+                    Event::Mouse(m) => { if input::handle_mouse(m, &mut app) { break; } }
+                    _ => {}
                 }
             }
             continue;
