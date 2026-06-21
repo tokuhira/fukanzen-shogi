@@ -1,0 +1,23 @@
+name: Windows Build
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        run: rustup default stable
+
+      - name: Build TUI (release, x86_64-pc-windows-msvc)
+        run: cargo build --release -p fukanzen-shogi-tui --bin fukanzen-shogi-tui --target x86_64-pc-windows-msvc
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fukanzen-shogi-tui-windows-x64
+          path: target/x86_64-pc-windows-msvc/release/fukanzen-shogi-tui.exe
