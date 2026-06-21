@@ -68,8 +68,9 @@ USI notation is used throughout for moves (`7g7f`, `P*5e`, `2b3a+`). Position se
   - *Ack synchronization* — both sides must acknowledge each other's reveal before the turn advances, preventing one-move desync from message reordering.
   - Plus: reconnect identity verification (`SHA-256(password)` checked against the stored hash from the game-start handshake) and move-history recovery (kifu position hashes are scanned to find the matching resume point). 20 tests covering all eight properties.
 - **A TCP network layer** (`tui/src/net.rs`) — 4-byte big-endian length prefix + `serde_json` body; reader in a background thread posting to `mpsc::Receiver<NetEvent>`; the main TUI loop drains it with `try_recv` in a 50 ms poll cycle.
-- **An online game state machine** (`tui/src/online.rs`) — `OnlinePhase` tracks `WaitingMyMove → WaitingPeerCommit → WaitingPeerReveal → WaitingPeerAck`; protocol steps auto-advance (commit is sent the moment a move is confirmed; reveal is sent the moment both commits arrive; ack is sent the moment the peer reveal passes verification). Disconnect handling attempts reconnection with identity and board-hash verification.
-- **CLI flags** on the existing TUI binary — `--listen PORT` (Sente, waits for connection) and `--connect HOST:PORT` (Gote, dials out), with a shared `--secret PASSWORD` for authentication. The binary without flags continues to run in the existing local verification mode.
+- **An online game state machine** (`tui/src/online.rs`) — `OnlinePhase` tracks `WaitingMyMove → WaitingPeerCommit → WaitingPeerReveal → WaitingPeerAck`; protocol steps auto-advance (commit is sent the moment a move is confirmed; reveal is sent the moment both commits arrive; ack is sent the moment the peer reveal passes verification). The current connection state and protocol phase are shown live in the status bar. On TCP disconnect, reconnection runs non-blocking in a background thread (the Connect side retries every 500 ms for up to 60 seconds); a four-second success banner appears on reconnect, and if the in-progress move was rolled back the user is notified to re-enter it.
+- **A portal menu** — the TUI launched without CLI flags shows a mode-selection screen: single-player verification desk, online battle as Sente (Listen), online battle as Gote (Connect), or quit. The online form accepts the port or host:port address and the shared password; from the second game onward the previous values are pre-filled, with automatic adjustment when switching sides (Connect→Listen extracts the port number; Listen→Connect reuses the last known address). An interactive terminal is required; launching via pipe or redirect is rejected at startup.
+- **CLI flags** — `--listen PORT` (Sente) and `--connect HOST:PORT` (Gote), with `--secret PASSWORD`, bypass the portal and start online play directly. This mode is retained for scripted or automated setups.
 
 The `protocol/` crate has no dependency on `net.rs` or the TUI; it receives nonces as arguments so tests are fully deterministic. The engine crate remains untouched.
 
@@ -146,8 +147,9 @@ The engine is designed from the start so that all of the above are *shells* arou
   - *Ack 同期* — 両者が互いのリビールを確認し合うまでターンを進めない（メッセージ順序差によるデシンクを防止）
   - さらに再接続時の本人認証（対局開始時に交換した `SHA-256(パスワード)` との照合）と棋譜ハッシュ照合による再開点特定（RecoverySession）も実装済み。
 - **TCP 通信殻**（`tui/src/net.rs`）— 4 バイト big-endian 長さプレフィックス + serde_json ボディ。受信スレッドが `mpsc::Sender<NetEvent>` へ送り、TUI メインループが 50 ms ポーリングで `try_recv` する。
-- **オンライン状態機械**（`tui/src/online.rs`）— `OnlinePhase`（着手入力中 → コミット待ち → リビール待ち → Ack 待ち）を管理。プロトコルは自動進行（着手確定でコミット送信・両者コミットでリビール送信・リビール検証後に Ack 送信）。切断時は再接続と身元確認を試みる。
-- **CLI フラグ**（既存 TUI バイナリに追加）— `--listen PORT`（先手・待ち受け）と `--connect HOST:PORT`（後手・接続）、共有パスワードは `--secret PASSWORD`。フラグなしでは従来のローカル検証モードで起動する。
+- **オンライン状態機械**（`tui/src/online.rs`）— `OnlinePhase`（着手入力中 → コミット待ち → リビール待ち → Ack 待ち）を管理。プロトコルは自動進行（着手確定でコミット送信・両者コミットでリビール送信・リビール検証後に Ack 送信）。接続状態とプロトコルフェーズはステータスバーにリアルタイム表示される。TCP 切断時はバックグラウンドスレッドで非ブロッキング再接続を実行（Connect 側は 500 ms 間隔で最大 60 秒リトライ）。再接続成功時は 4 秒間のバナーを表示し、着手がロールバックされた場合はその旨を通知して再入力を促す。
+- **ポータルメニュー** — CLI フラグなしで起動すると、単体検証卓・先手（待ち受け）・後手（接続）・終了を選ぶポータルメニューを表示する。通信対戦フォームではポート番号またはアドレスと共有パスワードを入力でき、二局目以降は前回の入力値をデフォルトとして引き継ぐ（先後逆の場合はポート番号を自動調整）。インタラクティブ端末が必須であり、パイプやリダイレクト経由での起動は起動時に弾かれる。
+- **CLI フラグ** — `--listen PORT`（先手）と `--connect HOST:PORT`（後手）、`--secret PASSWORD` を渡すとポータルを経由せず直接対局を開始する。スクリプトや自動化用途向けに引き続きサポート。
 
 `protocol/` クレートは `net.rs` や TUI への依存を持たない。ノンスを引数で受け取るため、すべてのテストが決定的に実行できる。エンジンクレートは無改変のまま。
 
@@ -175,7 +177,7 @@ The engine is designed from the start so that all of the above are *shells* arou
 
 ## Build & Run
 
-**Requirements:** Rust stable (edition 2021+), Cargo.
+**Requirements:** Rust stable (edition 2021+), Cargo. An interactive terminal is required for the TUI (pipe/redirect launches are rejected).
 
 ```sh
 # Build all crates
@@ -187,17 +189,23 @@ cargo test
 # Run the verification CLI (text I/O, machine-readable)
 cargo run --bin fukanzen-shogi
 
-# Run the TUI verification desk — local mode (full-screen, interactive)
+# Run the TUI — shows the portal menu (select single-player or online mode)
 cargo run --bin fukanzen-shogi-tui
 
-# Online battle — Sente side (listen on port 8765, shared password "mypass")
+# Online battle — Sente side (direct launch, bypasses portal)
 cargo run --bin fukanzen-shogi-tui -- --listen 8765 --secret mypass
 
-# Online battle — Gote side (connect to Sente's machine, same password)
+# Online battle — Gote side (direct launch, bypasses portal)
 cargo run --bin fukanzen-shogi-tui -- --connect 192.168.1.10:8765 --secret mypass
 ```
 
-In online mode both players enter their move on their own machine in the usual way. The commit-reveal-ack exchange happens automatically: the commit is sent the moment you confirm a move, the reveal is sent when both commits arrive, and the ack is sent once the peer's reveal passes verification. The turn resolves on both screens simultaneously after both acks are exchanged.
+**Portal menu** — the no-argument launch opens a menu where you choose single-player verification desk, Sente (Listen), or Gote (Connect). The online form lets you enter the port or address and shared password; after the first game the previous values are pre-filled. When the game ends you return to the portal automatically to start a new one without restarting the binary.
+
+**Direct launch** — passing `--listen` / `--connect` + `--secret` skips the portal and starts an online game immediately, behaving as in earlier releases.
+
+In online mode the commit-reveal-ack exchange is fully automatic: the commit is sent the moment you confirm a move, the reveal is sent when both commits arrive, and the ack is sent once the peer's reveal passes verification. The turn resolves on both screens simultaneously. On disconnect, the Connect side retries for up to 60 seconds in the background; a success banner is displayed and any rolled-back move is flagged for re-entry.
+
+**Pre-built Windows binary** — each push triggers a GitHub Actions workflow that cross-compiles `fukanzen-shogi-tui.exe` for `x86_64-pc-windows-msvc` and uploads it as a build artifact. No Rust toolchain is needed to play on Windows.
 
 ### TUI key bindings
 
@@ -220,7 +228,9 @@ In online mode both players enter their move on their own machine in the usual w
 | `?` | Toggle help overlay |
 | `q` | Quit |
 
-Mouse clicks are supported throughout: board squares, hand-piece areas, the promotion dialog (成る / 成らない), the resolve button, and the game-over popup buttons are all clickable. Clicking a selected piece again deselects it.
+Keys `u` (undo / cancel input), `n` (new game), `s`/`l` (save/load), `r` (resign), `f`, and `m` apply to the single-player verification desk. In online mode, `q` at the game-over or aborted screen returns to the portal.
+
+Mouse clicks are supported throughout: portal menu items, online connection form fields, board squares, hand-piece areas, the promotion dialog (成る / 成らない), the resolve button, and the game-over popup buttons are all clickable. Clicking a selected piece again deselects it.
 
 ### CLI usage
 
