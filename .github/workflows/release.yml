@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Rust
+        run: rustup default stable
+
+      # Cargo.toml の version とタグが一致することを保証する番人。
+      # 不一致ならここで失敗し、リリースは作成されない。
+      - name: Verify tag matches Cargo.toml version
+        shell: bash
+        run: |
+          TAG_VER="${GITHUB_REF_NAME#v}"
+          CARGO_VER=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          echo "Tag version  : ${TAG_VER}"
+          echo "Cargo version: ${CARGO_VER}"
+          if [ "${TAG_VER}" != "${CARGO_VER}" ]; then
+            echo "ERROR: タグ (${TAG_VER}) と Cargo.toml の version (${CARGO_VER}) が一致しません。"
+            exit 1
+          fi
+
+      - name: Build TUI (release, x86_64-pc-windows-msvc)
+        run: cargo build --release -p fukanzen-shogi-tui --bin fukanzen-shogi-tui --target x86_64-pc-windows-msvc
+
+      - name: Rename artifact with version
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          cp target/x86_64-pc-windows-msvc/release/fukanzen-shogi-tui.exe \
+             "fukanzen-shogi-tui-${VERSION}-windows-x64.exe"
+
+      - name: Create GitHub Release and upload binary
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          NOTES="Windows (x64) 向けビルド済みバイナリです。ダウンロードして CMD または PowerShell から実行してください。
+
+          バイナリ版確認: fukanzen-shogi-tui.exe --version"
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "不完全将棋 ${GITHUB_REF_NAME}" \
+            --notes "${NOTES}" \
+            "fukanzen-shogi-tui-${VERSION}-windows-x64.exe"

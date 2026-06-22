@@ -1,9 +1,12 @@
 /// 不完全将棋 TUI（第三段階: 通信秘匿対戦対応）
 ///
-/// 引数なし          → ローカル検証モード（先後を1人が操作）
-/// --listen PORT      → 先手として PORT で接続待ち
-/// --connect ADDR     → 後手として ADDR (host:port) へ接続
+/// 引数なし          → ポータルメニュー（モード選択）
+/// --version / -V    → バイナリ版を表示して終了
+/// --listen PORT      → 先手として PORT で接続待ち（ポータルをバイパス）
+/// --connect ADDR     → 後手として ADDR (host:port) へ接続（ポータルをバイパス）
 /// --secret SECRET    → 共有パスワード（通信モード時に必須）
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 use std::io::{self, IsTerminal, Stdout};
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event},
@@ -23,6 +26,13 @@ use app::App;
 use online::{ConnectMode, OnlineConfig};
 
 fn main() -> io::Result<()> {
+    // --version / -V は TUI 初期化より前に処理し、非対話でも動くようにする
+    let raw_args: Vec<String> = std::env::args().collect();
+    if raw_args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("fukanzen-shogi-tui {}", VERSION);
+        return Ok(());
+    }
+
     // インタラクティブ端末専用
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         eprintln!("エラー: インタラクティブな端末が必要です。パイプやリダイレクト経由での実行はできません。");

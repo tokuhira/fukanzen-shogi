@@ -318,8 +318,9 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
 fn render_menu(f: &mut Frame, selected: usize) {
     let area = centered_rect(46, 12, f.area());
 
+    let title = format!(" 不完全将棋 v{} ", crate::VERSION);
     let block = Block::default()
-        .title(" 不完全将棋 ")
+        .title(title)
         .title_alignment(Alignment::Center)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
