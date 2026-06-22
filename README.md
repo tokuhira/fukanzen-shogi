@@ -66,7 +66,8 @@ USI notation is used throughout for moves (`7g7f`, `P*5e`, `2b3a+`). Position se
   - *Order* — a reveal is rejected unless both commits have been received, preventing "second-look" cheating.
   - *Board-hash verification* — each reveal includes `SHA-256(canonical_bytes(position))`; a mismatch aborts the game rather than silently producing divergent boards.
   - *Ack synchronization* — both sides must acknowledge each other's reveal before the turn advances, preventing one-move desync from message reordering.
-  - Plus: reconnect identity verification (`SHA-256(password)` checked against the stored hash from the game-start handshake) and move-history recovery (kifu position hashes are scanned to find the matching resume point). 20 tests covering all eight properties.
+  - Plus: reconnect identity verification (`SHA-256(password)` checked against the stored hash from the game-start handshake) and move-history recovery (kifu position hashes are scanned to find the matching resume point). 28 tests covering all nine properties.
+  - *Version negotiation* (v0.6.0) — immediately after TCP connection, both sides exchange `(rule_version, protocol_version)` tuples; a mismatch causes an immediate abort with a descriptive message before any game state is shared. Clients older than v0.6.0 are incompatible.
 - **A TCP network layer** (`tui/src/net.rs`) — 4-byte big-endian length prefix + `serde_json` body; reader in a background thread posting to `mpsc::Receiver<NetEvent>`; the main TUI loop drains it with `try_recv` in a 50 ms poll cycle.
 - **An online game state machine** (`tui/src/online.rs`) — `OnlinePhase` tracks `WaitingMyMove → WaitingPeerCommit → WaitingPeerReveal → WaitingPeerAck`; protocol steps auto-advance (commit is sent the moment a move is confirmed; reveal is sent the moment both commits arrive; ack is sent the moment the peer reveal passes verification). The current connection state and protocol phase are shown live in the status bar. On TCP disconnect, reconnection runs non-blocking in a background thread (the Connect side retries every 500 ms for up to 60 seconds); a four-second success banner appears on reconnect, and if the in-progress move was rolled back the user is notified to re-enter it.
 - **A portal menu** — the TUI launched without CLI flags shows a mode-selection screen: single-player verification desk, online battle as Sente (Listen), online battle as Gote (Connect), or quit. The online form accepts the port or host:port address and the shared password; from the second game onward the previous values are pre-filled, with automatic adjustment when switching sides (Connect→Listen extracts the port number; Listen→Connect reuses the last known address). An interactive terminal is required; launching via pipe or redirect is rejected at startup.
@@ -139,13 +140,14 @@ The engine is designed from the start so that all of the above are *shells* arou
 
 **Phase3 — TCP 通信秘匿対戦** の成果物:
 
-- **純粋プロトコルクレート**（`protocol/`）— I/O・乱数なし。commit-reveal-ack プロトコルを状態機械として実装し、5 つの暗号的性質を 20 本のテストで保証する:
+- **純粋プロトコルクレート**（`protocol/`）— I/O・乱数なし。commit-reveal-ack プロトコルを状態機械として実装し、9 つの性質を 28 本のテストで保証する:
   - *拘束性* — SHA-256(着手 USI || ノンス) によりコミット後に着手を変更できない
   - *秘匿性* — ノンスが毎回異なるため、同一の着手でもコミット値は別物になる
   - *順序* — 両者のコミットが揃うまでリビールを受理しない（後出し禁止）
   - *盤面ハッシュ相互検証* — 各リビールに `SHA-256(canonical_bytes(局面))` を含め、不一致はアボートにより即時処理
   - *Ack 同期* — 両者が互いのリビールを確認し合うまでターンを進めない（メッセージ順序差によるデシンクを防止）
   - さらに再接続時の本人認証（対局開始時に交換した `SHA-256(パスワード)` との照合）と棋譜ハッシュ照合による再開点特定（RecoverySession）も実装済み。
+  - *バージョン交渉*（v0.6.0）— TCP 接続直後に双方が `(ルール版, プロトコル版)` タプルを交換し、不一致を即座にアボートとして検出する。v0.6.0 より前のクライアントとは互換性がない。
 - **TCP 通信殻**（`tui/src/net.rs`）— 4 バイト big-endian 長さプレフィックス + serde_json ボディ。受信スレッドが `mpsc::Sender<NetEvent>` へ送り、TUI メインループが 50 ms ポーリングで `try_recv` する。
 - **オンライン状態機械**（`tui/src/online.rs`）— `OnlinePhase`（着手入力中 → コミット待ち → リビール待ち → Ack 待ち）を管理。プロトコルは自動進行（着手確定でコミット送信・両者コミットでリビール送信・リビール検証後に Ack 送信）。接続状態とプロトコルフェーズはステータスバーにリアルタイム表示される。TCP 切断時はバックグラウンドスレッドで非ブロッキング再接続を実行（Connect 側は 500 ms 間隔で最大 60 秒リトライ）。再接続成功時は 4 秒間のバナーを表示し、着手がロールバックされた場合はその旨を通知して再入力を促す。
 - **ポータルメニュー** — CLI フラグなしで起動すると、単体検証卓・先手（待ち受け）・後手（接続）・終了を選ぶポータルメニューを表示する。通信対戦フォームではポート番号またはアドレスと共有パスワードを入力でき、二局目以降は前回の入力値をデフォルトとして引き継ぐ（先後逆の場合はポート番号を自動調整）。インタラクティブ端末が必須であり、パイプやリダイレクト経由での起動は起動時に弾かれる。
@@ -183,7 +185,7 @@ The engine is designed from the start so that all of the above are *shells* arou
 # Build all crates
 cargo build
 
-# Run all tests (engine: 37 tests, protocol: 20 tests)
+# Run all tests (engine: 37 tests, protocol: 28 tests)
 cargo test
 
 # Run the verification CLI (text I/O, machine-readable)
