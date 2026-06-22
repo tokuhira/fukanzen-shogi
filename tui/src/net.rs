@@ -60,6 +60,12 @@ pub enum NetMessage {
         /// 申告する現局面ハッシュ
         resume_hash: String,
     },
+    /// 接続直後のバージョン交渉（ハンドシェイク第一関門）
+    VersionHello {
+        rule_major: u32,
+        rule_minor: u32,
+        protocol:   u32,
+    },
     /// プロトコル違反・ハッシュ不一致によるアボート
     Abort {
         reason: String,
@@ -84,6 +90,21 @@ pub struct Connection {
     pub events: Receiver<NetEvent>,
 }
 
+// ─── トランスポート共通: バージョン交渉エラー ─────────────────────────────────
+
+/// 版交渉の失敗を表す型（殻側のラッパー）
+#[derive(Debug)]
+pub enum NegotiationError {
+    /// 版の不一致・不正応答・タイムアウト（protocol クレートの純粋判定結果）
+    Negotiation(protocol::NegotiationOutcome),
+    /// 送受信中の IO エラー
+    Io(std::io::Error),
+}
+
+impl From<std::io::Error> for NegotiationError {
+    fn from(e: std::io::Error) -> Self { NegotiationError::Io(e) }
+}
+
 // ─── TCP 固有: 接続確立 ───────────────────────────────────────────────────────
 
 impl Connection {
@@ -105,6 +126,42 @@ impl Connection {
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || reader_loop(reader, tx));
         Ok(Self { stream, events: rx })
+    }
+
+    /// 版交渉を実行する（ハンドシェイクの第一関門）。
+    ///
+    /// 自分の版を送り、相手の版を受け取って完全一致を確認する。
+    /// タイムアウトの計時はここ（殻）、判定は `protocol::negotiate_versions`（純粋）。
+    /// 成功すると `VersionCleared` を返し、呼び出し側は認証フェーズへ進める。
+    pub fn perform_version_negotiation(
+        &mut self,
+    ) -> Result<protocol::VersionCleared, NegotiationError> {
+        use std::time::Duration;
+        use protocol::{negotiate_versions, PeerVersionResponse, VersionTuple, MY_VERSION};
+
+        let mine = MY_VERSION;
+
+        // [transport-agnostic] 自分の版を送信
+        self.send(&NetMessage::VersionHello {
+            rule_major: mine.rule.0,
+            rule_minor: mine.rule.1,
+            protocol:   mine.protocol,
+        })?;
+
+        // [transport-agnostic] 相手の版を受信（10 秒タイムアウト）
+        let peer = match self.events.recv_timeout(Duration::from_secs(10)) {
+            Ok(NetEvent::Message(NetMessage::VersionHello { rule_major, rule_minor, protocol })) => {
+                PeerVersionResponse::Version(VersionTuple {
+                    rule: (rule_major, rule_minor),
+                    protocol,
+                })
+            }
+            Ok(_) => PeerVersionResponse::Invalid,   // 別メッセージ or 切断
+            Err(_) => PeerVersionResponse::Timeout,  // タイムアウト or チャネル閉鎖
+        };
+
+        negotiate_versions(&mine, peer)
+            .map_err(NegotiationError::Negotiation)
     }
 
     /// メッセージを1つ送信する（公開 API はトランスポート共通）

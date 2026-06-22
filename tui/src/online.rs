@@ -20,7 +20,7 @@ use protocol::{
 use crate::app::{App, OnlineProtocolPhase, OnlineStatus, Phase};
 use crate::input;
 use crate::net::{
-    self, Connection, NetEvent, NetMessage,
+    self, Connection, NegotiationError, NetEvent, NetMessage,
     board_hash_from_hex, board_hash_to_hex,
     commitment_from_hex, commitment_to_hex,
     nonce_from_hex, nonce_to_hex,
@@ -82,18 +82,25 @@ pub fn run_online(
         ConnectMode::Connect(addr) => Connection::connect(addr)?,
     };
 
-    // ── ハンドシェイク ──────────────────────────────────────────────────────
-    let secret_hash = hash_secret(&config.secret);
-    let my_side_u8 = match config.local_side { Side::Sente => 0u8, Side::Gote => 1u8 };
+    // ── バージョン交渉（ハンドシェイク第一関門、認証より前）──────────────────
+    let version_err: Option<String> = conn.perform_version_negotiation()
+        .err()
+        .map(|e| format_negotiation_error(&e));
 
-    conn.send(&NetMessage::GameStart {
-        side: my_side_u8,
-        secret_hash: net::to_hex(&secret_hash.0),
-    })?;
+    // ── 認証・ハンドシェイク（版交渉通過後のみ実行）──────────────────────────
+    let peer_secret_hash: Option<SecretHash> = if version_err.is_none() {
+        let secret_hash = hash_secret(&config.secret);
+        let my_side_u8 = match config.local_side { Side::Sente => 0u8, Side::Gote => 1u8 };
+        conn.send(&NetMessage::GameStart {
+            side: my_side_u8,
+            secret_hash: net::to_hex(&secret_hash.0),
+        })?;
+        Some(wait_game_start(&mut conn)?)
+    } else {
+        None
+    };
 
-    let peer_secret_hash = wait_game_start(&mut conn)?;
-
-    // ── 対局 ───────────────────────────────────────────────────────────────
+    // ── 対局準備 ────────────────────────────────────────────────────────────
     let mut app = App::new();
     // 後手側はカーソルを段 1 から開始
     if config.local_side == Side::Gote {
@@ -101,10 +108,15 @@ pub fn run_online(
         app.cursor_rank = 1;
         app.cursor_file = 5;
     }
-    app.message = format!("{}接続完了 — 着手を入力してください",
-        if config.local_side == Side::Sente { "先手: " } else { "後手: " });
 
-    let mut online_phase = OnlinePhase::WaitingMyMove;
+    let mut online_phase = if let Some(ref msg) = version_err {
+        app.message = format!("{} — [q] でポータルへ戻る", msg);
+        OnlinePhase::Aborted(msg.clone())
+    } else {
+        app.message = format!("{}接続完了 — 着手を入力してください",
+            if config.local_side == Side::Sente { "先手: " } else { "後手: " });
+        OnlinePhase::WaitingMyMove
+    };
     let mut turn_session: Option<TurnSession> = None;
     let mut pending_peer_commit: Option<protocol::Commitment> = None;
     let mut kifu = Kifu::new(Position::initial());
@@ -113,8 +125,8 @@ pub fn run_online(
     // 切断時点で着手が確定済みだったか（再接続後のロールバック通知に使う）
     let mut move_rolled_back = false;
 
-    // 初期状態を online_status に反映
-    sync_online_status(&mut app, &online_phase, config.local_side, true);
+    // 初期状態を online_status に反映（版交渉失敗時は切断扱い）
+    sync_online_status(&mut app, &online_phase, config.local_side, version_err.is_none());
 
     loop {
         // ── 描画（online_status は sync_online_status で常に最新） ────────
@@ -213,7 +225,9 @@ pub fn run_online(
                         // バックグラウンドで再接続（TUI はブロックしない）
                         let config2 = config.clone();
                         let kifu2 = kifu.clone();
-                        let peer_hash2 = peer_secret_hash;
+                        // 版交渉+認証を通過した場合のみ Disconnected に到達するため unwrap は安全
+                        let peer_hash2 = peer_secret_hash
+                            .expect("reconnect path requires successful version negotiation and auth");
                         let (tx, rx) = std::sync::mpsc::channel::<ReconnectEvent>();
                         reconnect_rx = Some(rx);
                         std::thread::spawn(move || {
@@ -441,9 +455,10 @@ fn handle_net_message(
             return Err(format!("相手がアボート: {}", reason));
         }
 
-        // GameStart / Reconnect はここには来ない（接続時に処理済み）
+        // GameStart / Reconnect / VersionHello はここには来ない（接続時に処理済み）
         NetMessage::GameStart { .. } => {}
         NetMessage::Reconnect { .. } => {}
+        NetMessage::VersionHello { .. } => {}
     }
     Ok(())
 }
@@ -536,6 +551,41 @@ fn reconnect(
             return Ok(conn);
         }
         std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+// ─── バージョン交渉エラーの整形 ──────────────────────────────────────────────
+
+fn format_negotiation_error(err: &NegotiationError) -> String {
+    use protocol::NegotiationOutcome;
+    match err {
+        NegotiationError::Negotiation(NegotiationOutcome::Incompatible {
+            mine, theirs, rule_mismatch, protocol_mismatch,
+        }) => {
+            let mut parts = Vec::new();
+            if *rule_mismatch {
+                parts.push(format!(
+                    "ルール版: 自分 {}.{} ≠ 相手 {}.{}",
+                    mine.rule.0, mine.rule.1, theirs.rule.0, theirs.rule.1
+                ));
+            }
+            if *protocol_mismatch {
+                parts.push(format!(
+                    "プロトコル版: 自分 {} ≠ 相手 {}",
+                    mine.protocol, theirs.protocol
+                ));
+            }
+            format!("版が異なるため対戦できません。{}", parts.join("、"))
+        }
+        NegotiationError::Negotiation(NegotiationOutcome::InvalidResponse) => {
+            "版交渉: 相手の応答が不正です。互換性のない版の可能性があります。".to_string()
+        }
+        NegotiationError::Negotiation(NegotiationOutcome::Timeout) => {
+            "版交渉: 相手が応答しませんでした。版交渉に対応していない版（v0.5.0 以前）の可能性があります。".to_string()
+        }
+        NegotiationError::Io(e) => {
+            format!("版交渉中に通信エラー: {}", e)
+        }
     }
 }
 
