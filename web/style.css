@@ -1,0 +1,101 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: #e8e4d8;
+  font-family: 'Noto Serif JP', '游明朝', 'Hiragino Mincho ProN', Georgia, serif;
+  color: #1a1a1a;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  padding: 28px 12px 40px;
+}
+
+#container {
+  width: 100%;
+  max-width: 440px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+h1 {
+  font-size: 1.25rem;
+  font-weight: normal;
+  letter-spacing: 0.25em;
+  color: #1a1a1a;
+  margin-bottom: 4px;
+}
+
+#phase-label {
+  font-size: 0.75rem;
+  color: #999;
+  letter-spacing: 0.12em;
+  min-height: 1.1em;
+}
+
+#move-display {
+  font-size: 1rem;
+  letter-spacing: 0.06em;
+  min-height: 1.6em;
+  color: #1a1a1a;
+}
+
+#event-label {
+  font-size: 0.78rem;
+  color: #aaa;
+  letter-spacing: 0.1em;
+  min-height: 1.1em;
+}
+
+#board-wrap {
+  width: 100%;
+}
+
+#board {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+#controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  margin-top: 4px;
+}
+
+#controls button {
+  background: none;
+  border: 1px solid #bbb;
+  color: #666;
+  padding: 6px 20px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  letter-spacing: 0.06em;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+#controls button:hover:not(:disabled) {
+  border-color: #1a1a1a;
+  color: #1a1a1a;
+}
+
+#controls button:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+#step-label {
+  font-size: 0.8rem;
+  color: #aaa;
+  min-width: 44px;
+  text-align: center;
+  letter-spacing: 0.04em;
+}

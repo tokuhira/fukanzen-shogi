@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>不完全将棋 — 棋譜再生</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="container">
+    <h1>不完全将棋</h1>
+    <p id="phase-label"></p>
+    <p id="move-display"></p>
+    <p id="event-label"></p>
+    <div id="board-wrap">
+      <svg id="board" xmlns="http://www.w3.org/2000/svg"></svg>
+    </div>
+    <div id="controls">
+      <button id="btn-prev">← 前</button>
+      <span id="step-label"></span>
+      <button id="btn-next">次 →</button>
+    </div>
+  </div>
+  <script src="board.js"></script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+# Cloudflare Pages — 静的配信（ビルドなし、web/ をそのままデプロイ）
+# 初回認証: npx wrangler login
+# デプロイ:  npx wrangler pages deploy
+name = "fukanzen-shogi"
+pages_build_output_dir = "web"
