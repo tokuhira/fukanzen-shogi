@@ -39,7 +39,32 @@ This design rests on three structural goals:
 
 > **Open questions (spec §7):** Repetition (sennichite), continuous check, the precise reading of the pawn-drop checkmate prohibition under simultaneous commitment, and the notation for entering-king declarations are all listed as undecided in the current specification. They are *not* resolved by this implementation; placeholder behavior is marked with code comments.
 
-### This Repository — Phases 1, 2 & 3
+### Demo
+
+A live web board is available at **[fukanzen-shogi.tokuhira.net](https://fukanzen-shogi.tokuhira.net)**.
+
+Current state: kifu (game record) replay only; sumi ink style; Rust engine not yet connected. Resolved positions are pre-computed and embedded as SFEN data. The rendering layer and the rule engine are already separated at the data boundary, so engine integration requires only switching the data source.
+
+### Repository Structure
+
+**Rust workspace (core and shells):**
+
+- `engine/` — pure rule engine; zero I/O, no `async`, no RNG, no networking. Public API: `legal_actions`, `resolve`, `check_status`, serialization. The **core**.
+- `cli/` — machine-readable verification CLI (text I/O, USI notation). A stable pipe interface kept unmodified across all phases.
+- `tui/` — interactive verification desk and **network battle mode** (ratatui + crossterm). TCP shell lives in `tui/src/net.rs`.
+- `protocol/` — pure protocol logic (commit-reveal, board-hash verification, ack, identity auth, reconnect recovery, version negotiation). No I/O; fully deterministic tests.
+
+**Web frontend (static):**
+
+- `web/` — static HTML/CSS/JS board; no build step, no frameworks. Kifu replay; engine not yet connected. Deployed to Cloudflare Pages. See [web/README.md](web/README.md).
+
+**Documentation:**
+
+- `docs/` — rule specifications, implementation guides, change instructions, policy documents.
+
+> Design principle — `engine/` is the **core**; `cli/`, `tui/`, `protocol/`, and `web/` are interchangeable **shells**. The engine never gains I/O, networking, or randomness.
+
+### This Repository — Phases 1–3
 
 **Phase 1 — Rule engine + verification CLI** delivers:
 
@@ -75,12 +100,17 @@ USI notation is used throughout for moves (`7g7f`, `P*5e`, `2b3a+`). Position se
 
 The `protocol/` crate has no dependency on `net.rs` or the TUI; it receives nonces as arguments so tests are fully deterministic. The engine crate remains untouched.
 
-### Roadmap (future phases, not yet implemented)
+**Web frontend (in progress):**
 
-- **Phase 4:** CPU opponent (search + evaluation).
-- **Phase 5+:** Wasm compilation; browser-based board UI; smartphone app; multi-language engine re-implementations with cross-diffing against the Rust reference.
+- **A static board** (`web/`) — HTML/CSS/JS, no build step. Six-turn demo game in sumi ink style, kifu replay mode. The Rust engine is not yet connected; resolved positions are pre-computed and embedded as SFEN data. The data boundary between the rendering layer and the rule engine is already established; engine integration is the next step.
 
-The engine is designed from the start so that all of the above are *shells* around an unchanged core. The engine itself will never gain I/O, networking, or randomness.
+### Future directions (not yet implemented)
+
+- **CPU opponent** — search and evaluation function.
+- **Web engine integration** — Wasm compilation of the engine; hot-seat and secret online play in the browser. The data boundary between rendering and rules is already in place in `web/`.
+- **Broader reach** — smartphone app; multi-language engine re-implementations with cross-diffing against the Rust reference; spectator streaming.
+
+The engine is designed so that all of the above are *shells* around an unchanged core. The engine itself will never gain I/O, networking, or randomness.
 
 ---
 
@@ -119,6 +149,31 @@ The engine is designed from the start so that all of the above are *shells* arou
 
 > **未確定事項（仕様書 §7）:** 千日手の成立時の扱い、連続王手の千日手の読み替え、打ち歩詰めの厳密な再形式化、入玉宣言法の読み替えはいずれも未確定です。本実装ではこれらを勝手に確定させず、暫定処理とコードコメントによる印として引き継いでいます。
 
+### デモ
+
+Web 盤を公開しています: **[fukanzen-shogi.tokuhira.net](https://fukanzen-shogi.tokuhira.net)**
+
+現状は棋譜再生のみ・水墨様式・Rust エンジン未接続です。解決後局面は事前計算済みの SFEN データとして埋め込まれています。描画層とルールエンジンはデータの境界で既に分離されており、エンジン接続は「データの供給元を切り替えるだけ」で実現できる構造です。
+
+### リポジトリ構成
+
+**Rust ワークスペース（核と殻）:**
+
+- `engine/` — 純粋なルールエンジン。I/O・非同期・乱数・ネットワーク依存なし。公開 API は `legal_actions`・`resolve`・`check_status` と直列化関数群。**核**。
+- `cli/` — 機械可読の検証 CLI（テキスト入出力、USI 記法）。以後の段階でも無改変で温存する安定した口。
+- `tui/` — 対話的検証卓と**ネットワーク対戦モード**（ratatui + crossterm）。TCP の殻は `tui/src/net.rs`。
+- `protocol/` — 通信プロトコルの純粋論理（commit-reveal・盤面ハッシュ検証・Ack・本人認証・中断救済・バージョン交渉）。I/O なし、全テスト決定的。
+
+**Web フロントエンド（静的）:**
+
+- `web/` — 静的 HTML/CSS/JS 盤。ビルド不要、フレームワーク不要。棋譜再生のみ、エンジン未接続。Cloudflare Pages で配信。[web/README.md](web/README.md) を参照。
+
+**ドキュメント:**
+
+- `docs/` — ルール仕様・実装指示書・変更指示・方針文書。
+
+> 設計哲学「共通の核と交換可能な殻」: `engine/` が核であり、`cli/`・`tui/`・`protocol/`・`web/` はすべて核を包む交換可能な殻。エンジン本体にはいかなる I/O も追加しない。
+
 ### このリポジトリ — Phase1・Phase2・Phase3
 
 **Phase1 — ルールエンジン＋検証用 CLI** の成果物:
@@ -155,10 +210,15 @@ The engine is designed from the start so that all of the above are *shells* arou
 
 `protocol/` クレートは `net.rs` や TUI への依存を持たない。ノンスを引数で受け取るため、すべてのテストが決定的に実行できる。エンジンクレートは無改変のまま。
 
+**Web フロントエンド（進行中）:**
+
+- **静的盤**（`web/`）— HTML/CSS/JS、ビルド不要。6 組手デモ局を水墨様式で棋譜再生。Rust エンジンは未接続。解決後局面は SFEN データとして事前計算済み。描画層とルールエンジンの境界はすでに確立されており、エンジン接続が次の段階。
+
 ### 今後の計画（未実装）
 
-- **Phase4:** CPU 対戦（探索・評価関数）。
-- **Phase5以降:** Wasm 化・ブラウザ UI・スマートフォンアプリ・多言語実装と差分テスト。
+- **CPU 対戦** — 探索・評価関数。
+- **Web エンジン接続** — Rust エンジンの Wasm 化・ブラウザ上での対戦機能（ホットシート／秘匿対戦）。`web/` の描画層とルールの境界はすでに設計済み。
+- **展開拡大** — スマートフォンアプリ・多言語実装と Rust 実装に対する差分テスト・観戦配信。
 
 エンジンは「共通の核と交換可能な殻」の設計原則に基づき、これらはすべてエンジンの外側に積む予定である。エンジン本体にはいかなる I/O も追加しない。
 
@@ -166,14 +226,34 @@ The engine is designed from the start so that all of the above are *shells* arou
 
 ## Detailed Specification / 詳細仕様
 
-- [不完全将棋 ルール仕様 v0.5](docs/不完全将棋_ルール仕様_v0.5.md) — **現行仕様**。両玉スワップを相討ち引き分けとして正式に追加（§4.7 v0.5・§5.4）
+**Rule specifications / ルール仕様:**
+
+- [不完全将棋 ルール仕様 v0.5](docs/不完全将棋_ルール仕様_v0.5.md) — **現行仕様 (current)**。両玉スワップを相討ち引き分けとして正式追加（§4.7 v0.5・§5.4）
 - [不完全将棋 ルール仕様 v0.4](docs/不完全将棋_ルール仕様_v0.4.md) — 戦国無双特則（§4.7）をスワップ（4.4）と同一マス相討ち（4.3）の両方に拡張
 - [不完全将棋 ルール仕様 v0.3](docs/不完全将棋_ルール仕様_v0.3.md) — 戦国無双特則（§4.7）をスワップ限定で追加
 - [不完全将棋 ルール仕様 v0.2](docs/不完全将棋_ルール仕様_v0.2.md) — 初期局面の正本 SFEN と SFEN 手番フィールドの確定的な扱い（`b` 固定）を追記
 - [不完全将棋 ルール仕様 v0.1](docs/不完全将棋_ルール仕様_v0.1.md) — 初版ルール定義
-- [不完全将棋 実装指示書 — Phase1](docs/不完全将棋_実装指示書_Phase1.md) — Phase 1 の設計・実装指針（仕様書 v0.4 対応）
-- [不完全将棋 実装指示書 — Phase2 TUI 検証卓](docs/不完全将棋_実装指示書_Phase2_TUI検証卓.md) — Phase 2 の設計・実装指針（ratatui による TUI 検証卓）
-- [不完全将棋 実装指示書 — Phase3 TCP 通信秘匿対戦](docs/不完全将棋_実装指示書_Phase3_TCP通信秘匿対戦.md) — Phase 3 の設計・実装指針（commit-reveal-ack・TCP 通信・中断救済）
+
+**Implementation guides / 実装指示書:**
+
+- [Phase 1 — Rule engine + verification CLI](docs/不完全将棋_実装指示書_Phase1.md)
+- [Phase 2 — TUI verification desk](docs/不完全将棋_実装指示書_Phase2_TUI検証卓.md)
+- [Phase 3 — TCP secret simultaneous play](docs/不完全将棋_実装指示書_Phase3_TCP通信秘匿対戦.md)
+- [Web board — kifu replay, sumi ink style](docs/不完全将棋_実装指示書_最小Web盤_棋譜再生水墨.md)
+- [GitHub Actions — Windows build](docs/不完全将棋_実装指示書_GitHubActions_Windowsビルド.md)
+- [Version management step 1](docs/不完全将棋_実装指示書_バージョン管理Step1.md)
+- [README and document structure](docs/不完全将棋_実装指示書_READMEとドキュメント整備_改訂版.md)
+
+**Change instructions / 変更指示:**
+
+- [v0.3 — Sengoku Musou exception](docs/不完全将棋_実装変更指示_v0.3_戦国無双.md)
+- [v0.4 — Sengoku Musou extension](docs/不完全将棋_実装変更指示_v0.4_戦国無双拡張.md)
+- [v0.5 — Both-kings swap draw](docs/不完全将棋_実装変更指示_v0.5_両玉スワップ.md)
+
+**Policy and auxiliary documents / 方針・補助文書:**
+
+- [Version compatibility management](docs/不完全将棋_バージョン互換性管理_方針.md)
+- [Version negotiation protocol v0.6.0](docs/不完全将棋_実装指示書_互換性確認プロトコルv0.6.0.md)
 
 ---
 
@@ -199,7 +279,13 @@ cargo run --bin fukanzen-shogi-tui -- --listen 8765 --secret mypass
 
 # Online battle — Gote side (direct launch, bypasses portal)
 cargo run --bin fukanzen-shogi-tui -- --connect 192.168.1.10:8765 --secret mypass
+
+# Display version
+cargo run --bin fukanzen-shogi-tui -- --version
 ```
+
+**Web board** — open `web/index.html` directly in any modern browser (no server required).  
+Live deployment: [fukanzen-shogi.tokuhira.net](https://fukanzen-shogi.tokuhira.net)
 
 **Portal menu** — the no-argument launch opens a menu where you choose single-player verification desk, Sente (Listen), or Gote (Connect). The online form lets you enter the port or address and shared password; after the first game the previous values are pre-filled. When the game ends you return to the portal automatically to start a new one without restarting the binary.
 
