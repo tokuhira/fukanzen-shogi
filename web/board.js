@@ -17,14 +17,17 @@ const POSITIONS = [
   "lnsgkgsnl/1r5b1/p1pppp1pp/6p2/7P1/2P6/P2PPPP1P/1B5R1/LNSGKGSNL b Pp 5",
   // 第5組手後: ☗8六歩打 ☖3五歩 (手数6)
   "lnsgkgsnl/1r5b1/p1pppp1pp/9/6pP1/1PP6/P2PPPP1P/1B5R1/LNSGKGSNL b p 6",
+  // 第6組手後: ☗3三角成 ☖8六飛（8六歩取り）(手数7)
+  "lnsgkgsnl/7b1/p1pppp+Bpp/9/6pP1/1rP6/P2PPPP1P/7R1/LNSGKGSNL b 2p 7",
 ];
 
 const TURNS = [
-  { s: "☗7六歩",  g: "☖3四歩",  sTo: [7,6], gTo: [3,4], event: null },
-  { s: "☗2六歩",  g: "☖8四歩",  sTo: [2,6], gTo: [8,4], event: null },
-  { s: "☗2五歩",  g: "☖8五歩",  sTo: [2,5], gTo: [8,5], event: null },
-  { s: "☗8六歩",  g: "☖8六歩",  sTo: [8,6], gTo: [8,6], event: "相討ち" },
-  { s: "☗8六歩打", g: "☖3五歩", sTo: [8,6], gTo: [3,5], event: null },
+  { s: "☗7六歩",  g: "☖3四歩",  sFrom: [7,7], gFrom: [3,3], sTo: [7,6], gTo: [3,4], sDrop: null, gDrop: null, event: null },
+  { s: "☗2六歩",  g: "☖8四歩",  sFrom: [2,7], gFrom: [8,3], sTo: [2,6], gTo: [8,4], sDrop: null, gDrop: null, event: null },
+  { s: "☗2五歩",  g: "☖8五歩",  sFrom: [2,6], gFrom: [8,4], sTo: [2,5], gTo: [8,5], sDrop: null, gDrop: null, event: null },
+  { s: "☗8六歩",  g: "☖8六歩",  sFrom: [8,7], gFrom: [8,5], sTo: [8,6], gTo: [8,6], sDrop: null, gDrop: null, event: "相討ち" },
+  { s: "☗8六歩打", g: "☖3五歩", sFrom: null,  gFrom: [3,4], sTo: [8,6], gTo: [3,5], sDrop: 'P',  gDrop: null, event: null },
+  { s: "☗3三角成", g: "☖8六飛", sFrom: [8,8], gFrom: [8,2], sTo: [3,3], gTo: [8,6], sDrop: null, gDrop: null, event: null },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -95,13 +98,16 @@ function parseSfen(sfen) {
 // SVG constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CELL   = 38;
-const BX     = 6;               // board left x
-const BY     = 58;              // board top y (room for gote hand + file labels)
-const BW     = CELL * 9;        // 342
-const BH     = CELL * 9;        // 342
-const SVG_W  = BX + BW + 30;   // 378
-const SVG_H  = BY + BH + 50;   // 450
+const CELL  = 38;
+const BX    = 6;               // board left x
+const BY    = 58;              // board top y (room for gote hand + file labels)
+const BW    = CELL * 9;        // 342
+const BH    = CELL * 9;        // 342
+const SVG_W = BX + BW + 30;   // 378
+const SVG_H = BY + BH + 50;   // 450
+
+const PFS = 22;   // piece font-size (board & hand)
+const LFS = 11;   // label / annotation font-size
 
 const KANJI = {
   P:'歩', L:'香', N:'桂', S:'銀', G:'金', B:'角', R:'飛', K:'玉',
@@ -110,33 +116,40 @@ const KANJI = {
 
 const HAND_ORDER = ['R','B','G','S','N','L','P'];
 const RANK_JA    = ['一','二','三','四','五','六','七','八','九'];
-const COUNT_JA   = ['一','二','三','四','五','六','七','八','九'];
 
 function countStr(n) {
   if (n <= 1) return '';
-  return n <= 9 ? COUNT_JA[n - 1] : String(n);
+  return n <= 9 ? RANK_JA[n - 1] : String(n);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SVG generation
 // ─────────────────────────────────────────────────────────────────────────────
 
-function renderSvg(pos, highlights) {
+// overlay = { board: [[file,rank], ...], sHand: Set|null, gHand: Set|null }
+function computeOverlay(t) {
+  return {
+    board: [t.sFrom, t.sTo, t.gFrom, t.gTo].filter(Boolean),
+    sHand: t.sDrop ? new Set([t.sDrop]) : null,
+    gHand: t.gDrop ? new Set([t.gDrop]) : null,
+  };
+}
+
+function renderSvg(pos, overlay) {
   const { board, handS, handG } = pos;
   const buf = [];
   const p = s => buf.push(s);
 
-  // Background
   p(`<rect width="${SVG_W}" height="${SVG_H}" fill="#f5f3ec"/>`);
+  p(`<g font-family="'Noto Serif JP',Georgia,serif">`);
 
   // ── Gote hand (top) ──────────────────────────────────────────────────────
-  renderHandArea(buf, handG, '後手持駒', BX, 8);
+  renderHandArea(buf, handG, '後手持駒', BX, 8, overlay?.gHand, 'g');
 
   // ── File labels 9→1 above board ─────────────────────────────────────────
   for (let f = 9; f >= 1; f--) {
     const cx = BX + (9 - f) * CELL + CELL / 2;
-    p(`<text x="${cx}" y="${BY - 7}" text-anchor="middle" `
-    + `font-size="11" fill="#777" font-family="'Noto Serif JP',Georgia,serif">${f}</text>`);
+    p(`<text x="${cx}" y="${BY - 7}" text-anchor="middle" font-size="${LFS}" fill="#777">${f}</text>`);
   }
 
   // ── Board outer border ───────────────────────────────────────────────────
@@ -154,14 +167,13 @@ function renderSvg(pos, highlights) {
   // ── Rank labels 一→九 right of board ────────────────────────────────────
   for (let r = 1; r <= 9; r++) {
     const cy = BY + (r - 1) * CELL + CELL / 2 + 5;
-    p(`<text x="${BX + BW + 6}" y="${cy}" font-size="11" fill="#777" `
-    + `font-family="'Noto Serif JP',Georgia,serif">${RANK_JA[r - 1]}</text>`);
+    p(`<text x="${BX + BW + 6}" y="${cy}" font-size="${LFS}" fill="#777">${RANK_JA[r - 1]}</text>`);
   }
 
-  // ── Destination highlights ───────────────────────────────────────────────
-  if (highlights) {
+  // ── Board highlights ─────────────────────────────────────────────────────
+  if (overlay?.board?.length) {
     const done = new Set();
-    for (const [f, r] of highlights) {
+    for (const [f, r] of overlay.board) {
       const key = `${f},${r}`;
       if (done.has(key)) continue;
       done.add(key);
@@ -176,47 +188,55 @@ function renderSvg(pos, highlights) {
     const kanji = KANJI[piece.kind] || '？';
     const cx    = BX + (9 - f) * CELL + CELL / 2;
     const cy    = BY + (r - 1) * CELL + CELL / 2;
-    const fs    = 22;
-    const dy    = fs * 0.36;  // baseline offset from center
+    const fs    = PFS;
+    const dy    = fs * 0.36;  // baseline offset from visual center
 
     if (piece.side === 'g') {
       p(`<text transform="rotate(180,${cx},${cy})" x="${cx}" y="${cy + dy}" `
-      + `text-anchor="middle" font-size="${fs}" fill="#1a1a1a" `
-      + `font-family="'Noto Serif JP',Georgia,serif">${kanji}</text>`);
+      + `text-anchor="middle" font-size="${fs}" fill="#1a1a1a">${kanji}</text>`);
     } else {
-      p(`<text x="${cx}" y="${cy + dy}" text-anchor="middle" font-size="${fs}" fill="#1a1a1a" `
-      + `font-family="'Noto Serif JP',Georgia,serif">${kanji}</text>`);
+      p(`<text x="${cx}" y="${cy + dy}" text-anchor="middle" font-size="${fs}" fill="#1a1a1a">${kanji}</text>`);
     }
   }
 
   // ── Sente hand (bottom) ──────────────────────────────────────────────────
-  renderHandArea(buf, handS, '先手持駒', BX, BY + BH + 12);
+  renderHandArea(buf, handS, '先手持駒', BX, BY + BH + 12, overlay?.sHand, 's');
 
+  p('</g>');
   return buf.join('');
 }
 
-function renderHandArea(buf, hand, label, x, y) {
-  buf.push(
-    `<text x="${x}" y="${y + 14}" font-size="11" fill="#999" `
-    + `font-family="'Noto Serif JP',Georgia,serif">${label}：</text>`
-  );
+function renderHandArea(buf, hand, label, x, y, hl = null, side = 's') {
+  const pbl = y + PFS;                                      // piece baseline
+  const tcy = y + Math.round(PFS * 0.64);                  // piece visual center y (rotation axis)
+  const lbl = y + Math.round(PFS * 0.64 + LFS * 0.36);    // label baseline (same visual center as pieces)
+  const hly = y + Math.round(PFS * 0.2);                   // highlight rect top (≈ glyph top)
+  const hlh = PFS - 2;                                      // highlight rect height (≈ cap height)
+
+  buf.push(`<text x="${x}" y="${lbl}" font-size="${LFS}" fill="#999">${label}：</text>`);
 
   const pieces = HAND_ORDER.filter(k => hand[k] > 0);
-  let ox = x + 74;  // '後手持駒：' / '先手持駒：' at font-size 11 ≈ 5 CJK + colon
+  let ox = x + 74;  // '後手持駒：' / '先手持駒：' at LFS ≈ 5 CJK + colon
 
   if (pieces.length === 0) {
-    buf.push(
-      `<text x="${ox}" y="${y + 14}" font-size="12" fill="#ccc" `
-      + `font-family="'Noto Serif JP',Georgia,serif">なし</text>`
-    );
+    buf.push(`<text x="${ox}" y="${lbl}" font-size="12" fill="#ccc">なし</text>`);
   } else {
     for (const k of pieces) {
       const txt = KANJI[k] + countStr(hand[k]);
-      buf.push(
-        `<text x="${ox}" y="${y + 14}" font-size="14" fill="#1a1a1a" `
-        + `font-family="'Noto Serif JP',Georgia,serif">${txt}</text>`
-      );
-      ox += txt.length * 14 + 2;
+      if (hl && hl.has(k)) {
+        buf.push(
+          `<rect x="${ox - 1}" y="${hly}" width="${txt.length * PFS + 2}" height="${hlh}" `
+          + `fill="#1a1a1a" fill-opacity="0.09"/>`
+        );
+      }
+      if (side === 'g') {
+        const tcx = ox + Math.round(txt.length * PFS / 2);
+        buf.push(`<text transform="rotate(180,${tcx},${tcy})" x="${tcx}" y="${pbl}" `
+        + `text-anchor="middle" font-size="${PFS}" fill="#1a1a1a">${txt}</text>`);
+      } else {
+        buf.push(`<text x="${ox}" y="${pbl}" font-size="${PFS}" fill="#1a1a1a">${txt}</text>`);
+      }
+      ox += txt.length * PFS + 4;
     }
   }
 }
@@ -250,33 +270,31 @@ function goPrev() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function render() {
-  const pos = parseSfen(POSITIONS[posIndex]);
+  const pos     = parseSfen(POSITIONS[posIndex]);
+  const overlay = phase === 'reveal' ? computeOverlay(TURNS[posIndex]) : null;
 
-  let highlights = null;
-  let moveText   = '';
-  let phaseText  = '';
-  let eventText  = '';
+  let moveText  = '';
+  let phaseText = '';
+  let eventText = '';
 
   if (phase === 'reveal') {
     const t = TURNS[posIndex];
-    highlights = [t.sTo, t.gTo];
-    moveText   = `${t.s}　${t.g}`;
-    phaseText  = '同時開示';
-    eventText  = t.event ? `（${t.event}）` : '';
+    moveText  = `${t.s}　${t.g}`;
+    phaseText = '同時開示';
+    eventText = t.event ? `（${t.event}）` : '';
   } else {
-    const turnsDone = posIndex;
-    phaseText = turnsDone === 0 ? '初期局面' : `第${turnsDone}組手後`;
+    phaseText = posIndex === 0 ? '初期局面' : `第${posIndex}組手後`;
   }
 
   // SVG
   const svg = document.getElementById('board');
   svg.setAttribute('viewBox', `0 0 ${SVG_W} ${SVG_H}`);
-  svg.innerHTML = renderSvg(pos, highlights);
+  svg.innerHTML = renderSvg(pos, overlay);
 
   // Text areas
   document.getElementById('phase-label').textContent  = phaseText;
   document.getElementById('move-display').textContent = moveText;
-  document.getElementById('event-label').textContent  = eventText;
+  document.getElementById('event-label').textContent  = eventText || ' ';
 
   // Step indicator  (sequence: pos0 rev0 pos1 rev1 ... pos5 = 11 steps)
   const step  = posIndex * 2 + (phase === 'reveal' ? 1 : 0) + 1;
