@@ -43,7 +43,7 @@ This design rests on three structural goals:
 
 A live web board is available at **[fukanzen-shogi.tokuhira.net](https://fukanzen-shogi.tokuhira.net)**.
 
-Current state: kifu (game record) replay only; sumi ink style; Rust engine not yet connected. Resolved positions are pre-computed and embedded as SFEN data. The rendering layer and the rule engine are already separated at the data boundary, so engine integration requires only switching the data source.
+Interactive hotsheet mode. One person plays both sides with mouse clicks. Click a piece to see its legal moves as subtle ink dots; build Sente's move, then Gote's, then resolve — the Wasm engine handles rule enforcement, simultaneous resolution, and game-over detection. Navigate the growing kifu with ← / →; returning to any past position and playing from there branches the record. Sumi ink style; no frameworks, no build step.
 
 ### Repository Structure
 
@@ -56,7 +56,8 @@ Current state: kifu (game record) replay only; sumi ink style; Rust engine not y
 
 **Web frontend (static):**
 
-- `web/` — static HTML/CSS/JS board; no build step, no frameworks. Kifu replay; engine not yet connected. Deployed to Cloudflare Pages. See [web/README.md](web/README.md).
+- `web/` — static HTML/CSS/JS board; no build step, no frameworks. Interactive hotsheet: click to move, legal-move ink dots, kifu navigation with branching, promotion dialog. Powered by `engine-wasm/` (Wasm). Deployed to Cloudflare Pages. See [web/README.md](web/README.md).
+- `engine-wasm/` — thin `wasm-bindgen` wrapper exposing `resolve_ply`, `game_status`, and `legal_actions` over a pure SFEN/USI string boundary. Engine core is untouched.
 
 **Documentation:**
 
@@ -100,14 +101,15 @@ USI notation is used throughout for moves (`7g7f`, `P*5e`, `2b3a+`). Position se
 
 The `protocol/` crate has no dependency on `net.rs` or the TUI; it receives nonces as arguments so tests are fully deterministic. The engine crate remains untouched.
 
-**Web frontend (in progress):**
+**Web frontend:**
 
-- **A static board** (`web/`) — HTML/CSS/JS, no build step. Six-turn demo game in sumi ink style, kifu replay mode. The Rust engine is not yet connected; resolved positions are pre-computed and embedded as SFEN data. The data boundary between the rendering layer and the rule engine is already established; engine integration is the next step.
+- **An interactive hotsheet board** (`web/`) — HTML/CSS/JS, no build step, no frameworks. One person plays both sides with mouse clicks in sumi ink style. Legal moves are shown as subtle ink dots (v0.5 rules enforced by engine). The kifu backbone accumulates all played moves; ← / → navigation lets you revisit any position and branch from there. Promotion dialog, simultaneous resolution, game-over detection — all engine-driven via Wasm. Deployed to Cloudflare Pages.
+- **Wasm wrapper** (`engine-wasm/`) — `wasm-bindgen` cdylib exposing three string-boundary functions (`resolve_ply`, `game_status`, `legal_actions`). The `engine` crate is untouched.
 
 ### Future directions (not yet implemented)
 
 - **CPU opponent** — search and evaluation function.
-- **Web engine integration** — Wasm compilation of the engine; hot-seat and secret online play in the browser. The data boundary between rendering and rules is already in place in `web/`.
+- **Secret online play in browser** — WebSocket/WebRTC shell around `protocol/`; each player sees only their own move until reveal.
 - **Broader reach** — smartphone app; multi-language engine re-implementations with cross-diffing against the Rust reference; spectator streaming.
 
 The engine is designed so that all of the above are *shells* around an unchanged core. The engine itself will never gain I/O, networking, or randomness.
@@ -153,7 +155,7 @@ The engine is designed so that all of the above are *shells* around an unchanged
 
 Web 盤を公開しています: **[fukanzen-shogi.tokuhira.net](https://fukanzen-shogi.tokuhira.net)**
 
-現状は棋譜再生のみ・水墨様式・Rust エンジン未接続です。解決後局面は事前計算済みの SFEN データとして埋め込まれています。描画層とルールエンジンはデータの境界で既に分離されており、エンジン接続は「データの供給元を切り替えるだけ」で実現できる構造です。
+マウスクリックで先後両方を操作するホットシートモードです。駒を選ぶとその駒の合法手が盤上に淡い墨点で示され（v0.5 ルールを Wasm エンジンが判定）、先手・後手の順に着手を組んで解決します。解決した手は棋譜として積まれ、← / → ボタンで前後に辿れます。過去局面に戻って指し直せば棋譜が分岐します。水墨様式、フレームワーク不要、ビルド不要。
 
 ### リポジトリ構成
 
@@ -166,7 +168,8 @@ Web 盤を公開しています: **[fukanzen-shogi.tokuhira.net](https://fukanze
 
 **Web フロントエンド（静的）:**
 
-- `web/` — 静的 HTML/CSS/JS 盤。ビルド不要、フレームワーク不要。棋譜再生のみ、エンジン未接続。Cloudflare Pages で配信。[web/README.md](web/README.md) を参照。
+- `web/` — 静的 HTML/CSS/JS 盤。ビルド不要、フレームワーク不要。ホットシート操作、合法手提示（墨点）、棋譜ナビゲーション・分岐、成り選択 UI。`engine-wasm/` で Wasm 化したエンジンが駆動。Cloudflare Pages で配信。[web/README.md](web/README.md) を参照。
+- `engine-wasm/` — `wasm-bindgen` の薄い cdylib ラッパー。`resolve_ply`・`game_status`・`legal_actions` を SFEN/USI の文字列境界で公開。エンジン本体は無改変。
 
 **ドキュメント:**
 
@@ -210,14 +213,15 @@ Web 盤を公開しています: **[fukanzen-shogi.tokuhira.net](https://fukanze
 
 `protocol/` クレートは `net.rs` や TUI への依存を持たない。ノンスを引数で受け取るため、すべてのテストが決定的に実行できる。エンジンクレートは無改変のまま。
 
-**Web フロントエンド（進行中）:**
+**Web フロントエンド:**
 
-- **静的盤**（`web/`）— HTML/CSS/JS、ビルド不要。6 組手デモ局を水墨様式で棋譜再生。Rust エンジンは未接続。解決後局面は SFEN データとして事前計算済み。描画層とルールエンジンの境界はすでに確立されており、エンジン接続が次の段階。
+- **ホットシート操作盤**（`web/`）— HTML/CSS/JS、ビルド不要、フレームワーク不要。水墨様式でマウスクリック着手。合法手を淡い墨点で提示（v0.5 ルール、エンジン判定）。棋譜バックボーンで← / →ナビゲーション・分岐対応。成り選択 UI・同時解決・終局判定をすべて Wasm エンジンが処理。Cloudflare Pages で公開。
+- **Wasm ラッパー**（`engine-wasm/`）— `wasm-bindgen` cdylib。`resolve_ply`・`game_status`・`legal_actions` の三関数を文字列境界で公開。`engine` クレートは無改変。
 
 ### 今後の計画（未実装）
 
 - **CPU 対戦** — 探索・評価関数。
-- **Web エンジン接続** — Rust エンジンの Wasm 化・ブラウザ上での対戦機能（ホットシート／秘匿対戦）。`web/` の描画層とルールの境界はすでに設計済み。
+- **ブラウザ上の秘匿対戦** — `protocol/` を Wasm 化し WebSocket/WebRTC の殻で繋ぐ。自分の手だけ可視、reveal まで相手の手は伏せる本物の秘匿モード。
 - **展開拡大** — スマートフォンアプリ・多言語実装と Rust 実装に対する差分テスト・観戦配信。
 
 エンジンは「共通の核と交換可能な殻」の設計原則に基づき、これらはすべてエンジンの外側に積む予定である。エンジン本体にはいかなる I/O も追加しない。
@@ -240,6 +244,8 @@ Web 盤を公開しています: **[fukanzen-shogi.tokuhira.net](https://fukanze
 - [Phase 2 — TUI verification desk](docs/不完全将棋_実装指示書_Phase2_TUI検証卓.md)
 - [Phase 3 — TCP secret simultaneous play](docs/不完全将棋_実装指示書_Phase3_TCP通信秘匿対戦.md)
 - [Web board — kifu replay, sumi ink style](docs/不完全将棋_実装指示書_最小Web盤_棋譜再生水墨.md)
+- [Web board — Wasm engine integration](docs/不完全将棋_実装指示書_Web盤Wasm組み込み.md)
+- [Web board — interactive hotsheet, legal-move display](docs/不完全将棋_実装指示書_Web盤操作可能化.md)
 - [GitHub Actions — Windows build](docs/不完全将棋_実装指示書_GitHubActions_Windowsビルド.md)
 - [Version management step 1](docs/不完全将棋_実装指示書_バージョン管理Step1.md)
 - [README and document structure](docs/不完全将棋_実装指示書_READMEとドキュメント整備_改訂版.md)
@@ -284,7 +290,11 @@ cargo run --bin fukanzen-shogi-tui -- --connect 192.168.1.10:8765 --secret mypas
 cargo run --bin fukanzen-shogi-tui -- --version
 ```
 
-**Web board** — open `web/index.html` directly in any modern browser (no server required).  
+**Web board** — requires an HTTP server locally (WebAssembly cannot be loaded from `file://`):
+```sh
+python3 -m http.server 8080 --directory web
+# then open http://localhost:8080
+```
 Live deployment: [fukanzen-shogi.tokuhira.net](https://fukanzen-shogi.tokuhira.net)
 
 **Portal menu** — the no-argument launch opens a menu where you choose single-player verification desk, Sente (Listen), or Gote (Connect). The online form lets you enter the port or address and shared password; after the first game the previous values are pre-filled. When the game ends you return to the portal automatically to start a new one without restarting the binary.

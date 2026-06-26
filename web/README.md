@@ -9,15 +9,25 @@ A static web board for Fukanzen Shogi. No framework, no server required for prod
 
 ### Current state
 
-Kifu (game record) replay. A 6-turn demo game is driven by the Wasm engine at runtime.
+Interactive hotsheet board. One person plays both sides with mouse/click.
 The `engine` crate is compiled to WebAssembly (`web/wasm/`) and called from `board.js`.
-Resolved positions are computed by the engine — no hardcoded SFEN positions.
+
+- **Click a piece** to see legal moves as subtle ink dots on the board (v0.5 rules enforced by engine).
+- **Sente first, then Gote** — click a piece for each side to build the paired move.
+- **Resolve** (button or keyboard) — calls `resolve_ply`; the move is appended to the kifu.
+- **Navigate** with ← / → buttons or arrow keys; revisiting any past position and playing from there branches the kifu.
+- **Promotion dialog** — appears on moves that can optionally promote.
+- **デモ局面 / 新局** buttons load the built-in 6-turn demo or reset to a blank board.
+
+All positions are computed by the Wasm engine at runtime. No hardcoded SFEN data.
 
 ### Design boundary
 
-`board.js` imports the Wasm engine, feeds it the initial SFEN and each turn's USI moves,
-and renders the returned SFEN positions. The rendering layer (`parseSfen`, `renderSvg`) is unchanged.
-Adding new game records requires only adding entries to `TURNS` — no manual SFEN computation.
+`board.js` imports three Wasm functions: `resolve_ply` (resolve a paired move),
+`game_status` (check for forced termination), and `legal_actions` (enumerate legal moves
+for one side). The engine is the sole source of rule truth; the JS layer handles
+only UI state and rendering. The rendering layer (`parseSfen`, `renderSvg`, `renderHandArea`)
+is unchanged from the kifu-replay prototype.
 
 ### How to run locally
 

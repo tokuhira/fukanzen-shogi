@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>不完全将棋 — 棋譜再生</title>
+  <title>不完全将棋</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -14,11 +14,22 @@
     <p id="event-label"></p>
     <div id="board-wrap">
       <svg id="board" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div id="promotion-overlay">
+        <p id="promotion-label">成りますか？</p>
+        <div id="promotion-buttons">
+          <button id="btn-promote">成</button>
+          <button id="btn-no-promote">不成</button>
+        </div>
+      </div>
     </div>
     <div id="controls">
       <button id="btn-prev">← 前</button>
       <span id="step-label"></span>
       <button id="btn-next">次 →</button>
+    </div>
+    <div id="kifu-controls">
+      <button id="btn-demo">デモ局面</button>
+      <button id="btn-new">新局</button>
     </div>
   </div>
   <script type="module" src="board.js"></script>

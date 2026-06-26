@@ -54,6 +54,30 @@ pub fn game_status(sfen: &str) -> String {
     }
 }
 
+/// 指定局面・陣営の合法手を USI 文字列の JSON 配列として返す。
+///
+/// - sfen: 局面の SFEN 文字列
+/// - side: "sente" | "gote"
+///
+/// 返値: `["7g7f","P*5e",...]`（空なら `[]`）
+#[wasm_bindgen]
+pub fn legal_actions(sfen: &str, side: &str) -> String {
+    let pos = match engine::serialize::sfen_to_position(sfen) {
+        Some(p) => p,
+        None => return "[]".to_string(),
+    };
+    let s = match side {
+        "sente" => engine::types::Side::Sente,
+        "gote"  => engine::types::Side::Gote,
+        _ => return "[]".to_string(),
+    };
+    let actions = engine::movegen::legal_actions(&pos, s);
+    let usis: Vec<String> = actions.iter()
+        .map(|a| format!("\"{}\"", a.to_usi()))
+        .collect();
+    format!("[{}]", usis.join(","))
+}
+
 fn escape_json(s: &str) -> String {
     s.replace('\\', r"\\").replace('"', r#"\""#)
 }
