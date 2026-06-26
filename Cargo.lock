@@ -335,6 +335,14 @@ name = "engine"
 version = "0.6.0"
 
 [[package]]
+name = "engine-wasm"
+version = "0.6.0"
+dependencies = [
+ "engine",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

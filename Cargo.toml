@@ -1,5 +1,5 @@
 [workspace]
-members = ["engine", "cli", "tui", "protocol"]
+members = ["engine", "cli", "tui", "protocol", "engine-wasm"]
 resolver = "2"
 
 [workspace.package]
