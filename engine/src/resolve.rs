@@ -172,6 +172,7 @@ fn resolve_king_wins(
     match enemy_act {
         Action::Move { from, .. } => next.board.set(from, None),
         Action::Drop { kind, .. } => next.hand_mut(enemy_side).remove(kind),
+        Action::Resign => unreachable!("Resign cannot be enemy_act in king wins"),
     }
 
     // 3. 取得した敵駒を玉側の持ち駒へ（基本種に戻す）
@@ -297,6 +298,7 @@ fn get_moving_piece(pos: &Position, action: Action, side: Side) -> Piece {
             pos.board.get(from).expect("no piece at from")
         }
         Action::Drop { kind, .. } => Piece::new(kind, side),
+        Action::Resign => unreachable!("Resign has no moving piece"),
     }
 }
 

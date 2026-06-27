@@ -73,6 +73,7 @@ pub enum DrawReason {
     BothKingDied,
     BothCheckmate,
     Sennichite,
+    MutualResign, // ルール 5.4: 両者同時投了 → 引き分け
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -764,5 +765,6 @@ pub fn game_over_text(kind: &GameOverKind) -> &'static str {
         GameOverKind::Draw(DrawReason::BothKingDied) => "引き分け（両玉が取られた）",
         GameOverKind::Draw(DrawReason::BothCheckmate) => "引き分け（両者着手不能）",
         GameOverKind::Draw(DrawReason::Sennichite) => "引き分け（千日手）",
+        GameOverKind::Draw(DrawReason::MutualResign) => "引き分け（両者投了）",
     }
 }

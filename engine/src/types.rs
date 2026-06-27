@@ -186,24 +186,30 @@ pub enum Action {
     },
     /// 持ち駒を打つ
     Drop { kind: PieceKind, to: Square },
+    /// 投了（commit-reveal プロトコル上の着手として扱う。盤面を変化させない）
+    Resign,
 }
 
 impl Action {
     pub fn to_sq(self) -> Square {
         match self {
-            Action::Move { to, .. } => to,
-            Action::Drop { to, .. } => to,
+            Action::Move { to, .. } | Action::Drop { to, .. } => to,
+            Action::Resign => panic!("Resign has no destination square"),
         }
     }
 
     pub fn from_sq(self) -> Option<Square> {
         match self {
             Action::Move { from, .. } => Some(from),
-            Action::Drop { .. } => None,
+            Action::Drop { .. } | Action::Resign => None,
         }
     }
 
-    /// USI 文字列へ変換（例: "7g7f", "7g7f+", "P*5e"）
+    pub fn is_resign(self) -> bool {
+        matches!(self, Action::Resign)
+    }
+
+    /// USI 文字列へ変換（例: "7g7f", "7g7f+", "P*5e", "resign"）
     pub fn to_usi(self) -> String {
         match self {
             Action::Move { from, to, promote } => {
@@ -213,11 +219,15 @@ impl Action {
             Action::Drop { kind, to } => {
                 format!("{}*{}", kind.usi_char(), to.to_usi())
             }
+            Action::Resign => "resign".to_string(),
         }
     }
 
-    /// USI 文字列からパース（例: "7g7f", "7g7f+", "P*5e"）
+    /// USI 文字列からパース（例: "7g7f", "7g7f+", "P*5e", "resign"）
     pub fn from_usi(s: &str) -> Option<Self> {
+        if s == "resign" {
+            return Some(Action::Resign);
+        }
         if s.contains('*') {
             // Drop
             let (kind_str, sq_str) = s.split_once('*')?;

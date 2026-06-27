@@ -299,6 +299,7 @@ fn apply_move_temp(pos: &Position, side: Side, action: Action) -> Position {
             next.board.set(to, Some(Piece::new(kind, side)));
             next.hand_mut(side).remove(kind);
         }
+        Action::Resign => unreachable!("Resign cannot be applied as a board move"),
     }
     next
 }

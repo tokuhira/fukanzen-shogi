@@ -285,6 +285,13 @@ pub fn run_online(
                         // Release は無視（Windows CMD チャタリング対策）
                     } else if k.code == KeyCode::Char('q') || k.code == KeyCode::Char('Q') {
                         break;
+                    } else if k.code == KeyCode::Char('r') || k.code == KeyCode::Char('R') {
+                        // オンライン投了: 即終局ではなく commit-reveal プロトコル経由で投了
+                        match config.local_side {
+                            Side::Sente => app.sente_action = Some(Action::Resign),
+                            Side::Gote  => app.gote_action  = Some(Action::Resign),
+                        }
+                        app.message = "投了申告 — 相手の確定を待っています...".to_string();
                     } else {
                         input::handle_key(k, &mut app);
                     }
@@ -423,16 +430,30 @@ fn handle_net_message(
                 let (sente_action, gote_action) = session.get_actions()
                     .ok_or_else(|| "ターン確定後に着手ペアなし".to_string())?;
 
-                // kifu に記録（position の进行は resolve_turn が行う）
+                *turn_session = None;
+
+                // 投了判定（ルール 5.3 / 5.4）: resolve を通さず直接終局へ
+                let s_resign = sente_action.is_resign();
+                let g_resign = gote_action.is_resign();
+                if s_resign || g_resign {
+                    use crate::app::{GameOverKind, WinReason, DrawReason};
+                    let kind = match (s_resign, g_resign) {
+                        (true, true)  => GameOverKind::Draw(DrawReason::MutualResign),
+                        (true, false) => GameOverKind::GoteWins(WinReason::Resign),
+                        (false, true) => GameOverKind::SenteWins(WinReason::Resign),
+                        _ => unreachable!(),
+                    };
+                    app.phase = Phase::GameOver(kind);
+                    return Ok(());
+                }
+
+                // 通常の着手: kifu に記録して resolve
                 app.sente_action = Some(sente_action);
                 app.gote_action = Some(gote_action);
                 app.resolve_turn();
 
-                // kifu オブジェクトも同期
                 use engine::types::Ply;
                 kifu.push(Ply { sente: sente_action, gote: gote_action });
-
-                *turn_session = None;
 
                 if !matches!(app.phase, Phase::GameOver(_)) {
                     // 次ターンへ
@@ -447,7 +468,6 @@ fn handle_net_message(
                     }
                     app.message = "次の着手を入力してください".to_string();
                 }
-                // else: ゲーム終了 → GameOver フェーズはそのまま
             }
         }
 

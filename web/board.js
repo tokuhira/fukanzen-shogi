@@ -4,7 +4,7 @@ import init, {
   legal_actions as wasmLegalActions,
 } from './wasm/engine_wasm.js';
 
-import { connectOnline, disconnectOnline, commitMoveOnline, getMySide, resignOnline } from './online.js';
+import { connectOnline, disconnectOnline, commitMoveOnline, getMySide } from './online.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -340,11 +340,28 @@ function endOnlineGame(msg) {
 }
 
 function handleTurnComplete(senteUsi, goteUsi) {
+  onlineCommitted = false;
+
+  // 投了の検出（ルール 5.3 / 5.4）
+  const sResign = senteUsi === 'resign';
+  const gResign = goteUsi  === 'resign';
+  if (sResign || gResign) {
+    let msg;
+    if (sResign && gResign) {
+      msg = '引き分け（両者投了）';
+    } else if (sResign) {
+      msg = onlineSide === 'sente' ? '投了しました（後手の勝ち）' : '相手が投了しました（先手の勝ち）';
+    } else {
+      msg = onlineSide === 'gote'  ? '投了しました（先手の勝ち）' : '相手が投了しました（後手の勝ち）';
+    }
+    endOnlineGame(msg);
+    return;
+  }
+
   const sText = usiToText(senteUsi, sfens[cursor], 'sente');
   const gText = usiToText(goteUsi,  sfens[cursor], 'gote');
   branchAndAppend(senteUsi, goteUsi, sText, gText);
   // branchAndAppend が phase='reveal'、resetInput() を呼んでいる
-  onlineCommitted = false;
   render();
   // 開示を 1.5s 表示してから次の局面へ
   setTimeout(() => {
@@ -824,8 +841,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('btn-resign').addEventListener('click', () => {
       if (!onlineMode || onlineGameOver || onlineCommitted) return;
       if (!confirm('投了しますか？')) return;
-      resignOnline();
-      endOnlineGame('投了しました');
+      // 投了は commit-reveal プロトコル経由。即終局にしない（両者投了の引き分けを拾うため）
+      commitMoveOnline(sfens[cursor], 'resign');
+      onlineCommitted = true;
+      render();
     });
 
     document.getElementById('btn-online').addEventListener('click', () => {
@@ -870,7 +889,8 @@ document.addEventListener('DOMContentLoaded', async () => {
           }
         },
         onTurnComplete:  handleTurnComplete,
-        onPeerAborted:   () => endOnlineGame('相手が投了しました'),
+        onPeerAborted: (reason) =>
+          endOnlineGame(`中断: ${reason}`),
       });
     });
   }
