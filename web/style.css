@@ -169,3 +169,106 @@ h1 {
   border-color: #888;
   color: #555;
 }
+
+/* ── オンライン対戦モーダル ── */
+
+#online-modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(210, 205, 190, 0.72);
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+#online-modal.visible { display: flex; }
+
+#online-panel {
+  background: #f5f3ec;
+  border: 1px solid #999;
+  padding: 28px 32px;
+  max-width: 320px;
+  width: 90%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.10);
+}
+
+#online-panel h2 {
+  font-size: 0.95rem;
+  font-weight: normal;
+  letter-spacing: 0.2em;
+  color: #1a1a1a;
+  text-align: center;
+  margin: 0;
+}
+
+.online-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.online-field span {
+  font-size: 0.7rem;
+  color: #999;
+  letter-spacing: 0.1em;
+}
+
+.online-field input {
+  border: 1px solid #bbb;
+  background: #faf9f5;
+  color: #1a1a1a;
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 7px 10px;
+  letter-spacing: 0.05em;
+  outline: none;
+  cursor: text;
+  user-select: text;
+}
+
+.online-field input:focus { border-color: #777; }
+
+#online-status {
+  font-size: 0.78rem;
+  color: #888;
+  letter-spacing: 0.08em;
+  min-height: 1.6em;
+  text-align: center;
+}
+
+#online-btns {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+#online-btns button {
+  background: none;
+  border: 1px solid #bbb;
+  color: #666;
+  padding: 7px 22px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  letter-spacing: 0.06em;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+#online-btns button:hover:not(:disabled) {
+  border-color: #1a1a1a;
+  color: #1a1a1a;
+}
+
+#online-btns button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+#btn-connect {
+  border-color: #888;
+  color: #333;
+}

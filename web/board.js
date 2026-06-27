@@ -4,6 +4,8 @@ import init, {
   legal_actions as wasmLegalActions,
 } from './wasm/engine_wasm.js';
 
+import { connectOnline, disconnectOnline } from './online.js';
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const INITIAL_SFEN = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1";
@@ -693,8 +695,60 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.addEventListener('keydown', e => {
     if (e.key === 'ArrowRight' || e.key === 'ArrowDown') goNext();
     if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   goPrev();
-    if (e.key === 'Escape') { resetInput(); render(); }
+    if (e.key === 'Escape') {
+      const modal = document.getElementById('online-modal');
+      if (modal.classList.contains('visible')) {
+        disconnectOnline();
+        modal.classList.remove('visible');
+        document.getElementById('online-status').textContent = '—';
+        document.getElementById('btn-connect').disabled = false;
+        document.getElementById('btn-connect').textContent = '入室';
+      } else {
+        resetInput(); render();
+      }
+    }
   });
+
+  // ── オンライン対戦モーダル ──────────────────────────────────────────────────
+  {
+    const modal     = document.getElementById('online-modal');
+    const statusEl  = document.getElementById('online-status');
+    const btnConn   = document.getElementById('btn-connect');
+    const btnClose  = document.getElementById('btn-online-close');
+
+    const closeModal = () => {
+      disconnectOnline();
+      modal.classList.remove('visible');
+      statusEl.textContent = '—';
+      btnConn.disabled = false;
+      btnConn.textContent = '入室';
+    };
+
+    document.getElementById('btn-online').addEventListener('click', () => {
+      modal.classList.add('visible');
+      document.getElementById('input-room').focus();
+    });
+
+    btnClose.addEventListener('click', closeModal);
+
+    btnConn.addEventListener('click', async () => {
+      const roomKey = document.getElementById('input-room').value.trim();
+      const secret  = document.getElementById('input-secret').value;
+      if (!roomKey) {
+        statusEl.textContent = 'ルームキーを入力してください';
+        return;
+      }
+      btnConn.disabled = true;
+      statusEl.textContent = '接続中…';
+      await connectOnline(roomKey, secret, (state, msg) => {
+        statusEl.textContent = msg;
+        if (state === 'error' || state === 'disconnected') {
+          btnConn.disabled = false;
+          btnConn.textContent = '入室';
+        }
+      });
+    });
+  }
 
   document.getElementById('phase-label').textContent = '読み込み中…';
   document.getElementById('btn-prev').disabled = true;

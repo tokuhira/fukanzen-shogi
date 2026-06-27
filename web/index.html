@@ -30,8 +30,29 @@
     <div id="kifu-controls">
       <button id="btn-demo">デモ局面</button>
       <button id="btn-new">新局</button>
+      <button id="btn-online">対戦</button>
     </div>
   </div>
+
+  <div id="online-modal">
+    <div id="online-panel">
+      <h2>オンライン対戦</h2>
+      <label class="online-field">
+        <span>ルームキー</span>
+        <input id="input-room" type="text" placeholder="合言葉を入力" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="online-field">
+        <span>パスワード</span>
+        <input id="input-secret" type="password" placeholder="対戦相手と共有" autocomplete="off">
+      </label>
+      <p id="online-status">—</p>
+      <div id="online-btns">
+        <button id="btn-connect">入室</button>
+        <button id="btn-online-close">閉じる</button>
+      </div>
+    </div>
+  </div>
+
   <script type="module" src="board.js"></script>
 </body>
 </html>

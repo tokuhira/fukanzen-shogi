@@ -23,7 +23,9 @@ export class GameRoom implements DurableObject {
     this.state.acceptWebSocket(server);
 
     if (existing.length === 1) {
-      existing[0].send(JSON.stringify({ type: "peer_joined" }));
+      // 1人目(先手)に peer_joined、2人目(後手)に room_ready を通知
+      existing[0].send(JSON.stringify({ type: "peer_joined", your_side: "sente" }));
+      server.send(JSON.stringify({ type: "room_ready", your_side: "gote" }));
     }
 
     return new Response(null, { status: 101, webSocket: client });
