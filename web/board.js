@@ -4,7 +4,7 @@ import init, {
   legal_actions as wasmLegalActions,
 } from './wasm/engine_wasm.js';
 
-import { connectOnline, disconnectOnline, commitMoveOnline, getMySide } from './online.js';
+import { connectOnline, disconnectOnline, commitMoveOnline, getMySide, resignOnline } from './online.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -156,6 +156,8 @@ let gameOverCache = { cursor: -1, msg: null };
 let onlineMode      = false;
 let onlineSide      = null;   // 'sente' | 'gote'
 let onlineCommitted = false;  // 自分の commit 送信済み（解決待ち中）
+let onlineGameOver  = false;  // 終局確定（review 中も true を維持）
+let onlineEndMsg    = '';     // 終局理由の表示文字列（投了時など）
 
 // ── Kifu management ───────────────────────────────────────────────────────────
 
@@ -330,6 +332,13 @@ function confirmMove(usi) {
   promotionPending = null; hidePromotionUI();
 }
 
+function endOnlineGame(msg) {
+  onlineGameOver  = true;
+  onlineEndMsg    = msg;
+  onlineCommitted = false;
+  render();
+}
+
 function handleTurnComplete(senteUsi, goteUsi) {
   const sText = usiToText(senteUsi, sfens[cursor], 'sente');
   const gText = usiToText(goteUsi,  sfens[cursor], 'gote');
@@ -341,8 +350,13 @@ function handleTurnComplete(senteUsi, goteUsi) {
   setTimeout(() => {
     cursor++;
     phase = 'position';
-    if (onlineSide === 'gote') inputStep = 'gote';
-    render();
+    const msg = getGameOverMsg();
+    if (msg) {
+      endOnlineGame(msg);
+    } else {
+      if (onlineSide === 'gote') inputStep = 'gote';
+      render();
+    }
   }, 1500);
 }
 
@@ -608,6 +622,7 @@ function renderHandArea(buf, hand, label, x, y, hl = null, side = 's') {
 
 function goNext() {
   if (promotionPending) return;
+  if (onlineMode && !onlineGameOver) return; // 対局中はナビ不可
 
   if (pendingSente && pendingGote) {
     branchAndAppend(pendingSente.usi, pendingGote.usi, pendingSente.text, pendingGote.text);
@@ -624,6 +639,7 @@ function goNext() {
 }
 
 function goPrev() {
+  if (onlineMode && !onlineGameOver) return; // 対局中はナビ不可
   if (promotionPending) {
     promotionPending = null; hidePromotionUI();
     selectedFrom = null; legalTargets = null;
@@ -670,8 +686,8 @@ function render() {
         moveText  = onlineSide === 'sente'
           ? (pendingSente?.text || '') : (pendingGote?.text || '');
         phaseText = '着手確定 — 相手の着手を待っています';
-      } else if (gameOver) {
-        phaseText = gameOver;
+      } else if (onlineGameOver) {
+        phaseText = onlineEndMsg || gameOver || '終局';
       } else if (onlineSide === 'gote') {
         phaseText = selectedFrom ? '後手の手を選択中' : '後手の手を選んでください';
       } else {
@@ -715,8 +731,17 @@ function render() {
 
   if (onlineMode) {
     btnNext.textContent = '次 →';
-    btnNext.disabled    = true;
-    btnPrev.disabled    = true;
+    if (onlineGameOver) {
+      // 終局後は棋譜ナビゲーションを解放（phase に関係なく維持）
+      btnNext.disabled = !(
+        phase === 'reveal' ||
+        (phase === 'position' && cursor < kifu.plies.length)
+      );
+      btnPrev.disabled = cursor === 0 && phase === 'position';
+    } else {
+      btnNext.disabled = true;
+      btnPrev.disabled = true;
+    }
   } else {
     btnNext.textContent = bothReady ? '解決 →' : '次 →';
     btnNext.disabled    = !(
@@ -727,6 +752,12 @@ function render() {
     btnPrev.disabled    = (
       cursor === 0 && phase === 'position' && !hasInput && !promotionPending
     );
+  }
+
+  const btnResign = document.getElementById('btn-resign');
+  if (btnResign) {
+    btnResign.style.display = onlineMode ? 'inline-block' : 'none';
+    btnResign.disabled      = !onlineMode || onlineGameOver || onlineCommitted;
   }
 }
 
@@ -779,6 +810,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         onlineMode      = false;
         onlineSide      = null;
         onlineCommitted = false;
+        onlineGameOver  = false;
+        onlineEndMsg    = '';
         resetToNew();
       }
       modal.classList.remove('visible');
@@ -787,6 +820,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       btnConn.textContent = '入室';
       render();
     };
+
+    document.getElementById('btn-resign').addEventListener('click', () => {
+      if (!onlineMode || onlineGameOver || onlineCommitted) return;
+      if (!confirm('投了しますか？')) return;
+      resignOnline();
+      endOnlineGame('投了しました');
+    });
 
     document.getElementById('btn-online').addEventListener('click', () => {
       modal.classList.add('visible');
@@ -812,6 +852,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             onlineMode      = true;
             onlineSide      = getMySide();
             onlineCommitted = false;
+            onlineGameOver  = false;
+            onlineEndMsg    = '';
             resetToNew();
             if (onlineSide === 'gote') inputStep = 'gote';
             modal.classList.remove('visible');
@@ -827,7 +869,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             render();
           }
         },
-        onTurnComplete: handleTurnComplete,
+        onTurnComplete:  handleTurnComplete,
+        onPeerAborted:   () => endOnlineGame('相手が投了しました'),
       });
     });
   }

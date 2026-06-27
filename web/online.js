@@ -29,8 +29,11 @@ let mySide   = null;   // 'sente' | 'gote'（陣営決定後に確定）
 let myCommitted = false;  // commit 送信済み
 let revealSent  = false;  // reveal 送信済み
 
+// 終局フラグ（投了・被投了後はプロトコルループを止める）
+let _gameEnded = false;
+
 // コールバック
-let _cbs = null; // { onStatus(state,msg), onTurnComplete(sUsi,gUsi) }
+let _cbs = null; // { onStatus, onTurnComplete, onPeerAborted }
 
 // ── 公開 API ─────────────────────────────────────────────────────────────────
 
@@ -64,7 +67,18 @@ export function disconnectOnline() {
   ws = null;
   session = null;
   mySide = null;
+  _gameEnded = false;
   _resetTurnState();
+}
+
+/**
+ * 投了メッセージを送信して終局にする。
+ * board.js が呼ぶ。
+ */
+export function resignOnline() {
+  if (!ws || !session || _gameEnded) return;
+  _gameEnded = true;
+  ws.send(JSON.stringify({ type: 'abort', reason: 'resign' }));
 }
 
 /**
@@ -73,7 +87,7 @@ export function disconnectOnline() {
  * @param {string} usi   着手の USI 表記
  */
 export async function commitMoveOnline(sfen, usi) {
-  if (!session || !ws) return;
+  if (!session || !ws || _gameEnded) return;
 
   const result = JSON.parse(session.commit_move(sfen, usi));
   if (!result.ok) {
@@ -176,13 +190,20 @@ function _handleMessage(data, secret) {
     case 'peer_acked':
       // peer の ack を受信済みだが、まだ自分の ack 前 — 通常は起きないが念のため無視
       break;
+
+    case 'peer_aborted': {
+      _gameEnded = true;
+      _resetTurnState();
+      _cbs?.onPeerAborted?.(result.reason);
+      break;
+    }
   }
 }
 
 // ── 内部ヘルパー ──────────────────────────────────────────────────────────────
 
 function _sendReveal() {
-  if (!session || revealSent) return;
+  if (!session || revealSent || _gameEnded) return;
   const result = JSON.parse(session.reveal_msg());
   if (result.ok) {
     ws.send(JSON.stringify(result.message));

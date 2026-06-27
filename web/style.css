@@ -272,3 +272,14 @@ h1 {
   border-color: #888;
   color: #333;
 }
+
+#btn-resign {
+  display: none; /* オンライン対局中のみ表示 */
+  border-color: #aa5555;
+  color: #aa5555;
+}
+
+#btn-resign:hover:not(:disabled) {
+  border-color: #882222;
+  color: #882222;
+}

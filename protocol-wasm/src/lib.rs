@@ -283,11 +283,14 @@ impl ProtocolSession {
 
         if t.is_complete() {
             if let Some((sa, ga)) = t.get_actions() {
-                return format!(
+                let msg = format!(
                     r#"{{"ok":true,"event":"turn_complete","sente_usi":"{}","gote_usi":"{}"}}"#,
                     sa.to_usi(),
                     ga.to_usi()
                 );
+                // 次ターンの peer_commit を feed_commit が正しくバッファできるよう解放する
+                self.turn = None;
+                return msg;
             }
         }
         r#"{"ok":true,"event":"peer_acked"}"#.to_string()
