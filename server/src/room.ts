@@ -56,14 +56,19 @@ export class GameRoom implements DurableObject {
   }
 
   webSocketClose(ws: WebSocket): void {
-    for (const other of this.state.getWebSockets()) {
-      if (other !== ws) {
-        try {
-          other.send(JSON.stringify({ type: "peer_disconnected" }));
-        } catch {
-          // other socket already closed
-        }
+    const others = this.state.getWebSockets().filter(s => s !== ws);
+
+    for (const other of others) {
+      try {
+        other.send(JSON.stringify({ type: "peer_disconnected" }));
+      } catch {
+        // other socket already closed
       }
+    }
+
+    // 両者切断したら gameStarted をリセット → 同じルームキーで新規ゲームを開始できる
+    if (others.length === 0) {
+      void this.state.storage.delete("gameStarted");
     }
   }
 
