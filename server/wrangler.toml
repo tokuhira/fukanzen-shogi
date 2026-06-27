@@ -1,0 +1,14 @@
+# Cloudflare Worker + Durable Object — 不完全将棋 WebSocket 中継
+# デプロイ: wrangler deploy
+# ローカル: wrangler dev
+name = "fukanzen-shogi-ws"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "GameRoom"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["GameRoom"]
