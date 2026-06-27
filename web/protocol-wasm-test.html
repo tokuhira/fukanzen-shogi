@@ -84,6 +84,78 @@ log('  sente.feed(gote ack) → ' + sFeedAck);
 log('  gote.feed(sente ack) → ' + gFeedAck);
 
 log('\n=== 完了 ===');
+
+// ── 不正検知テスト ─────────────────────────────────────────────────────────────
+
+function makeHandshakePair(password = 'pw') {
+  const s = new ProtocolSession('sente', password);
+  const g = new ProtocolSession('gote',  password);
+  g.feed(s.hello_msg());
+  s.feed(g.hello_msg());
+  return { s, g };
+}
+
+function runCommits({ s, g }, sSfen, sUsi, gUsi) {
+  const sRes = JSON.parse(s.commit_move(sSfen, sUsi));
+  const gRes = JSON.parse(g.commit_move(sSfen, gUsi));
+  s.feed(JSON.stringify(gRes.message));
+  g.feed(JSON.stringify(sRes.message));
+}
+
+log('\n\n=== 不正検知テスト ===\n');
+
+// ── [C1] CommitMismatch: 先手が commit した手と違う手を reveal ──────────────
+
+log('[C1] CommitMismatch（後出し: commitと異なる action を reveal）');
+{
+  const { s, g } = makeHandshakePair();
+  runCommits({ s, g }, SFEN, '7g7f', '3c3d');
+
+  // 先手の正規 reveal を取得し、action だけ別の手に差し替え
+  const legitReveal = JSON.parse(s.reveal_msg()).message;
+  const tampered = { ...legitReveal, action: '2g2f' };  // 違う手
+
+  const result = JSON.parse(g.feed(JSON.stringify(tampered)));
+  const ok = !result.ok && result.error === 'CommitMismatch';
+  log('  後手の feed(不正reveal) → ' + JSON.stringify(result));
+  log('  → ' + (ok ? '✅ CommitMismatch を検知して中断' : '❌ 検知できなかった'));
+}
+
+// ── [C2] BoardHashMismatch: 局面ハッシュを偽装して reveal ─────────────────
+
+log('\n[C2] BoardHashMismatch（局面ハッシュ偽装）');
+{
+  const { s, g } = makeHandshakePair();
+  runCommits({ s, g }, SFEN, '7g7f', '3c3d');
+
+  const legitReveal = JSON.parse(s.reveal_msg()).message;
+  const tampered = { ...legitReveal, board_hash: '00'.repeat(32) };  // ゼロハッシュ
+
+  const result = JSON.parse(g.feed(JSON.stringify(tampered)));
+  const ok = !result.ok && result.error === 'BoardHashMismatch';
+  log('  後手の feed(偽装ハッシュ) → ' + JSON.stringify(result));
+  log('  → ' + (ok ? '✅ BoardHashMismatch を検知して中断' : '❌ 検知できなかった'));
+}
+
+// ── [C3] CommitMismatch: nonce 偽装（nonce を変えると commit 再計算が一致しない）
+
+log('\n[C3] CommitMismatch（nonce 偽装）');
+{
+  const { s, g } = makeHandshakePair();
+  runCommits({ s, g }, SFEN, '7g7f', '3c3d');
+
+  const legitReveal = JSON.parse(s.reveal_msg()).message;
+  // nonce の先頭バイトを反転
+  const tamperedNonce = 'ff' + legitReveal.nonce.slice(2);
+  const tampered = { ...legitReveal, nonce: tamperedNonce };
+
+  const result = JSON.parse(g.feed(JSON.stringify(tampered)));
+  const ok = !result.ok && result.error === 'CommitMismatch';
+  log('  後手の feed(nonce偽装) → ' + JSON.stringify(result));
+  log('  → ' + (ok ? '✅ CommitMismatch を検知して中断' : '❌ 検知できなかった'));
+}
+
+log('\n=== 不正検知テスト 完了 ===');
 </script>
 </body>
 </html>

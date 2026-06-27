@@ -4,7 +4,7 @@ import init, {
   legal_actions as wasmLegalActions,
 } from './wasm/engine_wasm.js';
 
-import { connectOnline, disconnectOnline } from './online.js';
+import { connectOnline, disconnectOnline, commitMoveOnline, getMySide } from './online.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -150,6 +150,12 @@ let legalCache = { sfen: null, sente: null, gote: null };
 
 // Per-cursor game-over cache
 let gameOverCache = { cursor: -1, msg: null };
+
+// ── Online mode state ─────────────────────────────────────────────────────────
+
+let onlineMode      = false;
+let onlineSide      = null;   // 'sente' | 'gote'
+let onlineCommitted = false;  // 自分の commit 送信済み（解決待ち中）
 
 // ── Kifu management ───────────────────────────────────────────────────────────
 
@@ -298,6 +304,22 @@ function selectTarget(file, rank) {
 function confirmMove(usi) {
   const side = inputStep === 'gote' ? 'gote' : 'sente';
   const text = usiToText(usi, sfens[cursor], side);
+
+  if (onlineMode) {
+    // オンラインモード: 自分の陣営だけ確定して commit を送信する
+    if (side === 'sente') pendingSente = { usi, text };
+    else                  pendingGote  = { usi, text };
+    inputStep        = null;
+    selectedFrom     = null;
+    legalTargets     = null;
+    promotionPending = null;
+    hidePromotionUI();
+    onlineCommitted  = true;
+    commitMoveOnline(sfens[cursor], usi);
+    return;
+  }
+
+  // ホットシートモード（従来）
   if (side === 'sente') {
     pendingSente = { usi, text };
     inputStep    = 'gote';
@@ -306,6 +328,22 @@ function confirmMove(usi) {
   }
   selectedFrom = null; legalTargets = null;
   promotionPending = null; hidePromotionUI();
+}
+
+function handleTurnComplete(senteUsi, goteUsi) {
+  const sText = usiToText(senteUsi, sfens[cursor], 'sente');
+  const gText = usiToText(goteUsi,  sfens[cursor], 'gote');
+  branchAndAppend(senteUsi, goteUsi, sText, gText);
+  // branchAndAppend が phase='reveal'、resetInput() を呼んでいる
+  onlineCommitted = false;
+  render();
+  // 開示を 1.5s 表示してから次の局面へ
+  setTimeout(() => {
+    cursor++;
+    phase = 'position';
+    if (onlineSide === 'gote') inputStep = 'gote';
+    render();
+  }, 1500);
 }
 
 // ── Promotion UI ──────────────────────────────────────────────────────────────
@@ -353,6 +391,7 @@ function getHandPieceAt(hand, y0, sx, sy) {
 function handleSvgClick(event) {
   if (phase !== 'position') return;
   if (promotionPending)     return;
+  if (onlineMode && onlineCommitted) return;
 
   const { x: sx, y: sy } = svgCoords(event);
   const gameOver = getGameOverMsg();
@@ -626,7 +665,19 @@ function render() {
   } else {
     overlay = hasInput ? computeInputOverlay() : null;
 
-    if (bothReady) {
+    if (onlineMode) {
+      if (onlineCommitted) {
+        moveText  = onlineSide === 'sente'
+          ? (pendingSente?.text || '') : (pendingGote?.text || '');
+        phaseText = '着手確定 — 相手の着手を待っています';
+      } else if (gameOver) {
+        phaseText = gameOver;
+      } else if (onlineSide === 'gote') {
+        phaseText = selectedFrom ? '後手の手を選択中' : '後手の手を選んでください';
+      } else {
+        phaseText = selectedFrom ? '先手の手を選択中' : '先手の手を選んでください';
+      }
+    } else if (bothReady) {
       moveText  = `${pendingSente.text}　${pendingGote.text}`;
       phaseText = '解決してください';
     } else if (pendingSente) {
@@ -648,7 +699,8 @@ function render() {
   const svg = document.getElementById('board');
   svg.setAttribute('viewBox', `0 0 ${SVG_W} ${SVG_H}`);
   svg.innerHTML = renderSvg(pos, overlay);
-  svg.style.cursor = (phase === 'position' && !gameOver) ? 'pointer' : 'default';
+  svg.style.cursor = (phase === 'position' && !gameOver && !(onlineMode && onlineCommitted))
+    ? 'pointer' : 'default';
 
   document.getElementById('phase-label').textContent  = phaseText;
   document.getElementById('move-display').textContent = moveText;
@@ -661,18 +713,27 @@ function render() {
   const btnNext = document.getElementById('btn-next');
   const btnPrev = document.getElementById('btn-prev');
 
-  btnNext.textContent = bothReady ? '解決 →' : '次 →';
-  btnNext.disabled    = !(
-    bothReady ||
-    phase === 'reveal' ||
-    (phase === 'position' && !hasInput && cursor < kifu.plies.length)
-  );
-  btnPrev.disabled    = (
-    cursor === 0 && phase === 'position' && !hasInput && !promotionPending
-  );
+  if (onlineMode) {
+    btnNext.textContent = '次 →';
+    btnNext.disabled    = true;
+    btnPrev.disabled    = true;
+  } else {
+    btnNext.textContent = bothReady ? '解決 →' : '次 →';
+    btnNext.disabled    = !(
+      bothReady ||
+      phase === 'reveal' ||
+      (phase === 'position' && !hasInput && cursor < kifu.plies.length)
+    );
+    btnPrev.disabled    = (
+      cursor === 0 && phase === 'position' && !hasInput && !promotionPending
+    );
+  }
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
+
+// Escape キーと閉じるボタンの両方から呼べるようモジュールスコープに置く
+let closeModal = () => {};
 
 document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('board').addEventListener('click', handleSvgClick);
@@ -698,11 +759,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (e.key === 'Escape') {
       const modal = document.getElementById('online-modal');
       if (modal.classList.contains('visible')) {
-        disconnectOnline();
-        modal.classList.remove('visible');
-        document.getElementById('online-status').textContent = '—';
-        document.getElementById('btn-connect').disabled = false;
-        document.getElementById('btn-connect').textContent = '入室';
+        closeModal();
       } else {
         resetInput(); render();
       }
@@ -716,12 +773,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     const btnConn   = document.getElementById('btn-connect');
     const btnClose  = document.getElementById('btn-online-close');
 
-    const closeModal = () => {
+    closeModal = () => {
       disconnectOnline();
+      if (onlineMode) {
+        onlineMode      = false;
+        onlineSide      = null;
+        onlineCommitted = false;
+        resetToNew();
+      }
       modal.classList.remove('visible');
       statusEl.textContent = '—';
       btnConn.disabled = false;
       btnConn.textContent = '入室';
+      render();
     };
 
     document.getElementById('btn-online').addEventListener('click', () => {
@@ -740,12 +804,30 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       btnConn.disabled = true;
       statusEl.textContent = '接続中…';
-      await connectOnline(roomKey, secret, (state, msg) => {
-        statusEl.textContent = msg;
-        if (state === 'error' || state === 'disconnected') {
-          btnConn.disabled = false;
-          btnConn.textContent = '入室';
-        }
+      await connectOnline(roomKey, secret, {
+        onStatus: (state, msg) => {
+          statusEl.textContent = msg;
+          if (state === 'ready' && !onlineMode) {
+            // 握手完了（初回のみ）→ オンラインモード開始、モーダルを閉じる
+            onlineMode      = true;
+            onlineSide      = getMySide();
+            onlineCommitted = false;
+            resetToNew();
+            if (onlineSide === 'gote') inputStep = 'gote';
+            modal.classList.remove('visible');
+            render();
+          } else if (state === 'error' || state === 'disconnected') {
+            if (onlineMode) {
+              onlineMode      = false;
+              onlineSide      = null;
+              onlineCommitted = false;
+            }
+            btnConn.disabled = false;
+            btnConn.textContent = '入室';
+            render();
+          }
+        },
+        onTurnComplete: handleTurnComplete,
       });
     });
   }
