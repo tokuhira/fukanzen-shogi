@@ -1,0 +1,13 @@
+{
+  "name": "protocol-wasm",
+  "type": "module",
+  "version": "0.6.0",
+  "files": [
+    "protocol_wasm_bg.wasm",
+    "protocol_wasm.js"
+  ],
+  "main": "protocol_wasm.js",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

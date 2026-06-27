@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>protocol-wasm Step B 確認</title>
+</head>
+<body>
+<pre id="out" style="font-family:monospace;font-size:13px;white-space:pre-wrap"></pre>
+<script type="module">
+import init, { ProtocolSession } from './protocol-wasm/protocol_wasm.js';
+
+const log = (msg) => {
+  document.getElementById('out').textContent += msg + '\n';
+  console.log(msg);
+};
+
+await init();
+log('=== Step B: ProtocolSession ローカル動作確認 ===\n');
+
+const SFEN = 'lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1';
+
+// ── 先手セッション ──
+const sente = new ProtocolSession('sente', 'mypassword');
+const gote  = new ProtocolSession('gote',  'mypassword');
+
+log('[1] hello_msg');
+const sHello = sente.hello_msg();
+const gHello = gote.hello_msg();
+log('  sente hello: ' + sHello);
+log('  gote  hello: ' + gHello);
+
+log('\n[2] 握手: 双方 hello を feed');
+const sResult = sente.feed(gHello);
+const gResult = gote.feed(sHello);
+log('  sente.feed(gote hello) → ' + sResult);
+log('  gote.feed(sente hello) → ' + gResult);
+
+log('\n[3] commit_move (先手: 7七歩→7六歩)');
+const sCommit = sente.commit_move(SFEN, '7g7f');
+log('  sente.commit_move → ' + sCommit);
+
+log('\n[4] commit_move (後手: 3三歩→3四歩)');
+const gCommit = gote.commit_move(SFEN, '3c3d');
+log('  gote.commit_move → ' + gCommit);
+
+// commit メッセージ本体を取り出して相互に feed
+const sCommitMsg = JSON.parse(sCommit).message;
+const gCommitMsg = JSON.parse(gCommit).message;
+
+log('\n[5] peer commit を feed（→ both_committed になるか）');
+const sFeedCommit = sente.feed(JSON.stringify(gCommitMsg));
+const gFeedCommit = gote.feed(JSON.stringify(sCommitMsg));
+log('  sente.feed(gote commit) → ' + sFeedCommit);
+log('  gote.feed(sente commit) → ' + gFeedCommit);
+
+log('\n[6] reveal_msg');
+const sReveal = sente.reveal_msg();
+const gReveal = gote.reveal_msg();
+log('  sente.reveal_msg → ' + sReveal);
+log('  gote.reveal_msg  → ' + gReveal);
+
+const sRevealMsg = JSON.parse(sReveal).message;
+const gRevealMsg = JSON.parse(gReveal).message;
+
+log('\n[7] peer reveal を feed（→ both_revealed になるか）');
+const sFeedReveal = sente.feed(JSON.stringify(gRevealMsg));
+const gFeedReveal = gote.feed(JSON.stringify(sRevealMsg));
+log('  sente.feed(gote reveal) → ' + sFeedReveal);
+log('  gote.feed(sente reveal) → ' + gFeedReveal);
+
+log('\n[8] ack_msg');
+const sAck = sente.ack_msg();
+const gAck = gote.ack_msg();
+log('  sente.ack_msg → ' + sAck);
+log('  gote.ack_msg  → ' + gAck);
+
+const sAckMsg = JSON.parse(sAck).message;
+const gAckMsg = JSON.parse(gAck).message;
+
+log('\n[9] peer ack を feed（→ turn_complete になるか）');
+const sFeedAck = sente.feed(JSON.stringify(gAckMsg));
+const gFeedAck = gote.feed(JSON.stringify(sAckMsg));
+log('  sente.feed(gote ack) → ' + sFeedAck);
+log('  gote.feed(sente ack) → ' + gFeedAck);
+
+log('\n=== 完了 ===');
+</script>
+</body>
+</html>
