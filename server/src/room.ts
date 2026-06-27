@@ -40,8 +40,11 @@ export class GameRoom implements DurableObject {
         existing[0].send(JSON.stringify({ type: "peer_reconnected" }));
         // 再接続プレイヤーへ通知
         server.send(JSON.stringify({ type: "you_reconnected" }));
+      } else {
+        // existing.length === 0: 全員切断後の最初の接続
+        // stale な gameStarted をリセットして新規ゲームとして扱う
+        await this.state.storage.delete("gameStarted");
       }
-      // existing.length === 0: 両者切断中 → 次の再接続者が来たら片方だけいる状態になる
     }
 
     return new Response(null, { status: 101, webSocket: client });

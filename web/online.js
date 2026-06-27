@@ -162,6 +162,9 @@ function _onWsClose() {
 // ── 受信ディスパッチ ──────────────────────────────────────────────────────────
 
 function _handleMessage(data, secret) {
+  // disconnectOnline() が ws = null を設定済み → 切断処理中のメッセージは無視
+  if (!ws) return;
+
   let msg;
   try { msg = JSON.parse(data); } catch { return; }
 
@@ -177,6 +180,11 @@ function _handleMessage(data, secret) {
   }
 
   if (msg.type === 'peer_disconnected') {
+    if (!session) {
+      // 対局開始前に相手が切断 → 自分の WS も閉じてサーバー側リセットをトリガー
+      if (ws) { ws.close(); ws = null; }
+      return;
+    }
     // 相手切断: ゲーム状態を維持して再接続を待つ
     _resetTurnState();
     _cbs?.onStatus('peer_disconnected', '相手が切断しました。再接続を待っています…');
@@ -184,6 +192,12 @@ function _handleMessage(data, secret) {
   }
 
   if (msg.type === 'you_reconnected') {
+    if (!session) {
+      // session なしで再接続フローを受信（stale gameStarted）
+      // WS を閉じてサーバー側のリセットをトリガー
+      if (ws) { ws.close(); ws = null; }
+      return;
+    }
     // 自分が再接続プレイヤー: reconnect メッセージを送信
     const sfens = _cbs?.getSfens?.() ?? [];
     const currentSfen = sfens[sfens.length - 1] ?? '';
