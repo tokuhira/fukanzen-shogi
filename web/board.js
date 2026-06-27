@@ -977,9 +977,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             onlineWaiting    = false;
             onlineWaitingMsg = '';
             onlineCommitted  = false;
-            if (onlineSide === 'gote') inputStep = 'gote';
-            else                       inputStep = 'sente';
-            resetInput();
+            resetInput();  // selectedFrom・legalTargets 等をクリア（inputStep は null になる）
+            inputStep = onlineSide === 'gote' ? 'gote' : 'sente';
           }
           render();
         },
