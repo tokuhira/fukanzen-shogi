@@ -330,4 +330,77 @@ mod tests {
         assert_eq!(sa, peer_action);
         assert_eq!(ga, local_action);
     }
+
+    /// 先手が投了: ターン完了後に get_actions が (Resign, 通常着手) を返す
+    #[test]
+    fn sente_resign_completes_turn() {
+        let pos = Position::initial();
+        let hash = board_hash(&pos);
+        let mut s = TurnSession::new(Side::Sente, hash);
+
+        // 先手（自分）が投了を commit
+        let local_nonce = Nonce([1u8; 32]);
+        s.local_commit(Action::Resign, local_nonce).unwrap();
+
+        // 後手（相手）は通常着手
+        let peer_action = mv("3c3d");
+        let peer_nonce  = Nonce([2u8; 32]);
+        let peer_commit = make_commit(peer_action, &peer_nonce);
+        s.receive_peer_commit(peer_commit).unwrap();
+
+        s.local_reveal().unwrap();
+        s.receive_peer_reveal(peer_action, peer_nonce, hash).unwrap();
+        s.local_ack().unwrap();
+        s.receive_peer_ack();
+
+        assert!(s.is_complete());
+        let (sa, ga) = s.get_actions().unwrap();
+        assert_eq!(sa, Action::Resign);
+        assert_eq!(ga, peer_action);
+    }
+
+    /// 両者投了: ターン完了後に get_actions が (Resign, Resign) を返す
+    #[test]
+    fn mutual_resign_completes_turn() {
+        let pos = Position::initial();
+        let hash = board_hash(&pos);
+        let mut s = TurnSession::new(Side::Sente, hash);
+
+        let local_nonce = Nonce([1u8; 32]);
+        s.local_commit(Action::Resign, local_nonce).unwrap();
+
+        let peer_nonce  = Nonce([2u8; 32]);
+        let peer_commit = make_commit(Action::Resign, &peer_nonce);
+        s.receive_peer_commit(peer_commit).unwrap();
+
+        s.local_reveal().unwrap();
+        s.receive_peer_reveal(Action::Resign, peer_nonce, hash).unwrap();
+        s.local_ack().unwrap();
+        s.receive_peer_ack();
+
+        assert!(s.is_complete());
+        let (sa, ga) = s.get_actions().unwrap();
+        assert_eq!(sa, Action::Resign);
+        assert_eq!(ga, Action::Resign);
+    }
+
+    /// 投了コミットの拘束性: resign で commit して別の着手で reveal しようとするとエラー
+    #[test]
+    fn resign_commit_binding() {
+        let pos = Position::initial();
+        let hash = board_hash(&pos);
+        let mut s = TurnSession::new(Side::Sente, hash);
+
+        let local_nonce = Nonce([1u8; 32]);
+        s.local_commit(Action::Resign, local_nonce).unwrap();
+
+        // 相手は resign で commit したが別着手で reveal しようとする
+        let peer_nonce  = Nonce([2u8; 32]);
+        let peer_commit = make_commit(Action::Resign, &peer_nonce);
+        s.receive_peer_commit(peer_commit).unwrap();
+
+        let wrong_action = mv("3c3d");
+        let result = s.receive_peer_reveal(wrong_action, peer_nonce, hash);
+        assert_eq!(result, Err(ProtocolError::CommitMismatch));
+    }
 }

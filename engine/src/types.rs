@@ -327,4 +327,29 @@ mod tests {
         );
         assert_eq!(a.to_usi(), "P*5e");
     }
+
+    #[test]
+    fn action_resign_usi_roundtrip() {
+        assert_eq!(Action::from_usi("resign"), Some(Action::Resign));
+        assert_eq!(Action::Resign.to_usi(), "resign");
+    }
+
+    #[test]
+    fn action_resign_is_resign() {
+        assert!(Action::Resign.is_resign());
+        assert!(!Action::from_usi("7g7f").unwrap().is_resign());
+        assert!(!Action::from_usi("P*5e").unwrap().is_resign());
+    }
+
+    #[test]
+    fn action_resign_from_sq_is_none() {
+        assert_eq!(Action::Resign.from_sq(), None);
+    }
+
+    #[test]
+    fn action_from_usi_invalid_returns_none() {
+        assert_eq!(Action::from_usi(""), None);
+        assert_eq!(Action::from_usi("xyz"), None);
+        assert_eq!(Action::from_usi("resign2"), None);
+    }
 }
