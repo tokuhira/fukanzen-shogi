@@ -783,8 +783,8 @@ function render() {
 
   const btnResign = document.getElementById('btn-resign');
   if (btnResign) {
-    btnResign.style.display = onlineMode ? 'inline-block' : 'none';
-    btnResign.disabled      = !onlineMode || onlineGameOver || onlineCommitted || onlineWaiting;
+    btnResign.style.display = (onlineMode && !onlineGameOver) ? 'inline-block' : 'none';
+    btnResign.disabled      = onlineCommitted || onlineWaiting;
   }
 }
 
