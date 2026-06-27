@@ -21,6 +21,8 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 10px;
+  user-select: none;
+  cursor: default;
 }
 
 h1 {
