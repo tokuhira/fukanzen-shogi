@@ -4,7 +4,10 @@ import init, {
   legal_actions as wasmLegalActions,
 } from './wasm/engine_wasm.js';
 
-import { connectOnline, disconnectOnline, commitMoveOnline, getMySide } from './online.js';
+import {
+  connectOnline, disconnectOnline, commitMoveOnline, getMySide,
+  reconnectOnline, hasReconnectableSession,
+} from './online.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -153,11 +156,13 @@ let gameOverCache = { cursor: -1, msg: null };
 
 // ── Online mode state ─────────────────────────────────────────────────────────
 
-let onlineMode      = false;
-let onlineSide      = null;   // 'sente' | 'gote'
-let onlineCommitted = false;  // 自分の commit 送信済み（解決待ち中）
-let onlineGameOver  = false;  // 終局確定（review 中も true を維持）
-let onlineEndMsg    = '';     // 終局理由の表示文字列（投了時など）
+let onlineMode            = false;
+let onlineSide            = null;    // 'sente' | 'gote'
+let onlineCommitted       = false;   // 自分の commit 送信済み（解決待ち中）
+let onlineGameOver        = false;   // 終局確定（review 中も true を維持）
+let onlineEndMsg          = '';      // 終局理由の表示文字列（投了時など）
+let onlineWaiting         = false;   // 切断待機中（相手切断 or 自分切断後の再接続待ち）
+let onlineWaitingMsg      = '';      // 待機時の表示メッセージ
 
 // ── Kifu management ───────────────────────────────────────────────────────────
 
@@ -336,6 +341,9 @@ function endOnlineGame(msg) {
   onlineGameOver  = true;
   onlineEndMsg    = msg;
   onlineCommitted = false;
+  onlineWaiting   = false;
+  // 終局後は WS を閉じる（intentional なので onlineMode は破棄しない）
+  disconnectOnline();
   render();
 }
 
@@ -699,12 +707,14 @@ function render() {
     overlay = hasInput ? computeInputOverlay() : null;
 
     if (onlineMode) {
-      if (onlineCommitted) {
+      if (onlineGameOver) {
+        phaseText = onlineEndMsg || gameOver || '終局';
+      } else if (onlineWaiting) {
+        phaseText = onlineWaitingMsg;
+      } else if (onlineCommitted) {
         moveText  = onlineSide === 'sente'
           ? (pendingSente?.text || '') : (pendingGote?.text || '');
         phaseText = '着手確定 — 相手の着手を待っています';
-      } else if (onlineGameOver) {
-        phaseText = onlineEndMsg || gameOver || '終局';
       } else if (onlineSide === 'gote') {
         phaseText = selectedFrom ? '後手の手を選択中' : '後手の手を選んでください';
       } else {
@@ -774,7 +784,7 @@ function render() {
   const btnResign = document.getElementById('btn-resign');
   if (btnResign) {
     btnResign.style.display = onlineMode ? 'inline-block' : 'none';
-    btnResign.disabled      = !onlineMode || onlineGameOver || onlineCommitted;
+    btnResign.disabled      = !onlineMode || onlineGameOver || onlineCommitted || onlineWaiting;
   }
 }
 
@@ -788,7 +798,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btn-next').addEventListener('click', goNext);
   document.getElementById('btn-prev').addEventListener('click', goPrev);
   document.getElementById('btn-demo').addEventListener('click', () => { loadPlies(DEMO_PLIES); render(); });
-  document.getElementById('btn-new').addEventListener('click',  () => { resetToNew(); render(); });
+  document.getElementById('btn-new').addEventListener('click', () => {
+    if (onlineGameOver) {
+      // 終局後のクリーンアップ（WS は endOnlineGame で既に閉じ済み）
+      onlineMode            = false;
+      onlineSide            = null;
+      onlineGameOver        = false;
+      onlineEndMsg          = '';
+      onlineCommitted       = false;
+      onlineWaiting         = false;
+      onlineWaitingMsg      = '';
+    }
+    resetToNew();
+    render();
+  });
 
   document.getElementById('btn-promote').addEventListener('click', () => {
     if (!promotionPending) return;
@@ -822,14 +845,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     const btnClose  = document.getElementById('btn-online-close');
 
     closeModal = () => {
-      disconnectOnline();
-      if (onlineMode) {
-        onlineMode      = false;
-        onlineSide      = null;
-        onlineCommitted = false;
-        onlineGameOver  = false;
-        onlineEndMsg    = '';
-        resetToNew();
+      if (!onlineGameOver) {
+        // ゲーム中の退室: 完全切断
+        disconnectOnline();
+        if (onlineMode) {
+          onlineMode       = false;
+          onlineSide       = null;
+          onlineCommitted  = false;
+          onlineGameOver   = false;
+          onlineEndMsg     = '';
+          onlineWaiting    = false;
+          onlineWaitingMsg = '';
+          resetToNew();
+        }
       }
       modal.classList.remove('visible');
       statusEl.textContent = '—';
@@ -855,6 +883,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     btnClose.addEventListener('click', closeModal);
 
     btnConn.addEventListener('click', async () => {
+      // 「再接続」ボタンとして機能する場合（self_disconnected 後）
+      if (btnConn.textContent === '再接続' && hasReconnectableSession()) {
+        btnConn.disabled = true;
+        statusEl.textContent = '再接続中…';
+        await reconnectOnline();
+        return;
+      }
+
       const roomKey = document.getElementById('input-room').value.trim();
       const secret  = document.getElementById('input-secret').value;
       if (!roomKey) {
@@ -863,25 +899,67 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       btnConn.disabled = true;
       statusEl.textContent = '接続中…';
-      await connectOnline(roomKey, secret, {
+
+      const callbacks = {
         onStatus: (state, msg) => {
           statusEl.textContent = msg;
-          if (state === 'ready' && !onlineMode) {
-            // 握手完了（初回のみ）→ オンラインモード開始、モーダルを閉じる
-            onlineMode      = true;
-            onlineSide      = getMySide();
-            onlineCommitted = false;
-            onlineGameOver  = false;
-            onlineEndMsg    = '';
-            resetToNew();
-            if (onlineSide === 'gote') inputStep = 'gote';
+
+          if (state === 'ready') {
+            if (!onlineMode) {
+              // 初回接続: オンラインモード開始
+              onlineMode       = true;
+              onlineSide       = getMySide();
+              onlineCommitted  = false;
+              onlineGameOver   = false;
+              onlineEndMsg     = '';
+              onlineWaiting    = false;
+              onlineWaitingMsg = '';
+              resetToNew();
+              if (onlineSide === 'gote') inputStep = 'gote';
+            } else {
+              // 再接続完了: ゲーム状態はそのまま、waiting 解除
+              onlineWaiting    = false;
+              onlineWaitingMsg = '';
+              onlineCommitted  = false;
+            }
             modal.classList.remove('visible');
+            btnConn.disabled = false;
+            btnConn.textContent = '入室';
             render();
-          } else if (state === 'error' || state === 'disconnected') {
-            if (onlineMode) {
-              onlineMode      = false;
-              onlineSide      = null;
-              onlineCommitted = false;
+
+          } else if (state === 'peer_disconnected') {
+            // 相手が切断: ゲーム状態維持、待機表示
+            onlineWaiting    = true;
+            onlineWaitingMsg = msg;
+            onlineCommitted  = false;
+            render();
+
+          } else if (state === 'self_disconnected') {
+            // 自分が切断: 再接続可能な状態で待機
+            onlineWaiting    = true;
+            onlineWaitingMsg = msg;
+            onlineCommitted  = false;
+            btnConn.disabled = false;
+            btnConn.textContent = '再接続';
+            render();
+
+          } else if (state === 'error') {
+            if (onlineMode && !onlineGameOver) {
+              onlineWaiting    = true;
+              onlineWaitingMsg = `エラー: ${msg}`;
+            }
+            btnConn.disabled = false;
+            btnConn.textContent = '入室';
+            render();
+
+          } else if (state === 'disconnected') {
+            // intentional 切断（終局後 or 退室）
+            if (!onlineGameOver) {
+              onlineMode       = false;
+              onlineSide       = null;
+              onlineCommitted  = false;
+              onlineWaiting    = false;
+              onlineWaitingMsg = '';
             }
             btnConn.disabled = false;
             btnConn.textContent = '入室';
@@ -889,9 +967,25 @@ document.addEventListener('DOMContentLoaded', async () => {
           }
         },
         onTurnComplete:  handleTurnComplete,
-        onPeerAborted: (reason) =>
-          endOnlineGame(`中断: ${reason}`),
-      });
+        onPeerAborted:   (reason) => endOnlineGame(`中断: ${reason}`),
+        getSfens:        () => sfens,
+        onResumeAt:      (resumeSfen) => {
+          const idx = sfens.indexOf(resumeSfen);
+          if (idx >= 0) {
+            cursor           = idx;
+            phase            = 'position';
+            onlineWaiting    = false;
+            onlineWaitingMsg = '';
+            onlineCommitted  = false;
+            if (onlineSide === 'gote') inputStep = 'gote';
+            else                       inputStep = 'sente';
+            resetInput();
+          }
+          render();
+        },
+      };
+
+      await connectOnline(roomKey, secret, callbacks);
     });
   }
 

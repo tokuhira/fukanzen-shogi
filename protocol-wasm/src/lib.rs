@@ -33,6 +33,18 @@ fn random_nonce() -> Nonce {
     Nonce(bytes)
 }
 
+// ── ユーティリティ（セッション外） ───────────────────────────────────────────
+
+/// SFEN 文字列から盤面ハッシュ（hex 文字列）を計算する。
+/// 再接続時のハッシュ照合に使う。
+#[wasm_bindgen]
+pub fn sfen_hash(sfen: &str) -> String {
+    match sfen_to_position(sfen) {
+        Some(pos) => to_hex(&board_hash(&pos).0),
+        None => String::new(),
+    }
+}
+
 // ── セッション ────────────────────────────────────────────────────────────────
 
 /// ブラウザ手元で動く秘匿対戦プロトコルの状態機械。
@@ -44,6 +56,8 @@ fn random_nonce() -> Nonce {
 pub struct ProtocolSession {
     side: Side,
     my_auth_hash: SecretHash,
+    /// 初回 hello で相手から受け取った auth_hash（再接続の本人確認に使う）
+    peer_auth_hash_hex: Option<String>,
     handshake_done: bool,
     turn: Option<TurnSession>,
     /// peer commit が自分の commit より先に届いた場合のバッファ
@@ -62,6 +76,7 @@ impl ProtocolSession {
         ProtocolSession {
             side: s,
             my_auth_hash,
+            peer_auth_hash_hex: None,
             handshake_done: false,
             turn: None,
             pending_peer_commit: None,
@@ -85,6 +100,22 @@ impl ProtocolSession {
         )
     }
 
+    /// 再接続時に相手へ送るメッセージ（JSON 文字列）を返す。
+    /// - `board_hash_hex`: 現在局面の盤面ハッシュ（sfen_hash() で計算）
+    pub fn reconnect_msg(&self, board_hash_hex: &str) -> String {
+        format!(
+            r#"{{"ok":true,"message":{{"type":"reconnect","auth_hash":"{}","board_hash":"{}"}}}}"#,
+            to_hex(&self.my_auth_hash.0),
+            board_hash_hex
+        )
+    }
+
+    /// 初回 hello で受け取った相手の auth_hash（hex）を返す。
+    /// 再接続時の本人確認に使う。未取得の場合は空文字列。
+    pub fn peer_auth_hash(&self) -> String {
+        self.peer_auth_hash_hex.clone().unwrap_or_default()
+    }
+
     /// 相手から届いたメッセージを処理し、状態変化を JSON で返す。
     ///
     /// 返り値の形式:
@@ -92,6 +123,8 @@ impl ProtocolSession {
     /// - `{"ok":true,"event":"peer_committed","both_committed":true}`
     /// - `{"ok":true,"event":"peer_revealed","both_revealed":true}`
     /// - `{"ok":true,"event":"turn_complete","sente_usi":"7g7f","gote_usi":"3c3d"}`
+    /// - `{"ok":true,"event":"peer_reconnect_request","auth_hash":"...","board_hash":"..."}`
+    /// - `{"ok":true,"event":"reconnect_ack","resume_hash":"..."}`
     /// - `{"ok":false,"error":"..."}`
     pub fn feed(&mut self, msg: &str) -> String {
         let v: serde_json::Value = match serde_json::from_str(msg) {
@@ -99,16 +132,19 @@ impl ProtocolSession {
             Err(_) => return r#"{"ok":false,"error":"invalid_json"}"#.to_string(),
         };
         match v["type"].as_str() {
-            Some("hello") => self.feed_hello(&v),
-            Some("commit") => self.feed_commit(&v),
-            Some("reveal") => self.feed_reveal(&v),
-            Some("ack") => self.feed_ack(),
+            Some("hello")        => self.feed_hello(&v),
+            Some("commit")       => self.feed_commit(&v),
+            Some("reveal")       => self.feed_reveal(&v),
+            Some("ack")          => self.feed_ack(),
+            Some("reconnect")    => self.feed_reconnect(&v),
+            Some("reconnect_ack")=> self.feed_reconnect_ack(&v),
             Some("abort") => {
                 let reason = v["reason"].as_str().unwrap_or("unknown");
                 format!(r#"{{"ok":true,"event":"peer_aborted","reason":"{}"}}"#, reason)
             }
             // DO が送るシステムメッセージは JS 側が先にフィルタする想定だが念のため
-            Some("peer_joined") | Some("peer_disconnected") | Some("room_full") => {
+            Some("peer_joined") | Some("peer_disconnected") | Some("room_ready")
+            | Some("you_reconnected") | Some("peer_reconnected") => {
                 format!(r#"{{"ok":true,"event":"{}"}}"#, v["type"].as_str().unwrap())
             }
             _ => r#"{"ok":false,"error":"unknown_message_type"}"#.to_string(),
@@ -210,6 +246,7 @@ impl ProtocolSession {
         if from_hex32(auth_hex).is_none() {
             return r#"{"ok":false,"error":"invalid_auth_hash"}"#.to_string();
         }
+        self.peer_auth_hash_hex = Some(auth_hex.to_string());
 
         let peer_side = v["side"].as_str().unwrap_or("unknown");
         self.handshake_done = true;
@@ -294,5 +331,26 @@ impl ProtocolSession {
             }
         }
         r#"{"ok":true,"event":"peer_acked"}"#.to_string()
+    }
+
+    /// 相手から届いた reconnect メッセージを受け取る。
+    /// JS 側でハッシュ照合・本人確認を行うための情報を返す。
+    fn feed_reconnect(&mut self, v: &serde_json::Value) -> String {
+        let auth_hash  = v["auth_hash"].as_str().unwrap_or("");
+        let board_hash = v["board_hash"].as_str().unwrap_or("");
+        format!(
+            r#"{{"ok":true,"event":"peer_reconnect_request","auth_hash":"{}","board_hash":"{}"}}"#,
+            auth_hash,
+            board_hash
+        )
+    }
+
+    /// 相手から届いた reconnect_ack メッセージ（再接続承認）を受け取る。
+    fn feed_reconnect_ack(&mut self, v: &serde_json::Value) -> String {
+        let resume_hash = v["board_hash"].as_str().unwrap_or("");
+        format!(
+            r#"{{"ok":true,"event":"reconnect_ack","resume_hash":"{}"}}"#,
+            resume_hash
+        )
     }
 }

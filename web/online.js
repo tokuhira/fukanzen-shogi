@@ -11,10 +11,15 @@
  *   → peer_reveal 検証後 ack 送信（自動）
  *   → peer_ack 受信 → callbacks.onTurnComplete(senteUsi, goteUsi) 呼び出し
  *
+ * 切断・再接続フロー（Step F）:
+ *   peer 切断 → onStatus('peer_disconnected', ...) → 相手の再接続を待機
+ *   自分切断 → セッション保持・onStatus('self_disconnected', ...) → reconnectOnline() で再接続
+ *   再接続時: you_reconnected → reconnect メッセージ送信 → reconnect_ack で再開
+ *
  * I/O（WebSocket 送受信）はここで担い、ゲームの判定は ProtocolSession (Wasm) が担う。
  */
 
-import initProtocol, { ProtocolSession } from './protocol-wasm/protocol_wasm.js';
+import initProtocol, { ProtocolSession, sfen_hash as sfenHash } from './protocol-wasm/protocol_wasm.js';
 
 // 本番 Workers URL。ローカル確認時は wrangler dev の URL に変更する。
 const WS_BASE_URL = 'wss://fukanzen-shogi-ws.tokuhira.workers.dev';
@@ -25,52 +30,86 @@ let ws       = null;
 let session  = null;
 let mySide   = null;   // 'sente' | 'gote'（陣営決定後に確定）
 
+// 再接続のためにルームキー・シークレットを保持
+let _roomKey = null;
+let _secret  = null;
+
+// 意図的切断フラグ（disconnectOnline() / endGame 後の WS close を区別する）
+let _intentionalDisconnect = false;
+
 // 一手あたりのターン状態
 let myCommitted = false;  // commit 送信済み
 let revealSent  = false;  // reveal 送信済み
 
 // コールバック
-let _cbs = null; // { onStatus, onTurnComplete }
+let _cbs = null;
+// { onStatus, onTurnComplete, onPeerAborted, getSfens, onResumeAt }
+//   onStatus(state, msg):
+//     'waiting'|'handshaking'|'ready'|'disconnected'|'error'
+//     'peer_disconnected'|'self_disconnected'|'peer_reconnecting'|'reconnected'
+//   onTurnComplete(senteUsi, goteUsi)
+//   onPeerAborted(reason)
+//   getSfens() → string[]  ← 再接続時の盤面ハッシュ照合に使う
+//   onResumeAt(sfen)       ← 再接続後の再開局面を board.js へ通知する
 
 // ── 公開 API ─────────────────────────────────────────────────────────────────
 
 /**
- * ルームへ接続する。
- * @param {string}   roomKey
- * @param {string}   secret   共有パスワード
- * @param {{ onStatus, onTurnComplete }} callbacks
- *   onStatus(state, msg) — state: 'waiting'|'handshaking'|'ready'|'disconnected'|'error'
- *   onTurnComplete(senteUsi, goteUsi) — ターン確定時に board.js が受け取る
+ * ルームへ接続する（新規ゲーム）。
+ * 既存セッションがある場合は破棄して新規接続する。
  */
 export async function connectOnline(roomKey, secret, callbacks) {
-  _cbs = callbacks;
+  _cbs     = callbacks;
+  _roomKey = roomKey;
+  _secret  = secret;
 
-  if (ws) { ws.close(); ws = null; session = null; }
+  if (ws) {
+    _intentionalDisconnect = true;
+    ws.close();
+    ws = null;
+  }
+  session = null;
+  mySide  = null;
   _resetTurnState();
 
   await initProtocol();
 
   ws = new WebSocket(`${WS_BASE_URL}/room/${encodeURIComponent(roomKey)}`);
-
   ws.addEventListener('open',    () => _cbs?.onStatus('waiting', '相手の入室を待っています…'));
-  ws.addEventListener('close',   () => { _cbs?.onStatus('disconnected', '切断されました'); session = null; });
-  ws.addEventListener('error',   () => { _cbs?.onStatus('error', '接続エラー');            session = null; });
+  ws.addEventListener('close',   _onWsClose);
+  ws.addEventListener('error',   () => { _cbs?.onStatus('error', '接続エラー'); });
   ws.addEventListener('message', (evt) => _handleMessage(evt.data, secret));
 }
 
-/** 接続を切断してセッションを破棄する。 */
+/**
+ * 切断後にセッションを維持したまま WebSocket だけ再接続する。
+ * connectOnline() とは異なり、session・mySide は破棄しない。
+ * you_reconnected が届いたら reconnect メッセージを自動送信する。
+ */
+export async function reconnectOnline() {
+  if (!_roomKey || !session) return;
+
+  ws = new WebSocket(`${WS_BASE_URL}/room/${encodeURIComponent(_roomKey)}`);
+  ws.addEventListener('open',    () => _cbs?.onStatus('handshaking', '再接続中…'));
+  ws.addEventListener('close',   _onWsClose);
+  ws.addEventListener('error',   () => { _cbs?.onStatus('error', '接続エラー'); });
+  ws.addEventListener('message', (evt) => _handleMessage(evt.data, _secret));
+}
+
+/** 接続を切断してセッションを完全に破棄する。 */
 export function disconnectOnline() {
-  ws?.close();
-  ws = null;
+  _intentionalDisconnect = true;
+  if (ws) ws.close();
+  ws      = null;
   session = null;
-  mySide = null;
+  mySide  = null;
   _resetTurnState();
 }
 
 /**
  * 自分の着手を commit して送信する。board.js が呼ぶ。
  * @param {string} sfen  現在局面の SFEN
- * @param {string} usi   着手の USI 表記
+ * @param {string} usi   着手の USI 表記（"resign" を含む）
  */
 export async function commitMoveOnline(sfen, usi) {
   if (!session || !ws) return;
@@ -98,6 +137,28 @@ export const getMySide = () => mySide;
 /** 接続中かどうか。 */
 export const isOnline = () => ws !== null && session !== null;
 
+/** セッションが生きている（切断後の再接続が可能な）状態かどうか。 */
+export const hasReconnectableSession = () => session !== null && ws === null;
+
+// ── WS close ハンドラ ─────────────────────────────────────────────────────────
+
+function _onWsClose() {
+  const intentional = _intentionalDisconnect;
+  _intentionalDisconnect = false;
+  ws = null;
+  _resetTurnState();
+
+  if (intentional) {
+    // 意図的切断: セッションも破棄（disconnectOnline() または終局後）
+    // ※ disconnectOnline() が session = null を呼んでいるため、
+    //   ここで再度 null にする必要はないが念のため
+    _cbs?.onStatus('disconnected', '切断されました');
+  } else {
+    // 予期せぬ切断: session を保持して再接続を待つ
+    _cbs?.onStatus('self_disconnected', '接続が切れました。再接続できます。');
+  }
+}
+
 // ── 受信ディスパッチ ──────────────────────────────────────────────────────────
 
 function _handleMessage(data, secret) {
@@ -105,6 +166,7 @@ function _handleMessage(data, secret) {
   try { msg = JSON.parse(data); } catch { return; }
 
   // ── DO からのシステムメッセージ ───────────────────────────────────────────
+
   if (msg.type === 'peer_joined' || msg.type === 'room_ready') {
     mySide  = msg.your_side;
     session = new ProtocolSession(mySide, secret);
@@ -115,8 +177,32 @@ function _handleMessage(data, secret) {
   }
 
   if (msg.type === 'peer_disconnected') {
-    _cbs?.onStatus('disconnected', '相手が切断しました');
-    session = null;
+    // 相手切断: ゲーム状態を維持して再接続を待つ
+    _resetTurnState();
+    _cbs?.onStatus('peer_disconnected', '相手が切断しました。再接続を待っています…');
+    return;
+  }
+
+  if (msg.type === 'you_reconnected') {
+    // 自分が再接続プレイヤー: reconnect メッセージを送信
+    const sfens = _cbs?.getSfens?.() ?? [];
+    const currentSfen = sfens[sfens.length - 1] ?? '';
+    const hash = currentSfen ? sfenHash(currentSfen) : '';
+    if (!hash) {
+      _cbs?.onStatus('error', '再接続: 局面ハッシュを計算できません');
+      return;
+    }
+    const result = JSON.parse(session.reconnect_msg(hash));
+    if (result.ok) {
+      ws.send(JSON.stringify(result.message));
+      _cbs?.onStatus('handshaking', '再接続中 — 相手の認証を待っています…');
+    }
+    return;
+  }
+
+  if (msg.type === 'peer_reconnected') {
+    // 相手が再接続: reconnect メッセージを待つ
+    _cbs?.onStatus('handshaking', '相手が再接続しました。認証中…');
     return;
   }
 
@@ -142,21 +228,16 @@ function _handleMessage(data, secret) {
 
     case 'peer_committed': {
       if (result.both_committed) {
-        // 両者 commit 確定 → reveal
         if (myCommitted && !revealSent) _sendReveal();
       }
-      // myCommitted が false の場合: peer commit はバッファ済み。
-      // commitMoveOnline() が後から呼ばれたとき both_committed が true になる。
       break;
     }
 
     case 'peer_commit_buffered':
-      // 自分の commit より先に届いた。commitMoveOnline() 内で自動適用される。
       break;
 
     case 'peer_revealed': {
       if (result.both_revealed) {
-        // reveal 照合完了 → ack 送信
         const ackResult = JSON.parse(session.ack_msg());
         if (ackResult.ok) {
           ws.send(JSON.stringify(ackResult.message));
@@ -174,12 +255,62 @@ function _handleMessage(data, secret) {
     }
 
     case 'peer_acked':
-      // peer の ack を受信済みだが、まだ自分の ack 前 — 通常は起きないが念のため無視
       break;
 
     case 'peer_aborted': {
       _resetTurnState();
       _cbs?.onPeerAborted?.(result.reason);
+      break;
+    }
+
+    // ── 再接続プロトコル ──────────────────────────────────────────────────
+
+    case 'peer_reconnect_request': {
+      // 残留プレイヤー側: 相手の reconnect を検証し ack を返す
+      const expectedAuthHash = session.peer_auth_hash();
+      if (!expectedAuthHash || result.auth_hash !== expectedAuthHash) {
+        ws.send(JSON.stringify({ type: 'abort', reason: 'auth_mismatch' }));
+        _cbs?.onStatus('error', '再接続: 認証失敗');
+        return;
+      }
+
+      // 棋譜の各局面ハッシュと照合して再開点を特定
+      const sfens = _cbs?.getSfens?.() ?? [];
+      let resumeSfen = null;
+      for (const sfen of sfens) {
+        if (sfenHash(sfen) === result.board_hash) {
+          resumeSfen = sfen;
+          break;
+        }
+      }
+      if (!resumeSfen) {
+        ws.send(JSON.stringify({ type: 'abort', reason: 'hash_mismatch' }));
+        _cbs?.onStatus('error', '再接続: 棋譜が一致しません');
+        return;
+      }
+
+      ws.send(JSON.stringify({ type: 'reconnect_ack', board_hash: result.board_hash }));
+      _cbs?.onStatus('ready', '対局中');
+      _cbs?.onResumeAt?.(resumeSfen);
+      break;
+    }
+
+    case 'reconnect_ack': {
+      // 再接続プレイヤー側: 相手から承認を受けて再開点を特定
+      const sfens = _cbs?.getSfens?.() ?? [];
+      let resumeSfen = null;
+      for (const sfen of sfens) {
+        if (sfenHash(sfen) === result.resume_hash) {
+          resumeSfen = sfen;
+          break;
+        }
+      }
+      if (!resumeSfen) {
+        _cbs?.onStatus('error', '再接続: 再開局面が見つかりません');
+        return;
+      }
+      _cbs?.onStatus('ready', '対局中');
+      _cbs?.onResumeAt?.(resumeSfen);
       break;
     }
   }
@@ -202,8 +333,6 @@ function _sendReveal() {
 function _completeTurn(senteUsi, goteUsi) {
   _resetTurnState();
   _cbs?.onTurnComplete?.(senteUsi, goteUsi);
-  // onTurnComplete の後に onStatus('ready') を呼ぶと
-  // board.js 側の再レンダー後に上書きされるため最後に呼ぶ
   _cbs?.onStatus('ready', '対局中');
 }
 
