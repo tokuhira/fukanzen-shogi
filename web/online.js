@@ -193,9 +193,13 @@ function _handleMessage(data, secret) {
 
   if (msg.type === 'you_reconnected') {
     if (!session) {
-      // session なしで再接続フローを受信（stale gameStarted）
-      // WS を閉じてサーバー側のリセットをトリガー
-      if (ws) { ws.close(); ws = null; }
+      // session なしで再接続フローを受信（stale gameStarted + zombie WS）
+      // request_reset を送ってサーバー側の全 WS（ゾンビ含む）を強制クローズ
+      if (ws) {
+        try { ws.send(JSON.stringify({ type: 'request_reset' })); } catch {}
+        ws.close();
+        ws = null;
+      }
       return;
     }
     // 自分が再接続プレイヤー: reconnect メッセージを送信

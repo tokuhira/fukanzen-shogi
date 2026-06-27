@@ -51,6 +51,25 @@ export class GameRoom implements DurableObject {
   }
 
   webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {
+    // request_reset: stale WS / zombie WS の強制クリーンアップ
+    if (typeof message === "string") {
+      try {
+        const msg = JSON.parse(message) as { type?: string };
+        if (msg.type === "request_reset") {
+          void this.state.storage.delete("gameStarted");
+          for (const other of this.state.getWebSockets()) {
+            if (other !== ws) {
+              try { other.close(1000, "room reset"); } catch {}
+            }
+          }
+          ws.close(1000, "room reset");
+          return;
+        }
+      } catch {
+        // JSON でない場合は通常リレー
+      }
+    }
+    // 通常リレー
     for (const other of this.state.getWebSockets()) {
       if (other !== ws) {
         other.send(message);
