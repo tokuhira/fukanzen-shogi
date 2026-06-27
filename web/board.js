@@ -428,17 +428,6 @@ function computeRevealOverlay() {
 function computeInputOverlay() {
   const overlay = { board: [], sHand: null, gHand: null, legalDots: null, selectedSquare: null };
 
-  if (pendingSente) {
-    const m = parseUsi(pendingSente.usi);
-    if (m.isDrop) overlay.sHand = new Set([m.kind]);
-    else          overlay.board.push(m.from, m.to);
-  }
-  if (pendingGote) {
-    const m = parseUsi(pendingGote.usi);
-    if (m.isDrop) overlay.gHand = new Set([m.kind]);
-    else          overlay.board.push(m.from, m.to);
-  }
-
   if (selectedFrom?.board) {
     overlay.selectedSquare = selectedFrom.board;
   } else if (selectedFrom?.hand) {
