@@ -6,6 +6,17 @@ export class GameRoom implements DurableObject {
   }
 
   async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+
+    // 診断エンドポイント: GET /room/:key/status
+    if (request.method === "GET" && url.pathname.endsWith("/status")) {
+      const gameStarted = (await this.state.storage.get<boolean>("gameStarted")) ?? false;
+      const connections = this.state.getWebSockets().length;
+      return new Response(JSON.stringify({ gameStarted, connections }, null, 2), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     if (request.headers.get("Upgrade") !== "websocket") {
       return new Response("WebSocket required", { status: 426 });
     }

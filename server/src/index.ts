@@ -9,7 +9,7 @@ interface Env {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    const match = url.pathname.match(/^\/room\/([^/]+)$/);
+    const match = url.pathname.match(/^\/room\/([^/]+?)(\/status)?$/);
 
     if (!match) {
       return new Response("Not found", { status: 404 });
