@@ -37,6 +37,10 @@ let _secret  = null;
 // 意図的切断フラグ（disconnectOnline() / endGame 後の WS close を区別する）
 let _intentionalDisconnect = false;
 
+// request_reset 後の自動リトライ制御
+let _pendingReset  = false;   // true のとき _onWsClose で自動再接続する
+let _resetAttempts = 0;       // 連続リトライ回数（無限ループ防止）
+
 // 一手あたりのターン状態
 let myCommitted = false;  // commit 送信済み
 let revealSent  = false;  // reveal 送信済み
@@ -59,9 +63,10 @@ let _cbs = null;
  * 既存セッションがある場合は破棄して新規接続する。
  */
 export async function connectOnline(roomKey, secret, callbacks) {
-  _cbs     = callbacks;
-  _roomKey = roomKey;
-  _secret  = secret;
+  _cbs           = callbacks;
+  _roomKey       = roomKey;
+  _secret        = secret;
+  _resetAttempts = 0;
 
   if (ws) {
     _intentionalDisconnect = true;
@@ -74,11 +79,15 @@ export async function connectOnline(roomKey, secret, callbacks) {
 
   await initProtocol();
 
-  ws = new WebSocket(`${WS_BASE_URL}/room/${encodeURIComponent(roomKey)}`);
+  _openWs();
+}
+
+function _openWs() {
+  ws = new WebSocket(`${WS_BASE_URL}/room/${encodeURIComponent(_roomKey)}`);
   ws.addEventListener('open',    () => _cbs?.onStatus('waiting', '相手の入室を待っています…'));
   ws.addEventListener('close',   _onWsClose);
   ws.addEventListener('error',   () => { _cbs?.onStatus('error', '接続エラー'); });
-  ws.addEventListener('message', (evt) => _handleMessage(evt.data, secret));
+  ws.addEventListener('message', (evt) => _handleMessage(evt.data, _secret));
 }
 
 /**
@@ -143,15 +152,20 @@ export const hasReconnectableSession = () => session !== null && ws === null;
 // ── WS close ハンドラ ─────────────────────────────────────────────────────────
 
 function _onWsClose() {
-  const intentional = _intentionalDisconnect;
+  const intentional  = _intentionalDisconnect;
+  const pendingReset = _pendingReset;
   _intentionalDisconnect = false;
+  _pendingReset          = false;
   ws = null;
   _resetTurnState();
 
+  if (pendingReset) {
+    // request_reset 後の自動リトライ: ユーザーにエラーを見せずに再接続する
+    setTimeout(_openWs, 600);
+    return;
+  }
+
   if (intentional) {
-    // 意図的切断: セッションも破棄（disconnectOnline() または終局後）
-    // ※ disconnectOnline() が session = null を呼んでいるため、
-    //   ここで再度 null にする必要はないが念のため
     _cbs?.onStatus('disconnected', '切断されました');
   } else {
     // 予期せぬ切断: session を保持して再接続を待つ
@@ -193,9 +207,16 @@ function _handleMessage(data, secret) {
 
   if (msg.type === 'you_reconnected') {
     if (!session) {
-      // session なしで再接続フローを受信（stale gameStarted + zombie WS）
-      // request_reset を送ってサーバー側の全 WS（ゾンビ含む）を強制クローズ
+      // session なしで再接続フロー受信 = stale gameStarted + zombie WS
+      // 3回まで request_reset → 自動リトライ。超えたらエラーで止める
+      _resetAttempts++;
+      if (_resetAttempts > 3) {
+        _cbs?.onStatus('error', '入室できません。ページをリロードしてください。');
+        if (ws) { _intentionalDisconnect = true; ws.close(); ws = null; }
+        return;
+      }
       if (ws) {
+        _pendingReset = true;
         try { ws.send(JSON.stringify({ type: 'request_reset' })); } catch {}
         ws.close();
         ws = null;
