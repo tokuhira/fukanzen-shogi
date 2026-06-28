@@ -748,6 +748,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "notation"
+version = "0.7.0"
+dependencies = [
+ "engine",
+]
+
+[[package]]
+name = "notation-wasm"
+version = "0.7.0"
+dependencies = [
+ "engine",
+ "notation",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "num-conv"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

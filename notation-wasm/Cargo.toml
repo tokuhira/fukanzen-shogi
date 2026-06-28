@@ -1,0 +1,12 @@
+[package]
+name = "notation-wasm"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+engine     = { path = "../engine" }
+notation   = { path = "../notation" }
+wasm-bindgen = "0.2"
