@@ -6,7 +6,7 @@ import init, {
 
 import {
   connectOnline, disconnectOnline, commitMoveOnline, getMySide,
-  reconnectOnline, hasReconnectableSession,
+  reconnectOnline, hasReconnectableSession, debugState,
 } from './online.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -828,6 +828,7 @@ function render() {
 let closeModal = () => {};
 
 document.addEventListener('DOMContentLoaded', async () => {
+  window.__fukanzenDebug = () => console.table(debugState());
   document.getElementById('board').addEventListener('click', handleSvgClick);
   document.getElementById('btn-next').addEventListener('click', goNext);
   document.getElementById('btn-prev').addEventListener('click', goPrev);

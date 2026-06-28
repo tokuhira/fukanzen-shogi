@@ -87,8 +87,24 @@ function _openWs(onOpen = () => _cbs?.onStatus('waiting', '相手の入室を待
   ws.addEventListener('open',    onOpen);
   ws.addEventListener('close',   _onWsClose);
   ws.addEventListener('error',   () => _cbs?.onStatus('error', '接続エラー'));
-  ws.addEventListener('message', (evt) => _handleMessage(evt.data));
+  ws.addEventListener('message', (evt) => {
+    try {
+      const { type } = JSON.parse(evt.data);
+      console.debug('[ws recv]', _ts(), type, evt.data);
+    } catch { console.debug('[ws recv]', evt.data); }
+    _handleMessage(evt.data);
+  });
 }
+
+function _wsSend(data) {
+  try {
+    const { type } = JSON.parse(data);
+    console.debug('[ws send]', _ts(), type, data);
+  } catch { console.debug('[ws send]', data); }
+  ws.send(data);
+}
+
+function _ts() { return new Date().toISOString().slice(11, 23); }
 
 /**
  * 切断後にセッションを維持したまま WebSocket だけ再接続する。
@@ -124,7 +140,7 @@ export async function commitMoveOnline(sfen, usi) {
     return;
   }
 
-  ws.send(JSON.stringify(result.message));
+  _wsSend(JSON.stringify(result.message));
   myCommitted = true;
 
   if (result.both_committed) {
@@ -143,6 +159,21 @@ export const isOnline = () => ws !== null && session !== null;
 
 /** セッションが生きている（切断後の再接続が可能な）状態かどうか。 */
 export const hasReconnectableSession = () => session !== null && ws === null;
+
+/** DevTools デバッグ用: online.js の現在状態を返す。 */
+export function debugState() {
+  const RS = { 0: 'CONNECTING', 1: 'OPEN', 2: 'CLOSING', 3: 'CLOSED' };
+  return {
+    ws:                   ws ? RS[ws.readyState] ?? ws.readyState : null,
+    hasSession:           !!session,
+    mySide,
+    intentionalDisconnect: _intentionalDisconnect,
+    pendingReset:         _pendingReset,
+    resetAttempts:        _resetAttempts,
+    myCommitted,
+    revealSent,
+  };
+}
 
 // ── WS close ハンドラ ─────────────────────────────────────────────────────────
 
@@ -181,7 +212,7 @@ function _handleMessage(data) {
   if (msg.type === 'peer_joined' || msg.type === 'room_ready') {
     mySide  = msg.your_side;
     session = new ProtocolSession(mySide, _secret);
-    ws.send(session.hello_msg());
+    _wsSend(session.hello_msg());
     const label = mySide === 'sente' ? '先手' : '後手';
     _cbs?.onStatus('handshaking', `握手中 (${label})…`);
     return;
@@ -211,7 +242,7 @@ function _handleMessage(data) {
       }
       if (ws) {
         _pendingReset = true;
-        try { ws.send(JSON.stringify({ type: 'request_reset' })); } catch {}
+        try { _wsSend(JSON.stringify({ type: 'request_reset' })); } catch {}
         ws.close();
         ws = null;
       }
@@ -227,7 +258,7 @@ function _handleMessage(data) {
     }
     const result = JSON.parse(session.reconnect_msg(hash));
     if (result.ok) {
-      ws.send(JSON.stringify(result.message));
+      _wsSend(JSON.stringify(result.message));
       _cbs?.onStatus('handshaking', '再接続中 — 相手の認証を待っています…');
     }
     return;
@@ -273,7 +304,7 @@ function _handleMessage(data) {
       if (result.both_revealed) {
         const ackResult = JSON.parse(session.ack_msg());
         if (ackResult.ok) {
-          ws.send(JSON.stringify(ackResult.message));
+          _wsSend(JSON.stringify(ackResult.message));
           _cbs?.onStatus('handshaking', '開示完了 — Ack 送受信中');
         } else {
           _cbs?.onStatus('error', `ack エラー: ${ackResult.error}`);
@@ -302,17 +333,17 @@ function _handleMessage(data) {
       // 残留プレイヤー側: 相手の reconnect を検証し ack を返す
       const expectedAuthHash = session.peer_auth_hash();
       if (!expectedAuthHash || result.auth_hash !== expectedAuthHash) {
-        ws.send(JSON.stringify({ type: 'abort', reason: 'auth_mismatch' }));
+        _wsSend(JSON.stringify({ type: 'abort', reason: 'auth_mismatch' }));
         _cbs?.onStatus('error', '再接続: 認証失敗');
         return;
       }
       const resumeSfen = _findSfenByHash(result.board_hash);
       if (!resumeSfen) {
-        ws.send(JSON.stringify({ type: 'abort', reason: 'hash_mismatch' }));
+        _wsSend(JSON.stringify({ type: 'abort', reason: 'hash_mismatch' }));
         _cbs?.onStatus('error', '再接続: 棋譜が一致しません');
         return;
       }
-      ws.send(JSON.stringify({ type: 'reconnect_ack', board_hash: result.board_hash }));
+      _wsSend(JSON.stringify({ type: 'reconnect_ack', board_hash: result.board_hash }));
       _cbs?.onStatus('ready', '対局中');
       _cbs?.onResumeAt?.(resumeSfen);
       break;
@@ -343,7 +374,7 @@ function _sendReveal() {
   if (!session || revealSent) return;
   const result = JSON.parse(session.reveal_msg());
   if (result.ok) {
-    ws.send(JSON.stringify(result.message));
+    _wsSend(JSON.stringify(result.message));
     revealSent = true;
     _cbs?.onStatus('handshaking', '開示済み — 相手の開示を待っています');
   } else {
