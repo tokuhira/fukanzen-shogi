@@ -54,10 +54,12 @@ Interactive hotsheet mode. One person plays both sides with mouse clicks. Click 
 - `tui/` — interactive verification desk and **network battle mode** (ratatui + crossterm). TCP shell lives in `tui/src/net.rs`.
 - `protocol/` — pure protocol logic (commit-reveal, board-hash verification, ack, identity auth, reconnect recovery, version negotiation). No I/O; fully deterministic tests.
 
-**Web frontend (static):**
+**Web frontend and server (static + serverless):**
 
-- `web/` — static HTML/CSS/JS board; no build step, no frameworks. Interactive hotsheet: click to move, legal-move ink dots, kifu navigation with branching, promotion dialog. Powered by `engine-wasm/` (Wasm). Deployed to Cloudflare Pages. See [web/README.md](web/README.md).
-- `engine-wasm/` — thin `wasm-bindgen` wrapper exposing `resolve_ply`, `game_status`, and `legal_actions` over a pure SFEN/USI string boundary. Engine core is untouched.
+- `web/` — static HTML/CSS/JS board; no build step, no frameworks. Interactive hotsheet and browser online battle. Powered by `engine-wasm/` and `protocol-wasm/` (Wasm). Deployed to Cloudflare Pages. See [web/README.md](web/README.md).
+- `engine-wasm/` — thin `wasm-bindgen` cdylib exposing `resolve_ply`, `game_status`, and `legal_actions` over a pure SFEN/USI string boundary. Engine core is untouched.
+- `protocol-wasm/` — thin `wasm-bindgen` cdylib exposing `ProtocolSession`, SFEN hashing, and reconnect utilities for Wasm targets; used by the browser online battle.
+- `server/` — Cloudflare Worker + Durable Object managing WebSocket rooms for the browser online battle. Deployed to `fukanzen-shogi-ws.tokuhira.workers.dev`.
 
 **Documentation:**
 
@@ -71,7 +73,7 @@ Interactive hotsheet mode. One person plays both sides with mouse clicks. Click 
 
 - **A pure Rust rule engine** (`engine/`) — a library crate with zero I/O, no `async`, no RNG, no networking. Its public API is a set of pure functions: `legal_actions`, `resolve`, `check_status`, and serialization helpers.
 - **A verification CLI** (`cli/`) — a single-process tool where one person inputs moves for both sides in USI notation, used to manually verify that the engine behaves as specified. Kept as a machine-readable pipe interface; not modified by later phases.
-- **A regression test suite** — 37 tests covering all concrete examples from the implementation spec: collision cases (capture, escape, same-square clash, swap, path pass-through, drop clash, promoted-piece reversion, Sengoku Musou swap and drop-clash, both-kings swap draw), move generation (king safety, check evasion, nifu, uchi-fu-dzume, backed-piece prevention, both-kings legal approach, asymmetric swap legality), termination (definite mate, king's death, simultaneous king capture, draw conditions, counter-play backfire, rook pass-through), serialization round-trips, and canonical initial-position verification against the spec's authoritative SFEN.
+- **A regression test suite** — 41 tests covering all concrete examples from the implementation spec: collision cases (capture, escape, same-square clash, swap, path pass-through, drop clash, promoted-piece reversion, Sengoku Musou swap and drop-clash, both-kings swap draw), move generation (king safety, check evasion, nifu, uchi-fu-dzume, backed-piece prevention, both-kings legal approach, asymmetric swap legality), termination (definite mate, king's death, simultaneous king capture, draw conditions, counter-play backfire, rook pass-through), serialization round-trips, and canonical initial-position verification against the spec's authoritative SFEN.
 
 USI notation is used throughout for moves (`7g7f`, `P*5e`, `2b3a+`). Position serialization follows SFEN with a fixed sentinel (`b`) in place of the turn field, which does not exist in this variant; the canonical initial position is defined by a single `INITIAL_SFEN` constant rather than hardcoded piece placement, making the spec document the single source of truth. Canonical serialization — deterministic board + holdings + move-number bytes — feeds directly into the SHA-256 board-hash layer in Phase 3. A separate content serialization (board + holdings only, no move number) is used for repetition detection.
 
@@ -92,8 +94,8 @@ USI notation is used throughout for moves (`7g7f`, `P*5e`, `2b3a+`). Position se
   - *Order* — a reveal is rejected unless both commits have been received, preventing "second-look" cheating.
   - *Board-hash verification* — each reveal includes `SHA-256(canonical_bytes(position))`; a mismatch aborts the game rather than silently producing divergent boards.
   - *Ack synchronization* — both sides must acknowledge each other's reveal before the turn advances, preventing one-move desync from message reordering.
-  - Plus: reconnect identity verification (`SHA-256(password)` checked against the stored hash from the game-start handshake) and move-history recovery (kifu position hashes are scanned to find the matching resume point). 28 tests covering all nine properties.
-  - *Version negotiation* (v0.6.0) — immediately after TCP connection, both sides exchange `(rule_version, protocol_version)` tuples; a mismatch causes an immediate abort with a descriptive message before any game state is shared. Clients older than v0.6.0 are incompatible.
+  - Plus: reconnect identity verification (`SHA-256(password)` checked against the stored hash from the game-start handshake) and move-history recovery (kifu position hashes are scanned to find the matching resume point). 31 tests covering all properties.
+  - *Version negotiation* (v0.6.0) — immediately after TCP connection, both sides exchange `(rule_version, protocol_version)` tuples; a mismatch causes an immediate abort with a descriptive message before any game state is shared. Clients at v0.6.0 are incompatible with v0.7.0 (protocol version raised to 2; resign added to commit-reveal flow).
 - **A TCP network layer** (`tui/src/net.rs`) — 4-byte big-endian length prefix + `serde_json` body; reader in a background thread posting to `mpsc::Receiver<NetEvent>`; the main TUI loop drains it with `try_recv` in a 50 ms poll cycle.
 - **An online game state machine** (`tui/src/online.rs`) — `OnlinePhase` tracks `WaitingMyMove → WaitingPeerCommit → WaitingPeerReveal → WaitingPeerAck`; protocol steps auto-advance (commit is sent the moment a move is confirmed; reveal is sent the moment both commits arrive; ack is sent the moment the peer reveal passes verification). The current connection state and protocol phase are shown live in the status bar. On TCP disconnect, reconnection runs non-blocking in a background thread (the Connect side retries every 500 ms for up to 60 seconds); a four-second success banner appears on reconnect, and if the in-progress move was rolled back the user is notified to re-enter it.
 - **A portal menu** — the TUI launched without CLI flags shows a mode-selection screen: single-player verification desk, online battle as Sente (Listen), online battle as Gote (Connect), or quit. The online form accepts the port or host:port address and the shared password; from the second game onward the previous values are pre-filled, with automatic adjustment when switching sides (Connect→Listen extracts the port number; Listen→Connect reuses the last known address). An interactive terminal is required; launching via pipe or redirect is rejected at startup.
@@ -104,12 +106,12 @@ The `protocol/` crate has no dependency on `net.rs` or the TUI; it receives nonc
 **Web frontend:**
 
 - **An interactive hotsheet board** (`web/`) — HTML/CSS/JS, no build step, no frameworks. One person plays both sides with mouse clicks in sumi ink style. Legal moves are shown as subtle ink dots (v0.5 rules enforced by engine). The kifu backbone accumulates all played moves; ← / → navigation lets you revisit any position and branch from there. Promotion dialog, simultaneous resolution, game-over detection — all engine-driven via Wasm. Deployed to Cloudflare Pages.
-- **Wasm wrapper** (`engine-wasm/`) — `wasm-bindgen` cdylib exposing three string-boundary functions (`resolve_ply`, `game_status`, `legal_actions`). The `engine` crate is untouched.
+- **Browser online battle** (`web/online.js`, `protocol-wasm/`, `server/`) — two players in separate browsers play a fully secret simultaneous game over WebSocket. Each player commits a move without seeing the opponent's; both are revealed only when the other is in. The `protocol-wasm` Wasm module handles commit-reveal, board-hash verification, identity auth, and reconnect recovery — the same protocol logic as the TUI TCP mode, wrapped for the browser. The Cloudflare Worker relays encrypted payloads between clients; a Durable Object per room keeps WebSocket state without a database. Deployed to `fukanzen-shogi-ws.tokuhira.workers.dev`.
+- **Wasm wrappers** — `engine-wasm/` exposes the rule engine; `protocol-wasm/` exposes the protocol session. Both are thin `wasm-bindgen` cdylibs; the engine and protocol cores are untouched.
 
 ### Future directions (not yet implemented)
 
 - **CPU opponent** — search and evaluation function.
-- **Secret online play in browser** — WebSocket/WebRTC shell around `protocol/`; each player sees only their own move until reveal.
 - **Broader reach** — smartphone app; multi-language engine re-implementations with cross-diffing against the Rust reference; spectator streaming.
 
 The engine is designed so that all of the above are *shells* around an unchanged core. The engine itself will never gain I/O, networking, or randomness.
@@ -166,10 +168,12 @@ Web 盤を公開しています: **[fukanzen-shogi.tokuhira.net](https://fukanze
 - `tui/` — 対話的検証卓と**ネットワーク対戦モード**（ratatui + crossterm）。TCP の殻は `tui/src/net.rs`。
 - `protocol/` — 通信プロトコルの純粋論理（commit-reveal・盤面ハッシュ検証・Ack・本人認証・中断救済・バージョン交渉）。I/O なし、全テスト決定的。
 
-**Web フロントエンド（静的）:**
+**Web フロントエンドとサーバー（静的＋サーバーレス）:**
 
-- `web/` — 静的 HTML/CSS/JS 盤。ビルド不要、フレームワーク不要。ホットシート操作、合法手提示（墨点）、棋譜ナビゲーション・分岐、成り選択 UI。`engine-wasm/` で Wasm 化したエンジンが駆動。Cloudflare Pages で配信。[web/README.md](web/README.md) を参照。
+- `web/` — 静的 HTML/CSS/JS 盤。ビルド不要、フレームワーク不要。ホットシート操作とブラウザ秘匿対戦の両モード。`engine-wasm/` と `protocol-wasm/` で Wasm 化した核が駆動。Cloudflare Pages で配信。[web/README.md](web/README.md) を参照。
 - `engine-wasm/` — `wasm-bindgen` の薄い cdylib ラッパー。`resolve_ply`・`game_status`・`legal_actions` を SFEN/USI の文字列境界で公開。エンジン本体は無改変。
+- `protocol-wasm/` — `wasm-bindgen` の薄い cdylib ラッパー。`ProtocolSession`・SFEN ハッシュ・再接続ユーティリティをブラウザ向けに公開。プロトコル本体は無改変。
+- `server/` — Cloudflare Worker + Durable Object。ブラウザ秘匿対戦の WebSocket ルーム管理を担う。`fukanzen-shogi-ws.tokuhira.workers.dev` へデプロイ。
 
 **ドキュメント:**
 
@@ -183,7 +187,7 @@ Web 盤を公開しています: **[fukanzen-shogi.tokuhira.net](https://fukanze
 
 - **Rust ルールエンジン**（`engine/`）— I/O・非同期・乱数・ネットワーク依存を一切持たない純粋なライブラリクレート。公開 API は `legal_actions`・`resolve`・`check_status` と直列化関数群からなる純粋関数群。
 - **検証用 CLI**（`cli/`）— 一人が両陣営の着手を USI 記法で入力し、一局を最後まで進められる検証モード。秘匿性なし・単一プロセス。機械可読の口として以後の段階でも無改変で温存する。
-- **回帰テスト群** — 仕様書の具体例を写した 37 本のテスト（衝突解決・戦国無双特則（スワップ＋同一マス打ち込み）・両玉スワップ引き分け（v0.5）・合法手生成・後ろ盾検証・両玉接近合法性・非対称スワップ・終了判定・取り合いの裏目・合駒貫き・両玉同時取得・直列化・初期局面の正本 SFEN 照合）がすべて通過している。
+- **回帰テスト群** — 仕様書の具体例を写した 41 本のテスト（衝突解決・戦国無双特則（スワップ＋同一マス打ち込み）・両玉スワップ引き分け（v0.5）・合法手生成・後ろ盾検証・両玉接近合法性・非対称スワップ・終了判定・取り合いの裏目・合駒貫き・両玉同時取得・直列化・初期局面の正本 SFEN 照合）がすべて通過している。
 
 着手記法は USI 準拠（例: `7g7f`、`P*5e`、`2b3a+`）。局面の SFEN 手番フィールドは固定値 `b`（不完全将棋に手番は存在しない）。初期局面は正本 SFEN 定数 `INITIAL_SFEN` をパースして生成し、仕様書が唯一の出典となる。正準直列化（盤面＋持ち駒＋手数）は Phase3 の盤面ハッシュ計算に直結する。千日手検出用の内容直列化（手数除く）とは区別して設計済み。
 
@@ -204,8 +208,8 @@ Web 盤を公開しています: **[fukanzen-shogi.tokuhira.net](https://fukanze
   - *順序* — 両者のコミットが揃うまでリビールを受理しない（後出し禁止）
   - *盤面ハッシュ相互検証* — 各リビールに `SHA-256(canonical_bytes(局面))` を含め、不一致はアボートにより即時処理
   - *Ack 同期* — 両者が互いのリビールを確認し合うまでターンを進めない（メッセージ順序差によるデシンクを防止）
-  - さらに再接続時の本人認証（対局開始時に交換した `SHA-256(パスワード)` との照合）と棋譜ハッシュ照合による再開点特定（RecoverySession）も実装済み。
-  - *バージョン交渉*（v0.6.0）— TCP 接続直後に双方が `(ルール版, プロトコル版)` タプルを交換し、不一致を即座にアボートとして検出する。v0.6.0 より前のクライアントとは互換性がない。
+  - さらに再接続時の本人認証（対局開始時に交換した `SHA-256(パスワード)` との照合）と棋譜ハッシュ照合による再開点特定（RecoverySession）も実装済み。31 本のテストで全性質を保証。
+  - *バージョン交渉*（v0.6.0）— TCP 接続直後に双方が `(ルール版, プロトコル版)` タプルを交換し、不一致を即座にアボートとして検出する。v0.6.0 以前のクライアントとは互換性がない。v0.7.0 でプロトコル版が 2 に上がり（投了の commit-reveal 対応追加）、v0.6.0 との対戦互換性もなくなる。
 - **TCP 通信殻**（`tui/src/net.rs`）— 4 バイト big-endian 長さプレフィックス + serde_json ボディ。受信スレッドが `mpsc::Sender<NetEvent>` へ送り、TUI メインループが 50 ms ポーリングで `try_recv` する。
 - **オンライン状態機械**（`tui/src/online.rs`）— `OnlinePhase`（着手入力中 → コミット待ち → リビール待ち → Ack 待ち）を管理。プロトコルは自動進行（着手確定でコミット送信・両者コミットでリビール送信・リビール検証後に Ack 送信）。接続状態とプロトコルフェーズはステータスバーにリアルタイム表示される。TCP 切断時はバックグラウンドスレッドで非ブロッキング再接続を実行（Connect 側は 500 ms 間隔で最大 60 秒リトライ）。再接続成功時は 4 秒間のバナーを表示し、着手がロールバックされた場合はその旨を通知して再入力を促す。
 - **ポータルメニュー** — CLI フラグなしで起動すると、単体検証卓・先手（待ち受け）・後手（接続）・終了を選ぶポータルメニューを表示する。通信対戦フォームではポート番号またはアドレスと共有パスワードを入力でき、二局目以降は前回の入力値をデフォルトとして引き継ぐ（先後逆の場合はポート番号を自動調整）。インタラクティブ端末が必須であり、パイプやリダイレクト経由での起動は起動時に弾かれる。
@@ -216,12 +220,12 @@ Web 盤を公開しています: **[fukanzen-shogi.tokuhira.net](https://fukanze
 **Web フロントエンド:**
 
 - **ホットシート操作盤**（`web/`）— HTML/CSS/JS、ビルド不要、フレームワーク不要。水墨様式でマウスクリック着手。合法手を淡い墨点で提示（v0.5 ルール、エンジン判定）。棋譜バックボーンで← / →ナビゲーション・分岐対応。成り選択 UI・同時解決・終局判定をすべて Wasm エンジンが処理。Cloudflare Pages で公開。
-- **Wasm ラッパー**（`engine-wasm/`）— `wasm-bindgen` cdylib。`resolve_ply`・`game_status`・`legal_actions` の三関数を文字列境界で公開。`engine` クレートは無改変。
+- **ブラウザ秘匿対戦**（`web/online.js`・`protocol-wasm/`・`server/`）— 別々のブラウザの二人が WebSocket 経由で本物の秘匿同時対局を行う。各プレイヤーは相手が commit するまで自分の着手だけを持ち、両者が揃った瞬間に同時開示される。`protocol-wasm` Wasm モジュールが commit-reveal・盤面ハッシュ検証・本人認証・再接続救済を処理し、Cloudflare Worker が暗号化済みペイロードを中継する（Durable Object で WebSocket セッションを管理）。TUI の TCP 対戦モードと同一のプロトコル論理をブラウザ向けに再利用。
+- **Wasm ラッパー** — `engine-wasm/` がルールエンジンを、`protocol-wasm/` がプロトコルセッションを公開。ともに `wasm-bindgen` の薄い cdylib であり、engine・protocol 本体は無改変。
 
 ### 今後の計画（未実装）
 
 - **CPU 対戦** — 探索・評価関数。
-- **ブラウザ上の秘匿対戦** — `protocol/` を Wasm 化し WebSocket/WebRTC の殻で繋ぐ。自分の手だけ可視、reveal まで相手の手は伏せる本物の秘匿モード。
 - **展開拡大** — スマートフォンアプリ・多言語実装と Rust 実装に対する差分テスト・観戦配信。
 
 エンジンは「共通の核と交換可能な殻」の設計原則に基づき、これらはすべてエンジンの外側に積む予定である。エンジン本体にはいかなる I/O も追加しない。
@@ -246,6 +250,7 @@ Web 盤を公開しています: **[fukanzen-shogi.tokuhira.net](https://fukanze
 - [Web board — kifu replay, sumi ink style](docs/不完全将棋_実装指示書_最小Web盤_棋譜再生水墨.md)
 - [Web board — Wasm engine integration](docs/不完全将棋_実装指示書_Web盤Wasm組み込み.md)
 - [Web board — interactive hotsheet, legal-move display](docs/不完全将棋_実装指示書_Web盤操作可能化.md)
+- [Web board — browser online battle (Cloudflare DO)](docs/不完全将棋_実装指示書_ブラウザ秘匿対戦_DurableObject.md)
 - [GitHub Actions — Windows build](docs/不完全将棋_実装指示書_GitHubActions_Windowsビルド.md)
 - [Version management step 1](docs/不完全将棋_実装指示書_バージョン管理Step1.md)
 - [README and document structure](docs/不完全将棋_実装指示書_READMEとドキュメント整備_改訂版.md)
@@ -271,7 +276,7 @@ Web 盤を公開しています: **[fukanzen-shogi.tokuhira.net](https://fukanze
 # Build all crates
 cargo build
 
-# Run all tests (engine: 37 tests, protocol: 28 tests)
+# Run all tests (engine: 41 tests, protocol: 31 tests)
 cargo test
 
 # Run the verification CLI (text I/O, machine-readable)
