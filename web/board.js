@@ -337,6 +337,28 @@ function confirmMove(usi) {
   promotionPending = null; hidePromotionUI();
 }
 
+function _resetOnlineState() {
+  onlineMode       = false;
+  onlineSide       = null;
+  onlineGameOver   = false;
+  onlineEndMsg     = '';
+  onlineCommitted  = false;
+  onlineWaiting    = false;
+  onlineWaitingMsg = '';
+}
+
+function _onlinePhaseText(gameOver) {
+  if (onlineGameOver) {
+    if (gameOver || cursor === kifu.plies.length) return onlineEndMsg || gameOver || '終局';
+    if (cursor === 0) return '初期局面';
+    return `第${cursor}組手後`;
+  }
+  if (onlineWaiting)   return onlineWaitingMsg;
+  if (onlineCommitted) return '着手確定 — 相手の着手を待っています';
+  if (onlineSide === 'gote') return selectedFrom ? '後手の手を選択中' : '後手の手を選んでください';
+  return selectedFrom ? '先手の手を選択中' : '先手の手を選んでください';
+}
+
 function endOnlineGame(msg) {
   onlineGameOver  = true;
   onlineEndMsg    = msg;
@@ -728,25 +750,9 @@ function render() {
     overlay = hasInput ? computeInputOverlay() : null;
 
     if (onlineMode) {
-      if (onlineGameOver) {
-        // 終局後レビュー: 最終局面のみ終局メッセージ、途中は通常の局面テキスト
-        if (gameOver || cursor === kifu.plies.length) {
-          phaseText = onlineEndMsg || gameOver || '終局';
-        } else if (cursor === 0) {
-          phaseText = '初期局面';
-        } else {
-          phaseText = `第${cursor}組手後`;
-        }
-      } else if (onlineWaiting) {
-        phaseText = onlineWaitingMsg;
-      } else if (onlineCommitted) {
-        moveText  = onlineSide === 'sente'
-          ? (pendingSente?.text || '') : (pendingGote?.text || '');
-        phaseText = '着手確定 — 相手の着手を待っています';
-      } else if (onlineSide === 'gote') {
-        phaseText = selectedFrom ? '後手の手を選択中' : '後手の手を選んでください';
-      } else {
-        phaseText = selectedFrom ? '先手の手を選択中' : '先手の手を選んでください';
+      phaseText = _onlinePhaseText(gameOver);
+      if (!onlineGameOver && onlineCommitted) {
+        moveText = onlineSide === 'sente' ? (pendingSente?.text || '') : (pendingGote?.text || '');
       }
     } else if (bothReady) {
       moveText  = `${pendingSente.text}　${pendingGote.text}`;
@@ -827,16 +833,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btn-prev').addEventListener('click', goPrev);
   document.getElementById('btn-demo').addEventListener('click', () => { loadPlies(DEMO_PLIES); render(); });
   document.getElementById('btn-new').addEventListener('click', () => {
-    if (onlineGameOver) {
-      // 終局後のクリーンアップ（WS は endOnlineGame で既に閉じ済み）
-      onlineMode            = false;
-      onlineSide            = null;
-      onlineGameOver        = false;
-      onlineEndMsg          = '';
-      onlineCommitted       = false;
-      onlineWaiting         = false;
-      onlineWaitingMsg      = '';
-    }
+    if (onlineGameOver) _resetOnlineState();
     resetToNew();
     render();
   });
@@ -874,18 +871,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     closeModal = () => {
       if (!onlineGameOver) {
-        // ゲーム中の退室: 完全切断
         disconnectOnline();
-        if (onlineMode) {
-          onlineMode       = false;
-          onlineSide       = null;
-          onlineCommitted  = false;
-          onlineGameOver   = false;
-          onlineEndMsg     = '';
-          onlineWaiting    = false;
-          onlineWaitingMsg = '';
-          resetToNew();
-        }
+        if (onlineMode) { _resetOnlineState(); resetToNew(); }
       }
       modal.classList.remove('visible');
       statusEl.textContent = '—';
@@ -981,14 +968,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             render();
 
           } else if (state === 'disconnected') {
-            // intentional 切断（終局後 or 退室）
-            if (!onlineGameOver) {
-              onlineMode       = false;
-              onlineSide       = null;
-              onlineCommitted  = false;
-              onlineWaiting    = false;
-              onlineWaitingMsg = '';
-            }
+            if (!onlineGameOver) _resetOnlineState();
             btnConn.disabled = false;
             btnConn.textContent = '入室';
             render();

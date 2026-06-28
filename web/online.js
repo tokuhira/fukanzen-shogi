@@ -82,12 +82,12 @@ export async function connectOnline(roomKey, secret, callbacks) {
   _openWs();
 }
 
-function _openWs() {
+function _openWs(onOpen = () => _cbs?.onStatus('waiting', '相手の入室を待っています…')) {
   ws = new WebSocket(`${WS_BASE_URL}/room/${encodeURIComponent(_roomKey)}`);
-  ws.addEventListener('open',    () => _cbs?.onStatus('waiting', '相手の入室を待っています…'));
+  ws.addEventListener('open',    onOpen);
   ws.addEventListener('close',   _onWsClose);
-  ws.addEventListener('error',   () => { _cbs?.onStatus('error', '接続エラー'); });
-  ws.addEventListener('message', (evt) => _handleMessage(evt.data, _secret));
+  ws.addEventListener('error',   () => _cbs?.onStatus('error', '接続エラー'));
+  ws.addEventListener('message', (evt) => _handleMessage(evt.data));
 }
 
 /**
@@ -97,12 +97,7 @@ function _openWs() {
  */
 export async function reconnectOnline() {
   if (!_roomKey || !session) return;
-
-  ws = new WebSocket(`${WS_BASE_URL}/room/${encodeURIComponent(_roomKey)}`);
-  ws.addEventListener('open',    () => _cbs?.onStatus('handshaking', '再接続中…'));
-  ws.addEventListener('close',   _onWsClose);
-  ws.addEventListener('error',   () => { _cbs?.onStatus('error', '接続エラー'); });
-  ws.addEventListener('message', (evt) => _handleMessage(evt.data, _secret));
+  _openWs(() => _cbs?.onStatus('handshaking', '再接続中…'));
 }
 
 /** 接続を切断してセッションを完全に破棄する。 */
@@ -175,8 +170,7 @@ function _onWsClose() {
 
 // ── 受信ディスパッチ ──────────────────────────────────────────────────────────
 
-function _handleMessage(data, secret) {
-  // disconnectOnline() が ws = null を設定済み → 切断処理中のメッセージは無視
+function _handleMessage(data) {
   if (!ws) return;
 
   let msg;
@@ -186,7 +180,7 @@ function _handleMessage(data, secret) {
 
   if (msg.type === 'peer_joined' || msg.type === 'room_ready') {
     mySide  = msg.your_side;
-    session = new ProtocolSession(mySide, secret);
+    session = new ProtocolSession(mySide, _secret);
     ws.send(session.hello_msg());
     const label = mySide === 'sente' ? '先手' : '後手';
     _cbs?.onStatus('handshaking', `握手中 (${label})…`);
@@ -312,22 +306,12 @@ function _handleMessage(data, secret) {
         _cbs?.onStatus('error', '再接続: 認証失敗');
         return;
       }
-
-      // 棋譜の各局面ハッシュと照合して再開点を特定
-      const sfens = _cbs?.getSfens?.() ?? [];
-      let resumeSfen = null;
-      for (const sfen of sfens) {
-        if (sfenHash(sfen) === result.board_hash) {
-          resumeSfen = sfen;
-          break;
-        }
-      }
+      const resumeSfen = _findSfenByHash(result.board_hash);
       if (!resumeSfen) {
         ws.send(JSON.stringify({ type: 'abort', reason: 'hash_mismatch' }));
         _cbs?.onStatus('error', '再接続: 棋譜が一致しません');
         return;
       }
-
       ws.send(JSON.stringify({ type: 'reconnect_ack', board_hash: result.board_hash }));
       _cbs?.onStatus('ready', '対局中');
       _cbs?.onResumeAt?.(resumeSfen);
@@ -336,14 +320,7 @@ function _handleMessage(data, secret) {
 
     case 'reconnect_ack': {
       // 再接続プレイヤー側: 相手から承認を受けて再開点を特定
-      const sfens = _cbs?.getSfens?.() ?? [];
-      let resumeSfen = null;
-      for (const sfen of sfens) {
-        if (sfenHash(sfen) === result.resume_hash) {
-          resumeSfen = sfen;
-          break;
-        }
-      }
+      const resumeSfen = _findSfenByHash(result.resume_hash);
       if (!resumeSfen) {
         _cbs?.onStatus('error', '再接続: 再開局面が見つかりません');
         return;
@@ -356,6 +333,11 @@ function _handleMessage(data, secret) {
 }
 
 // ── 内部ヘルパー ──────────────────────────────────────────────────────────────
+
+function _findSfenByHash(hash) {
+  const sfens = _cbs?.getSfens?.() ?? [];
+  return sfens.find(sfen => sfenHash(sfen) === hash) ?? null;
+}
 
 function _sendReveal() {
   if (!session || revealSent) return;
