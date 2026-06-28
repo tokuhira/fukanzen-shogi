@@ -65,6 +65,8 @@ export class ProtocolSession {
      * - `{"ok":true,"event":"peer_committed","both_committed":true}`
      * - `{"ok":true,"event":"peer_revealed","both_revealed":true}`
      * - `{"ok":true,"event":"turn_complete","sente_usi":"7g7f","gote_usi":"3c3d"}`
+     * - `{"ok":true,"event":"peer_reconnect_request","auth_hash":"...","board_hash":"..."}`
+     * - `{"ok":true,"event":"reconnect_ack","resume_hash":"..."}`
      * - `{"ok":false,"error":"..."}`
      * @param {string} msg
      * @returns {string}
@@ -118,6 +120,43 @@ export class ProtocolSession {
         return this;
     }
     /**
+     * 初回 hello で受け取った相手の auth_hash（hex）を返す。
+     * 再接続時の本人確認に使う。未取得の場合は空文字列。
+     * @returns {string}
+     */
+    peer_auth_hash() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.protocolsession_peer_auth_hash(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * 再接続時に相手へ送るメッセージ（JSON 文字列）を返す。
+     * - `board_hash_hex`: 現在局面の盤面ハッシュ（sfen_hash() で計算）
+     * @param {string} board_hash_hex
+     * @returns {string}
+     */
+    reconnect_msg(board_hash_hex) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ptr0 = passStringToWasm0(board_hash_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.protocolsession_reconnect_msg(this.__wbg_ptr, ptr0, len0);
+            deferred2_0 = ret[0];
+            deferred2_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
      * 両者 commit 後に reveal メッセージを生成する。返り値に送るべき reveal JSON を含む。
      * @returns {string}
      */
@@ -135,6 +174,27 @@ export class ProtocolSession {
     }
 }
 if (Symbol.dispose) ProtocolSession.prototype[Symbol.dispose] = ProtocolSession.prototype.free;
+
+/**
+ * SFEN 文字列から盤面ハッシュ（hex 文字列）を計算する。
+ * 再接続時のハッシュ照合に使う。
+ * @param {string} sfen
+ * @returns {string}
+ */
+export function sfen_hash(sfen) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(sfen, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.sfen_hash(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
