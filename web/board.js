@@ -708,7 +708,14 @@ function render() {
 
     if (onlineMode) {
       if (onlineGameOver) {
-        phaseText = onlineEndMsg || gameOver || '終局';
+        // 終局後レビュー: 最終局面のみ終局メッセージ、途中は通常の局面テキスト
+        if (gameOver || cursor === kifu.plies.length) {
+          phaseText = onlineEndMsg || gameOver || '終局';
+        } else if (cursor === 0) {
+          phaseText = '初期局面';
+        } else {
+          phaseText = `第${cursor}組手後`;
+        }
       } else if (onlineWaiting) {
         phaseText = onlineWaitingMsg;
       } else if (onlineCommitted) {
