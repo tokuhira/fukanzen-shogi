@@ -369,20 +369,8 @@ function handleTurnComplete(senteUsi, goteUsi) {
   const sText = usiToText(senteUsi, sfens[cursor], 'sente');
   const gText = usiToText(goteUsi,  sfens[cursor], 'gote');
   branchAndAppend(senteUsi, goteUsi, sText, gText);
-  // branchAndAppend が phase='reveal'、resetInput() を呼んでいる
+  // phase='reveal' のまま待機 → 盤面クリックで次局面へ（handleSvgClick で処理）
   render();
-  // 開示を 1.5s 表示してから次の局面へ
-  setTimeout(() => {
-    cursor++;
-    phase = 'position';
-    const msg = getGameOverMsg();
-    if (msg) {
-      endOnlineGame(msg);
-    } else {
-      if (onlineSide === 'gote') inputStep = 'gote';
-      render();
-    }
-  }, 1500);
 }
 
 // ── Promotion UI ──────────────────────────────────────────────────────────────
@@ -427,7 +415,40 @@ function getHandPieceAt(hand, y0, sx, sy) {
   return null;
 }
 
+function _advanceFromReveal(sx, sy) {
+  cursor++;
+  phase = 'position';
+  const msg = getGameOverMsg();
+  if (msg) { endOnlineGame(msg); return; }
+
+  if (onlineSide === 'gote') inputStep = 'gote';
+
+  // クリック座標が自分の合法手の駒に当たっていれば選択状態へ直接遷移
+  const activeSide = onlineSide === 'gote' ? 'g' : 's';
+  const pos = parseSfen(sfens[cursor]);
+  const sq  = getBoardSquare(sx, sy);
+  if (sq) {
+    const [f, r] = sq;
+    const piece = pos.board.get(`${f},${r}`);
+    if (piece && piece.side === activeSide) selectBoardPiece(f, r);
+  } else if (onlineSide === 'gote') {
+    const k = getHandPieceAt(pos.handG, 8, sx, sy);
+    if (k) selectHandPiece(k);
+  } else {
+    const k = getHandPieceAt(pos.handS, BY + BH + 12, sx, sy);
+    if (k) selectHandPiece(k);
+  }
+  render();
+}
+
 function handleSvgClick(event) {
+  // 同時開示フェーズ: 盤面・駒台クリックで次局面へ遷移
+  if (phase === 'reveal' && onlineMode && !onlineGameOver) {
+    const { x: sx, y: sy } = svgCoords(event);
+    _advanceFromReveal(sx, sy);
+    return;
+  }
+
   if (phase !== 'position') return;
   if (promotionPending)     return;
   if (onlineMode && onlineCommitted) return;
