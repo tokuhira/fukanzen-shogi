@@ -4,6 +4,10 @@ import init, {
   legal_actions as wasmLegalActions,
 } from './wasm/engine_wasm.js';
 
+import initNotation, {
+  ja_notation as wasmJaNotation,
+} from './notation-wasm/notation_wasm.js';
+
 import {
   connectOnline, disconnectOnline, commitMoveOnline, getMySide,
   reconnectOnline, hasReconnectableSession, debugState,
@@ -71,14 +75,8 @@ function countStr(n) {
 
 function usiToText(usi, sfen, side) {
   const prefix = side === 'sente' ? '☗' : '☖';
-  const m = parseUsi(usi);
-  if (m.isDrop) {
-    return `${prefix}${m.to[0]}${RANK_JA[m.to[1] - 1]}${KANJI[m.kind] || m.kind}打`;
-  }
-  const pos = parseSfen(sfen);
-  const piece = pos.board.get(`${m.from[0]},${m.from[1]}`);
-  const kanji = piece ? (KANJI[piece.kind] || '？') : '？';
-  return `${prefix}${m.to[0]}${RANK_JA[m.to[1] - 1]}${kanji}${m.promote ? '成' : ''}`;
+  const legalJson = wasmLegalActions(sfen, side);
+  return `${prefix}${wasmJaNotation(usi, side, legalJson, sfen)}`;
 }
 
 // ── SFEN parser ───────────────────────────────────────────────────────────────
@@ -1002,7 +1000,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btn-next').disabled = true;
 
   try {
-    await init();
+    await Promise.all([init(), initNotation()]);
     resetToNew();
     render();
   } catch (err) {
