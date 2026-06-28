@@ -12,7 +12,9 @@ use ratatui::backend::CrosstermBackend;
 
 use engine::board::Position;
 use engine::kifu::Kifu;
+use engine::movegen::legal_actions;
 use engine::types::{Action, Side};
+use notation::ja_notation;
 use protocol::{
     board_hash, hash_secret, Nonce, RecoverySession, SecretHash, TurnSession,
 };
@@ -315,7 +317,10 @@ pub fn run_online(
         if let Some(action) = my_action {
             // UI を "待機中" に固定
             app.phase = Phase::ResolveReady;
-            app.message = format!("着手確定: {}", action.to_usi());
+            let pos = kifu.current();
+            let la = legal_actions(&pos, config.local_side);
+            let notation = ja_notation(&action, config.local_side, &la, &pos);
+            app.message = format!("着手確定: {}", notation);
 
             // commit-reveal セッション開始
             let pos = kifu.current();

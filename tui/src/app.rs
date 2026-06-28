@@ -7,6 +7,7 @@ use engine::resolve::{resolve, ResolutionEvent};
 use engine::serialize::{kifu_from_string, kifu_to_string, position_to_sfen};
 use engine::terminate::{check_king_death, check_sennichite, check_status, GameEnd, GameStatus};
 use engine::types::{Action, PieceKind, Ply, Side, Square};
+use notation::ja_notation;
 
 // ─── オンライン状態（ui.rs が参照する表示用構造体）────────────────────────────
 
@@ -304,18 +305,21 @@ impl App {
 
     fn apply_action(&mut self, action: Action, side: Side) {
         self.clear_selection();
+        let pos = self.current_pos();
+        let la = legal_actions(&pos, side);
+        let notation = ja_notation(&action, side, &la, &pos);
         match side {
             Side::Sente => {
                 self.sente_action = Some(action);
                 self.phase = Phase::GoteInput;
                 self.cursor_file = 5;
                 self.cursor_rank = 1;
-                self.message = format!("先手: {} 確定。後手の着手を入力してください", action.to_usi());
+                self.message = format!("先手: {} 確定。後手の着手を入力してください", notation);
             }
             Side::Gote => {
                 self.gote_action = Some(action);
                 self.phase = Phase::ResolveReady;
-                self.message = format!("後手: {} 確定。[Enter]で解決", action.to_usi());
+                self.message = format!("後手: {} 確定。[Enter]で解決", notation);
             }
         }
     }
@@ -669,7 +673,9 @@ fn build_resolution_text(
     event: &ResolutionEvent,
 ) -> Vec<String> {
     let mut lines = Vec::new();
-    lines.push(format!("先手: {}  後手: {}", sente.to_usi(), gote.to_usi()));
+    let s_text = ja_notation(&sente, Side::Sente, &legal_actions(pos, Side::Sente), pos);
+    let g_text = ja_notation(&gote,  Side::Gote,  &legal_actions(pos, Side::Gote),  pos);
+    lines.push(format!("先手: {}  後手: {}", s_text, g_text));
 
     let sente_from = sente.from_sq();
     let gote_from  = gote.from_sq();
