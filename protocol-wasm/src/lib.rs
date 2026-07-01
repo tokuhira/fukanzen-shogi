@@ -45,6 +45,20 @@ pub fn sfen_hash(sfen: &str) -> String {
     }
 }
 
+/// このビルドが実装するルール・プロトコル・アプリの版タプルを JSON で返す。
+///
+/// 返値: `{"rule":"0.5","protocol":2,"app":"0.8.0"}`
+#[wasm_bindgen]
+pub fn version_tuple() -> String {
+    format!(
+        r#"{{"rule":"{}.{}","protocol":{},"app":"{}"}}"#,
+        MY_VERSION.rule.0,
+        MY_VERSION.rule.1,
+        MY_VERSION.protocol,
+        env!("CARGO_PKG_VERSION")
+    )
+}
+
 // ── セッション ────────────────────────────────────────────────────────────────
 
 /// ブラウザ手元で動く秘匿対戦プロトコルの状態機械。

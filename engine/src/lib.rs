@@ -1,3 +1,4 @@
+pub mod archive;
 pub mod board;
 pub mod kifu;
 pub mod movegen;

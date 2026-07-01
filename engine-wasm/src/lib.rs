@@ -78,6 +78,96 @@ pub fn legal_actions(sfen: &str, side: &str) -> String {
     format!("[{}]", usis.join(","))
 }
 
+/// 対局データを版タプル付きアーカイブ書式 v1 のテキストへ変換する。
+///
+/// request_json:
+/// `{"initial_sfen":"...","plies":[{"s":"7g7f","g":"3c3d"},...],
+///   "rule":"0.5","protocol":2,"app":"0.8.0","sente":null,"gote":null,
+///   "result":{"kind":"mate","outcome":"gote_wins"}}`
+///
+/// 成功: アーカイブ本文の文字列
+/// 失敗: `"ERROR: <理由>"`
+#[wasm_bindgen]
+pub fn build_archive(request_json: &str) -> String {
+    let v: serde_json::Value = match serde_json::from_str(request_json) {
+        Ok(v) => v,
+        Err(_) => return "ERROR: invalid_json".to_string(),
+    };
+
+    let initial_sfen = match v["initial_sfen"].as_str() {
+        Some(s) => s,
+        None => return "ERROR: missing initial_sfen".to_string(),
+    };
+    let initial = match engine::serialize::sfen_to_position(initial_sfen) {
+        Some(p) => p,
+        None => return "ERROR: bad initial_sfen".to_string(),
+    };
+    let mut kifu = engine::kifu::Kifu::new(initial);
+
+    let plies = match v["plies"].as_array() {
+        Some(a) => a,
+        None => return "ERROR: missing plies".to_string(),
+    };
+    for p in plies {
+        let s_usi = match p["s"].as_str() {
+            Some(s) => s,
+            None => return "ERROR: missing ply.s".to_string(),
+        };
+        let g_usi = match p["g"].as_str() {
+            Some(s) => s,
+            None => return "ERROR: missing ply.g".to_string(),
+        };
+        let sente = match engine::types::Action::from_usi(s_usi) {
+            Some(a) => a,
+            None => return format!("ERROR: bad ply.s: {}", s_usi),
+        };
+        let gote = match engine::types::Action::from_usi(g_usi) {
+            Some(a) => a,
+            None => return format!("ERROR: bad ply.g: {}", g_usi),
+        };
+        kifu.push(engine::types::Ply { sente, gote });
+    }
+
+    let rule_str = match v["rule"].as_str() {
+        Some(s) => s,
+        None => return "ERROR: missing rule".to_string(),
+    };
+    let rule = match rule_str.split_once('.') {
+        Some((a, b)) => match (a.parse::<u32>(), b.parse::<u32>()) {
+            (Ok(a), Ok(b)) => (a, b),
+            _ => return "ERROR: bad rule".to_string(),
+        },
+        None => return "ERROR: bad rule".to_string(),
+    };
+    let protocol = match v["protocol"].as_u64() {
+        Some(p) => p as u32,
+        None => return "ERROR: missing protocol".to_string(),
+    };
+    let app = v["app"].as_str().map(|s| s.to_string());
+    let sente = v["sente"].as_str().map(|s| s.to_string());
+    let gote = v["gote"].as_str().map(|s| s.to_string());
+
+    let kind = match v["result"]["kind"].as_str().and_then(engine::archive::ResultKind::from_str) {
+        Some(k) => k,
+        None => return "ERROR: bad result.kind".to_string(),
+    };
+    let outcome = match v["result"]["outcome"].as_str().and_then(engine::archive::Outcome::from_str) {
+        Some(o) => o,
+        None => return "ERROR: bad result.outcome".to_string(),
+    };
+
+    let meta = engine::archive::ArchiveMeta {
+        rule,
+        protocol,
+        app,
+        sente,
+        gote,
+        result: engine::archive::ArchiveResult { kind, outcome },
+    };
+
+    engine::archive::kifu_to_archive(&kifu, &meta)
+}
+
 fn escape_json(s: &str) -> String {
     s.replace('\\', r"\\").replace('"', r#"\""#)
 }

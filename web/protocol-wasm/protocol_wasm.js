@@ -1,3 +1,5 @@
+/* @ts-self-types="./protocol_wasm.d.ts" */
+
 /**
  * ブラウザ手元で動く秘匿対戦プロトコルの状態機械。
  *
@@ -193,6 +195,25 @@ export function sfen_hash(sfen) {
         return getStringFromWasm0(ret[0], ret[1]);
     } finally {
         wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * このビルドが実装するルール・プロトコル・アプリの版タプルを JSON で返す。
+ *
+ * 返値: `{"rule":"0.5","protocol":2,"app":"0.8.0"}`
+ * @returns {string}
+ */
+export function version_tuple() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.version_tuple();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
     }
 }
 function __wbg_get_imports() {

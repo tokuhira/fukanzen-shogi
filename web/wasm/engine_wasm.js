@@ -1,3 +1,33 @@
+/* @ts-self-types="./engine_wasm.d.ts" */
+
+/**
+ * 対局データを版タプル付きアーカイブ書式 v1 のテキストへ変換する。
+ *
+ * request_json:
+ * `{"initial_sfen":"...","plies":[{"s":"7g7f","g":"3c3d"},...],
+ *   "rule":"0.5","protocol":2,"app":"0.8.0","sente":null,"gote":null,
+ *   "result":{"kind":"mate","outcome":"gote_wins"}}`
+ *
+ * 成功: アーカイブ本文の文字列
+ * 失敗: `"ERROR: <理由>"`
+ * @param {string} request_json
+ * @returns {string}
+ */
+export function build_archive(request_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(request_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.build_archive(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
 /**
  * 指定局面のゲーム状態を返す（着手選択前の確定詰みチェック）。
  *

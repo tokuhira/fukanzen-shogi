@@ -18,6 +18,7 @@ Interactive board with offline single-player and online browser-vs-browser battl
 - **Promotion dialog** — appears on moves that can optionally promote.
 - **Japanese notation** — move labels use human-readable kifu notation (e.g. ５八金右, ７六歩) with disambiguation suffixes only when needed.
 - **デモ局面 / 新局** buttons load the built-in 6-turn demo or reset to a blank board.
+- **棋譜を保存** — save the current game (mid-game or finished) as a version-tuple-stamped archive file (`.kifu`, download + clipboard copy). The archive embeds `(rule_version, protocol_version)` so old records replay correctly even after rule changes.
 
 All positions are computed by the Wasm engine at runtime. No hardcoded SFEN data.
 
@@ -27,8 +28,8 @@ All positions are computed by the Wasm engine at runtime. No hardcoded SFEN data
 
 | Module | Location | Role |
 |---|---|---|
-| `engine-wasm` | `web/wasm/` | `resolve_ply`, `game_status`, `legal_actions` — rule engine |
-| `protocol-wasm` | `web/protocol-wasm/` | commit-reveal message encoding/decoding (online play) |
+| `engine-wasm` | `web/wasm/` | `resolve_ply`, `game_status`, `legal_actions`, `build_archive` — rule engine + archive format |
+| `protocol-wasm` | `web/protocol-wasm/` | commit-reveal message encoding/decoding (online play), `version_tuple` |
 | `notation-wasm` | `web/notation-wasm/` | `ja_notation` — human-readable Japanese kifu notation |
 
 The engine is the sole source of rule truth; the JS layer handles only UI state and rendering.
@@ -89,6 +90,7 @@ Config: `wrangler.toml` at repository root (`pages_build_output_dir = "web"`).
 - **成りダイアログ** — 任意成りが可能な着手で表示。
 - **日本語棋譜表記** — ５八金右・７六歩など、曖昧さがある場合のみ区別符（右・左・直・上・引・寄）を付加。
 - **デモ局面 / 新局** ボタンで 6 組手デモ局を再生、または初期局面にリセット。
+- **棋譜を保存** — 対局中・終局後を問わず、版タプル付きアーカイブ書式（`.kifu`、ダウンロード＋クリップボードコピー）で現在の対局を保存。`(ルール版, プロトコル版)` を埋め込むため、ルール変更後も旧記録を正しく再現できる。
 
 全局面は Wasm エンジンがブラウザ上でリアルタイム計算。ハードコードされた局面データはない。
 
@@ -98,8 +100,8 @@ Config: `wrangler.toml` at repository root (`pages_build_output_dir = "web"`).
 
 | モジュール | 配置先 | 役割 |
 |---|---|---|
-| `engine-wasm` | `web/wasm/` | `resolve_ply` / `game_status` / `legal_actions` — ルールエンジン |
-| `protocol-wasm` | `web/protocol-wasm/` | コミット秘匿プロトコルのメッセージ符号化（オンライン対戦） |
+| `engine-wasm` | `web/wasm/` | `resolve_ply` / `game_status` / `legal_actions` / `build_archive` — ルールエンジン＋アーカイブ書式 |
+| `protocol-wasm` | `web/protocol-wasm/` | コミット秘匿プロトコルのメッセージ符号化（オンライン対戦）、`version_tuple` |
 | `notation-wasm` | `web/notation-wasm/` | `ja_notation` — 日本語棋譜表記生成 |
 
 ルールの唯一の正源は engine-wasm。JS 層は UI 状態と描画のみ担当。

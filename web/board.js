@@ -2,11 +2,16 @@ import init, {
   resolve_ply,
   game_status  as wasmGameStatus,
   legal_actions as wasmLegalActions,
+  build_archive as wasmBuildArchive,
 } from './wasm/engine_wasm.js';
 
 import initNotation, {
   ja_notation as wasmJaNotation,
 } from './notation-wasm/notation_wasm.js';
+
+import initProtocol, {
+  version_tuple as wasmVersionTuple,
+} from './protocol-wasm/protocol_wasm.js';
 
 import {
   connectOnline, disconnectOnline, commitMoveOnline, getMySide,
@@ -152,6 +157,11 @@ let legalCache = { sfen: null, sente: null, gote: null };
 // Per-cursor game-over cache
 let gameOverCache = { cursor: -1, msg: null };
 
+// ── Archive state ─────────────────────────────────────────────────────────────
+
+let versionTuple    = null;  // { rule, protocol, app } — init() 完了後にキャッシュ
+let resultOverride  = null;  // { kind, outcome } | null — 投了など盤面から導出できない結果
+
 // ── Online mode state ─────────────────────────────────────────────────────────
 
 let onlineMode            = false;
@@ -178,7 +188,8 @@ function loadPlies(plies) {
   cursor = 0;
   phase  = 'position';
   resetInput();
-  gameOverCache = { cursor: -1, msg: null };
+  gameOverCache  = { cursor: -1, msg: null };
+  resultOverride = null;
 }
 
 function resetToNew() {
@@ -188,7 +199,8 @@ function resetToNew() {
   cursor = 0;
   phase  = 'position';
   resetInput();
-  gameOverCache = { cursor: -1, msg: null };
+  gameOverCache  = { cursor: -1, msg: null };
+  resultOverride = null;
 }
 
 function branchAndAppend(sUsi, gUsi, sText, gText) {
@@ -230,6 +242,73 @@ function computeGameOver() {
   if (status === 'gote_loses')  return '先手の勝ち（後手が着手不能）';
   if (status === 'draw')        return '引き分け（両者着手不能）';
   return null;
+}
+
+// ── Archive ────────────────────────────────────────────────────────────────────
+
+// 対局全体（現在の表示カーソルではなく kifu.plies の末尾）の結果をアーカイブ語彙で返す
+function currentResult() {
+  if (resultOverride) return resultOverride;
+  const n = kifu.plies.length;
+  if (n > 0) {
+    const ev = events[n - 1];
+    if (ev === 'sente_died') return { kind: 'king_death', outcome: 'gote_wins' };
+    if (ev === 'gote_died')  return { kind: 'king_death', outcome: 'sente_wins' };
+    if (ev === 'both_died')  return { kind: 'swap_draw',  outcome: 'draw' };
+  }
+  const status = wasmGameStatus(sfens[n]);
+  if (status === 'sente_loses') return { kind: 'mate', outcome: 'gote_wins' };
+  if (status === 'gote_loses')  return { kind: 'mate', outcome: 'sente_wins' };
+  if (status === 'draw')        return { kind: 'mate', outcome: 'draw' };
+  return { kind: 'unfinished', outcome: 'none' };
+}
+
+// 現在の対局を版タプル付きアーカイブ書式のテキストへ変換する。失敗時は null。
+function buildArchiveText() {
+  if (!versionTuple) return null;
+  const request = {
+    initial_sfen: INITIAL_SFEN,
+    plies: kifu.plies.map(p => ({ s: p.sUsi, g: p.gUsi })),
+    rule: versionTuple.rule,
+    protocol: versionTuple.protocol,
+    app: versionTuple.app,
+    sente: null,
+    gote: null,
+    result: currentResult(),
+  };
+  const text = wasmBuildArchive(JSON.stringify(request));
+  if (text.startsWith('ERROR:')) {
+    console.error('build_archive failed:', text);
+    return null;
+  }
+  return text;
+}
+
+function archiveFilename() {
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}` +
+    `_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  return `fukanzen-shogi_${stamp}.kifu`;
+}
+
+async function saveKifu() {
+  const text = buildArchiveText();
+  if (!text) { alert('棋譜の保存に失敗しました'); return; }
+
+  const blob = new Blob([text], { type: 'text/plain' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = archiveFilename();
+  a.click();
+  URL.revokeObjectURL(url);
+
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // クリップボード API が使えない環境ではダウンロードのみで良しとする
+  }
 }
 
 // ── Input management ──────────────────────────────────────────────────────────
@@ -343,6 +422,7 @@ function _resetOnlineState() {
   onlineCommitted  = false;
   onlineWaiting    = false;
   onlineWaitingMsg = '';
+  resultOverride   = null;
 }
 
 function _onlinePhaseText(gameOver) {
@@ -374,14 +454,18 @@ function handleTurnComplete(senteUsi, goteUsi) {
   const sResign = senteUsi === 'resign';
   const gResign = goteUsi  === 'resign';
   if (sResign || gResign) {
-    let msg;
+    let msg, outcome;
     if (sResign && gResign) {
       msg = '引き分け（両者投了）';
+      outcome = 'draw';
     } else if (sResign) {
       msg = onlineSide === 'sente' ? '投了しました（後手の勝ち）' : '相手が投了しました（先手の勝ち）';
+      outcome = 'gote_wins';
     } else {
       msg = onlineSide === 'gote'  ? '投了しました（先手の勝ち）' : '相手が投了しました（後手の勝ち）';
+      outcome = 'sente_wins';
     }
+    resultOverride = { kind: 'resign', outcome };
     endOnlineGame(msg);
     return;
   }
@@ -818,6 +902,12 @@ function render() {
     btnResign.style.display = (onlineMode && !onlineGameOver) ? 'inline-block' : 'none';
     btnResign.disabled      = onlineCommitted || onlineWaiting;
   }
+
+  const btnSave = document.getElementById('btn-save');
+  if (btnSave) {
+    const isOver = onlineMode ? onlineGameOver : !!gameOver;
+    btnSave.classList.toggle('highlight', isOver);
+  }
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -831,6 +921,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btn-next').addEventListener('click', goNext);
   document.getElementById('btn-prev').addEventListener('click', goPrev);
   document.getElementById('btn-demo').addEventListener('click', () => { loadPlies(DEMO_PLIES); render(); });
+  document.getElementById('btn-save').addEventListener('click', saveKifu);
   document.getElementById('btn-new').addEventListener('click', () => {
     if (onlineGameOver) _resetOnlineState();
     resetToNew();
@@ -1000,7 +1091,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btn-next').disabled = true;
 
   try {
-    await Promise.all([init(), initNotation()]);
+    await Promise.all([init(), initNotation(), initProtocol()]);
+    versionTuple = JSON.parse(wasmVersionTuple());
     resetToNew();
     render();
   } catch (err) {

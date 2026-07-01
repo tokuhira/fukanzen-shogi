@@ -170,6 +170,12 @@ h1 {
   color: #555;
 }
 
+#kifu-controls button.highlight {
+  border-color: #a05a2c;
+  color: #a05a2c;
+  font-weight: bold;
+}
+
 /* ── オンライン対戦モーダル ── */
 
 #online-modal {
