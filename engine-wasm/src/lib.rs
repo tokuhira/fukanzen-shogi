@@ -168,6 +168,124 @@ pub fn build_archive(request_json: &str) -> String {
     engine::archive::kifu_to_archive(&kifu, &meta)
 }
 
+/// アーカイブ書式 v1（または旧 sfen 始まり）のテキストを解釈して対局データを返す。
+/// `build_archive` の対。
+///
+/// 成功: `{"ok":true,"initial_sfen":"...","plies":[{"s":"7g7f","g":"3c3d"},...],
+///        "meta":{"rule":"0.5","protocol":2,"app":"0.8.0","sente":null,"gote":null,
+///                "result":{"kind":"mate","outcome":"gote_wins"}}}`
+/// 失敗: `{"ok":false,"error":"<理由>"}`
+#[wasm_bindgen]
+pub fn parse_archive(text: &str) -> String {
+    let (kifu, meta) = match engine::archive::archive_to_kifu(text) {
+        Some(v) => v,
+        None => return r#"{"ok":false,"error":"parse_failed"}"#.to_string(),
+    };
+
+    let initial_sfen = engine::serialize::position_to_sfen(&kifu.initial_position);
+    let plies: Vec<String> = kifu
+        .plies
+        .iter()
+        .map(|p| format!(
+            r#"{{"s":"{}","g":"{}"}}"#,
+            escape_json(&p.sente.to_usi()),
+            escape_json(&p.gote.to_usi())
+        ))
+        .collect();
+
+    let app_json = match &meta.app {
+        Some(s) => format!(r#""{}""#, escape_json(s)),
+        None => "null".to_string(),
+    };
+    let sente_json = match &meta.sente {
+        Some(s) => format!(r#""{}""#, escape_json(s)),
+        None => "null".to_string(),
+    };
+    let gote_json = match &meta.gote {
+        Some(s) => format!(r#""{}""#, escape_json(s)),
+        None => "null".to_string(),
+    };
+
+    format!(
+        r#"{{"ok":true,"initial_sfen":"{}","plies":[{}],"meta":{{"rule":"{}.{}","protocol":{},"app":{},"sente":{},"gote":{},"result":{{"kind":"{}","outcome":"{}"}}}}}}"#,
+        escape_json(&initial_sfen),
+        plies.join(","),
+        meta.rule.0,
+        meta.rule.1,
+        meta.protocol,
+        app_json,
+        sente_json,
+        gote_json,
+        meta.result.kind.to_str(),
+        meta.result.outcome.to_str(),
+    )
+}
+
 fn escape_json(s: &str) -> String {
     s.replace('\\', r"\\").replace('"', r#"\""#)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_request() -> String {
+        r#"{"initial_sfen":"lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1",
+            "plies":[{"s":"7g7f","g":"3c3d"},{"s":"2g2f","g":"8c8d"}],
+            "rule":"0.5","protocol":2,"app":"0.8.1",
+            "sente":null,"gote":null,
+            "result":{"kind":"mate","outcome":"gote_wins"}}"#
+            .to_string()
+    }
+
+    #[test]
+    fn build_then_parse_round_trip() {
+        let archive = build_archive(&sample_request());
+        assert!(!archive.starts_with("ERROR"), "build_archive failed: {}", archive);
+
+        let parsed_json = parse_archive(&archive);
+        let v: serde_json::Value = serde_json::from_str(&parsed_json).unwrap();
+        assert_eq!(v["ok"], true);
+        assert_eq!(
+            v["initial_sfen"],
+            "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1"
+        );
+        assert_eq!(v["plies"].as_array().unwrap().len(), 2);
+        assert_eq!(v["plies"][0]["s"], "7g7f");
+        assert_eq!(v["plies"][0]["g"], "3c3d");
+        assert_eq!(v["plies"][1]["s"], "2g2f");
+        assert_eq!(v["plies"][1]["g"], "8c8d");
+        assert_eq!(v["meta"]["rule"], "0.5");
+        assert_eq!(v["meta"]["protocol"], 2);
+        assert_eq!(v["meta"]["app"], "0.8.1");
+        assert_eq!(v["meta"]["sente"], serde_json::Value::Null);
+        assert_eq!(v["meta"]["gote"], serde_json::Value::Null);
+        assert_eq!(v["meta"]["result"]["kind"], "mate");
+        assert_eq!(v["meta"]["result"]["outcome"], "gote_wins");
+    }
+
+    #[test]
+    fn parse_old_bare_kifu() {
+        let old = "sfen lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1\n1: 7g7f | 3c3d";
+        let parsed_json = parse_archive(old);
+        let v: serde_json::Value = serde_json::from_str(&parsed_json).unwrap();
+        assert_eq!(v["ok"], true);
+        assert_eq!(v["plies"].as_array().unwrap().len(), 1);
+        assert_eq!(v["meta"]["result"]["kind"], "unfinished");
+        assert_eq!(v["meta"]["result"]["outcome"], "none");
+    }
+
+    #[test]
+    fn parse_broken_input() {
+        let parsed_json = parse_archive("this is not an archive");
+        let v: serde_json::Value = serde_json::from_str(&parsed_json).unwrap();
+        assert_eq!(v["ok"], false);
+    }
+
+    #[test]
+    fn parse_empty_input() {
+        let parsed_json = parse_archive("");
+        let v: serde_json::Value = serde_json::from_str(&parsed_json).unwrap();
+        assert_eq!(v["ok"], false);
+    }
 }

@@ -79,6 +79,32 @@ export function legal_actions(sfen, side) {
 }
 
 /**
+ * アーカイブ書式 v1（または旧 sfen 始まり）のテキストを解釈して対局データを返す。
+ * `build_archive` の対。
+ *
+ * 成功: `{"ok":true,"initial_sfen":"...","plies":[{"s":"7g7f","g":"3c3d"},...],
+ *        "meta":{"rule":"0.5","protocol":2,"app":"0.8.0","sente":null,"gote":null,
+ *                "result":{"kind":"mate","outcome":"gote_wins"}}}`
+ * 失敗: `{"ok":false,"error":"<理由>"}`
+ * @param {string} text
+ * @returns {string}
+ */
+export function parse_archive(text) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.parse_archive(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
  * 両着手を解決して次局面と発生事象を返す。
  *
  * - sfen: 現局面の SFEN 文字列

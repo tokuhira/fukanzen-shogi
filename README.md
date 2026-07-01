@@ -57,7 +57,7 @@ Interactive hotsheet mode. One person plays both sides with mouse clicks. Click 
 **Web frontend and server (static + serverless):**
 
 - `web/` — static HTML/CSS/JS board; no build step, no frameworks. Interactive hotsheet and browser online battle. Powered by `engine-wasm/` and `protocol-wasm/` (Wasm). Deployed to Cloudflare Pages. See [web/README.md](web/README.md).
-- `engine-wasm/` — thin `wasm-bindgen` cdylib exposing `resolve_ply`, `game_status`, `legal_actions`, and `build_archive` over a pure SFEN/USI string boundary. Engine core is untouched.
+- `engine-wasm/` — thin `wasm-bindgen` cdylib exposing `resolve_ply`, `game_status`, `legal_actions`, `build_archive`, and `parse_archive` over a pure SFEN/USI string boundary. Engine core is untouched.
 - `protocol-wasm/` — thin `wasm-bindgen` cdylib exposing `ProtocolSession`, SFEN hashing, `version_tuple`, and reconnect utilities for Wasm targets; used by the browser online battle.
 - `notation/` — pure Rust library generating human-readable Japanese kifu notation (e.g. ５八金右, ７六歩) with disambiguation suffixes (右/左/直/上/引/寄) only when needed.
 - `notation-wasm/` — thin `wasm-bindgen` cdylib exposing `ja_notation` for browser use; used by the web board for move labels.
@@ -110,7 +110,8 @@ The `protocol/` crate has no dependency on `net.rs` or the TUI; it receives nonc
 - **An interactive hotsheet board** (`web/`) — HTML/CSS/JS, no build step, no frameworks. One person plays both sides with mouse clicks in sumi ink style. Legal moves are shown as subtle ink dots (v0.5 rules enforced by engine). The kifu backbone accumulates all played moves; ← / → navigation lets you revisit any position and branch from there. Promotion dialog, simultaneous resolution, game-over detection — all engine-driven via Wasm. Deployed to Cloudflare Pages.
 - **Browser online battle** (`web/online.js`, `protocol-wasm/`, `server/`) — two players in separate browsers play a fully secret simultaneous game over WebSocket. Each player commits a move without seeing the opponent's; both are revealed only when the other is in. The `protocol-wasm` Wasm module handles commit-reveal, board-hash verification, identity auth, and reconnect recovery — the same protocol logic as the TUI TCP mode, wrapped for the browser. The Cloudflare Worker relays encrypted payloads between clients; a Durable Object per room keeps WebSocket state without a database. Deployed to `fukanzen-shogi-ws.tokuhira.workers.dev`.
 - **Version-tuple-stamped archive** (v0.8.0) — the 棋譜を保存 button saves the current game, mid-game or finished, as an archive file embedding `(rule_version, protocol_version, app_version)` alongside the move list. Because collision resolution can change between rule versions (e.g. the Sengoku Musou changes across v0.3–v0.5), a bare move list is not enough to guarantee an old record replays identically — the version tuple lets it be reconstructed under the exact rules it was played with. Backward-compatible with the pre-v0.8.0 plain-kifu format. `engine::archive` is the format's single source of truth; `web/` only handles I/O (download + clipboard copy).
-- **Wasm wrappers** — `engine-wasm/` exposes the rule engine and the archive format (`build_archive`); `protocol-wasm/` exposes the protocol session and the version tuple (`version_tuple`); `notation-wasm/` exposes Japanese move notation. All are thin `wasm-bindgen` cdylibs; the underlying crates are untouched.
+- **Archive retrieval and replay** (v0.8.1) — the 棋譜を読込 button loads a saved archive back in (file picker or pasted text) and replays it through the existing kifu navigation — sumi ink board, ← / → navigation, Japanese notation regenerated from USI. The embedded version tuple and result are shown as a small appreciation line; if the archive's rule version doesn't match the running engine, a plain-language warning is shown without blocking replay (the outcome may not reproduce exactly under a different rule version). Branching from a loaded position still works, same as any other replay. Old bare-kifu files load too. Wire format and rule/protocol versions are unchanged — this step only adds a reader.
+- **Wasm wrappers** — `engine-wasm/` exposes the rule engine and the archive format (`build_archive`, `parse_archive`); `protocol-wasm/` exposes the protocol session and the version tuple (`version_tuple`); `notation-wasm/` exposes Japanese move notation. All are thin `wasm-bindgen` cdylibs; the underlying crates are untouched.
 
 ### Future directions (not yet implemented)
 
@@ -174,7 +175,7 @@ Web 盤を公開しています: **[fukanzen-shogi.tokuhira.net](https://fukanze
 **Web フロントエンドとサーバー（静的＋サーバーレス）:**
 
 - `web/` — 静的 HTML/CSS/JS 盤。ビルド不要、フレームワーク不要。ホットシート操作とブラウザ秘匿対戦の両モード。`engine-wasm/` と `protocol-wasm/` で Wasm 化した核が駆動。Cloudflare Pages で配信。[web/README.md](web/README.md) を参照。
-- `engine-wasm/` — `wasm-bindgen` の薄い cdylib ラッパー。`resolve_ply`・`game_status`・`legal_actions`・`build_archive` を SFEN/USI の文字列境界で公開。エンジン本体は無改変。
+- `engine-wasm/` — `wasm-bindgen` の薄い cdylib ラッパー。`resolve_ply`・`game_status`・`legal_actions`・`build_archive`・`parse_archive` を SFEN/USI の文字列境界で公開。エンジン本体は無改変。
 - `protocol-wasm/` — `wasm-bindgen` の薄い cdylib ラッパー。`ProtocolSession`・SFEN ハッシュ・`version_tuple`・再接続ユーティリティをブラウザ向けに公開。プロトコル本体は無改変。
 - `notation/` — 人間可読な日本語棋譜表記を生成する純粋 Rust ライブラリ（例: ５八金右・７六歩）。曖昧さがある場合のみ区別符（右/左/直/上/引/寄）を付加。
 - `notation-wasm/` — `wasm-bindgen` の薄い cdylib ラッパー。`ja_notation` をブラウザ向けに公開。Web 盤の着手ラベルに使用。
@@ -227,7 +228,8 @@ Web 盤を公開しています: **[fukanzen-shogi.tokuhira.net](https://fukanze
 - **ホットシート操作盤**（`web/`）— HTML/CSS/JS、ビルド不要、フレームワーク不要。水墨様式でマウスクリック着手。合法手を淡い墨点で提示（v0.5 ルール、エンジン判定）。棋譜バックボーンで← / →ナビゲーション・分岐対応。成り選択 UI・同時解決・終局判定をすべて Wasm エンジンが処理。Cloudflare Pages で公開。
 - **ブラウザ秘匿対戦**（`web/online.js`・`protocol-wasm/`・`server/`）— 別々のブラウザの二人が WebSocket 経由で本物の秘匿同時対局を行う。各プレイヤーは相手が commit するまで自分の着手だけを持ち、両者が揃った瞬間に同時開示される。`protocol-wasm` Wasm モジュールが commit-reveal・盤面ハッシュ検証・本人認証・再接続救済を処理し、Cloudflare Worker が暗号化済みペイロードを中継する（Durable Object で WebSocket セッションを管理）。TUI の TCP 対戦モードと同一のプロトコル論理をブラウザ向けに再利用。
 - **版タプル付きアーカイブ保存**（v0.8.0）— 「棋譜を保存」ボタンで、対局中・終局後を問わず現在の対局を `(ルール版, プロトコル版, アプリ版)` を着手列とともに埋め込んだアーカイブファイルとして保存できる。衝突解決の挙動はルール版ごとに変わりうる（戦国無双特則が v0.3〜v0.5 で変遷したように）ため、着手列だけでは旧記録を同一挙動で再現できる保証がない。版タプルにより、実際に指されたルールのもとで再現できる。v0.8.0 以前の素の棋譜形式とは後方互換。書式の正本は `engine::archive` であり、`web/` は保存・コピーの I/O のみを担う。
-- **Wasm ラッパー** — `engine-wasm/` がルールエンジンとアーカイブ書式（`build_archive`）を、`protocol-wasm/` がプロトコルセッションと版タプル（`version_tuple`）を、`notation-wasm/` が日本語棋譜表記を公開。すべて `wasm-bindgen` の薄い cdylib であり、各クレート本体は無改変。
+- **アーカイブの取り出しと再生**（v0.8.1）— 「棋譜を読込」ボタンで、保存済みアーカイブをファイル選択または貼り付けから読み込み、既存の棋譜ナビ（水墨盤・← / →・日本語表記の再計算）でそのまま再生できる。刻まれた版タプルと結果を鑑賞用の情報行に表示し、読み込んだアーカイブのルール版と現行エンジンが食い違えば、再生を止めずに平易な注意文を表示する（当時と結末が異なりうることを正直に伝える）。読込局面からの分岐再指しも従来どおり可能。旧・素の棋譜形式も読める。書式・ルール版・プロトコル版は不変で、読み手を足すだけの一歩。
+- **Wasm ラッパー** — `engine-wasm/` がルールエンジンとアーカイブ書式（`build_archive`・`parse_archive`）を、`protocol-wasm/` がプロトコルセッションと版タプル（`version_tuple`）を、`notation-wasm/` が日本語棋譜表記を公開。すべて `wasm-bindgen` の薄い cdylib であり、各クレート本体は無改変。
 
 ### 今後の計画（未実装）
 
@@ -261,6 +263,7 @@ Web 盤を公開しています: **[fukanzen-shogi.tokuhira.net](https://fukanze
 - [Version management step 1](docs/不完全将棋_実装指示書_バージョン管理Step1.md)
 - [README and document structure](docs/不完全将棋_実装指示書_READMEとドキュメント整備_改訂版.md)
 - [Version-tuple-stamped archive — Yodogawa step 1](docs/不完全将棋_実装指示書_版タプル付きアーカイブ_淀川第一歩.md) — v0.8.0
+- [Archive retrieval and replay — Yodogawa step 2](docs/不完全将棋_実装指示書_アーカイブ取り出しと再生_淀川第二歩.md) — v0.8.1
 
 **Change instructions / 変更指示:**
 

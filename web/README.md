@@ -19,6 +19,7 @@ Interactive board with offline single-player and online browser-vs-browser battl
 - **Japanese notation** — move labels use human-readable kifu notation (e.g. ５八金右, ７六歩) with disambiguation suffixes only when needed.
 - **デモ局面 / 新局** buttons load the built-in 6-turn demo or reset to a blank board.
 - **棋譜を保存** — save the current game (mid-game or finished) as a version-tuple-stamped archive file (`.kifu`, download + clipboard copy). The archive embeds `(rule_version, protocol_version)` so old records replay correctly even after rule changes.
+- **棋譜を読込** — load a saved archive back in, via file picker or pasted text. Replays through the same navigation (← / →, sumi ink, Japanese notation); branching from a past position still works. The embedded version tuple and result are shown; if the archive's rule version doesn't match the running engine, a plain-language warning is shown (replay still proceeds — it just may not reproduce the original outcome exactly). Old bare-kifu files (pre-v0.8.0) still load.
 
 All positions are computed by the Wasm engine at runtime. No hardcoded SFEN data.
 
@@ -28,7 +29,7 @@ All positions are computed by the Wasm engine at runtime. No hardcoded SFEN data
 
 | Module | Location | Role |
 |---|---|---|
-| `engine-wasm` | `web/wasm/` | `resolve_ply`, `game_status`, `legal_actions`, `build_archive` — rule engine + archive format |
+| `engine-wasm` | `web/wasm/` | `resolve_ply`, `game_status`, `legal_actions`, `build_archive`, `parse_archive` — rule engine + archive format |
 | `protocol-wasm` | `web/protocol-wasm/` | commit-reveal message encoding/decoding (online play), `version_tuple` |
 | `notation-wasm` | `web/notation-wasm/` | `ja_notation` — human-readable Japanese kifu notation |
 
@@ -91,6 +92,7 @@ Config: `wrangler.toml` at repository root (`pages_build_output_dir = "web"`).
 - **日本語棋譜表記** — ５八金右・７六歩など、曖昧さがある場合のみ区別符（右・左・直・上・引・寄）を付加。
 - **デモ局面 / 新局** ボタンで 6 組手デモ局を再生、または初期局面にリセット。
 - **棋譜を保存** — 対局中・終局後を問わず、版タプル付きアーカイブ書式（`.kifu`、ダウンロード＋クリップボードコピー）で現在の対局を保存。`(ルール版, プロトコル版)` を埋め込むため、ルール変更後も旧記録を正しく再現できる。
+- **棋譜を読込** — 保存したアーカイブをファイル選択または貼り付けで読み込み、既存の棋譜ナビ（← / →・水墨盤・日本語表記）でそのまま鑑賞できる。読み込んだ局面から盤クリックで分岐再指しも可能。刻まれた版タプルと結果を表示し、読み込んだアーカイブのルール版と現行エンジンが食い違う場合は平易な注意文を表示する（再生自体は止めない）。v0.8.0 より前の素の棋譜ファイルも読み込める。
 
 全局面は Wasm エンジンがブラウザ上でリアルタイム計算。ハードコードされた局面データはない。
 
@@ -100,7 +102,7 @@ Config: `wrangler.toml` at repository root (`pages_build_output_dir = "web"`).
 
 | モジュール | 配置先 | 役割 |
 |---|---|---|
-| `engine-wasm` | `web/wasm/` | `resolve_ply` / `game_status` / `legal_actions` / `build_archive` — ルールエンジン＋アーカイブ書式 |
+| `engine-wasm` | `web/wasm/` | `resolve_ply` / `game_status` / `legal_actions` / `build_archive` / `parse_archive` — ルールエンジン＋アーカイブ書式 |
 | `protocol-wasm` | `web/protocol-wasm/` | コミット秘匿プロトコルのメッセージ符号化（オンライン対戦）、`version_tuple` |
 | `notation-wasm` | `web/notation-wasm/` | `ja_notation` — 日本語棋譜表記生成 |
 

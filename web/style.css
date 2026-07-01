@@ -54,6 +54,17 @@ h1 {
   min-height: 1.6em;
 }
 
+#archive-info {
+  font-size: 0.72rem;
+  color: #888;
+  letter-spacing: 0.06em;
+  min-height: 1.2em;
+}
+
+#archive-info.mismatch {
+  color: #a05a2c;
+}
+
 #board-wrap {
   width: 100%;
   position: relative;
@@ -288,4 +299,83 @@ h1 {
 #btn-resign:hover:not(:disabled) {
   border-color: #882222;
   color: #882222;
+}
+
+/* ── 棋譜読込モーダル ── */
+
+#load-modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(210, 205, 190, 0.72);
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+#load-modal.visible { display: flex; }
+
+#load-panel {
+  background: #f5f3ec;
+  border: 1px solid #999;
+  padding: 28px 32px;
+  max-width: 380px;
+  width: 90%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.10);
+}
+
+#load-panel h2 {
+  font-size: 0.95rem;
+  font-weight: normal;
+  letter-spacing: 0.2em;
+  color: #1a1a1a;
+  text-align: center;
+  margin: 0;
+}
+
+.load-hint {
+  font-size: 0.75rem;
+  color: #888;
+  text-align: center;
+  margin: 0;
+}
+
+#input-paste {
+  border: 1px solid #bbb;
+  background: #faf9f5;
+  color: #1a1a1a;
+  font-family: inherit;
+  font-size: 0.78rem;
+  padding: 8px 10px;
+  min-height: 100px;
+  resize: vertical;
+  outline: none;
+}
+
+#input-paste:focus { border-color: #777; }
+
+#load-btns {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+#load-btns button {
+  background: none;
+  border: 1px solid #bbb;
+  color: #666;
+  padding: 7px 22px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  letter-spacing: 0.06em;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+#load-btns button:hover:not(:disabled) {
+  border-color: #1a1a1a;
+  color: #1a1a1a;
 }

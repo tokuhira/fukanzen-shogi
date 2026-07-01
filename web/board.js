@@ -3,6 +3,7 @@ import init, {
   game_status  as wasmGameStatus,
   legal_actions as wasmLegalActions,
   build_archive as wasmBuildArchive,
+  parse_archive as wasmParseArchive,
 } from './wasm/engine_wasm.js';
 
 import initNotation, {
@@ -55,6 +56,30 @@ const EVENT_LABEL = {
   gote_died:  '後手玉が取られた',
   both_died:  '両玉相討ち',
 };
+
+// アーカイブ鑑賞表示用の結果語彙（engine::archive::ResultKind / Outcome）
+const RESULT_KIND_JA = {
+  mate:       '詰み',
+  king_death: '玉が取られた',
+  swap_draw:  '両玉相討ち',
+  sennichite: '千日手',
+  resign:     '投了',
+  unfinished: '未完',
+  other:      'その他',
+};
+const OUTCOME_JA = {
+  sente_wins: '先手の勝ち',
+  gote_wins:  '後手の勝ち',
+  draw:       '引き分け',
+  none:       '',
+};
+
+function formatResult(result) {
+  const kindJa = RESULT_KIND_JA[result.kind] || result.kind;
+  if (result.outcome === 'none') return kindJa;
+  const outcomeJa = OUTCOME_JA[result.outcome] || result.outcome;
+  return `${outcomeJa}（${kindJa}）`;
+}
 
 // ── USI utilities ─────────────────────────────────────────────────────────────
 
@@ -161,6 +186,7 @@ let gameOverCache = { cursor: -1, msg: null };
 
 let versionTuple    = null;  // { rule, protocol, app } — init() 完了後にキャッシュ
 let resultOverride  = null;  // { kind, outcome } | null — 投了など盤面から導出できない結果
+let loadedMeta       = null;  // 読み込んだアーカイブの ArchiveMeta（鑑賞表示・版不一致判定用）
 
 // ── Online mode state ─────────────────────────────────────────────────────────
 
@@ -174,14 +200,18 @@ let onlineWaitingMsg      = '';      // 待機時の表示メッセージ
 
 // ── Kifu management ───────────────────────────────────────────────────────────
 
-function loadPlies(plies) {
+function loadPlies(plies, initialSfen = INITIAL_SFEN) {
   kifu.plies = [];
-  sfens  = [INITIAL_SFEN];
+  sfens  = [initialSfen];
   events = [];
   for (const ply of plies) {
-    const r = JSON.parse(resolve_ply(sfens.at(-1), ply.sUsi, ply.gUsi));
+    const preSfen = sfens.at(-1);
+    const r = JSON.parse(resolve_ply(preSfen, ply.sUsi, ply.gUsi));
     if (!r.ok) throw new Error(r.error);
-    kifu.plies.push({ ...ply });
+    // 日本語表記が無ければ再計算（中身は USI、表記は導出）
+    const sText = ply.sText ?? usiToText(ply.sUsi, preSfen, 'sente');
+    const gText = ply.gText ?? usiToText(ply.gUsi, preSfen, 'gote');
+    kifu.plies.push({ sUsi: ply.sUsi, gUsi: ply.gUsi, sText, gText });
     sfens.push(r.sfen);
     events.push(r.event);
   }
@@ -201,6 +231,7 @@ function resetToNew() {
   resetInput();
   gameOverCache  = { cursor: -1, msg: null };
   resultOverride = null;
+  loadedMeta     = null;
 }
 
 function branchAndAppend(sUsi, gUsi, sText, gText) {
@@ -309,6 +340,52 @@ async function saveKifu() {
   } catch {
     // クリップボード API が使えない環境ではダウンロードのみで良しとする
   }
+}
+
+// アーカイブ書式（または旧 sfen 始まり棋譜）のテキストをパースする。失敗時は null。
+function parseArchiveText(text) {
+  const r = JSON.parse(wasmParseArchive(text));
+  if (!r.ok) return null;
+  return r;   // { ok, initial_sfen, plies:[{s,g}], meta }
+}
+
+// 読み込んだアーカイブを既存の再生機構（棋譜ナビ・水墨盤・日本語表記）へ流し込む。
+function loadArchive(text) {
+  const parsed = parseArchiveText(text);
+  if (!parsed) { alert('棋譜を読み込めませんでした'); return; }
+
+  // ローカル鑑賞として読む（オンライン状態は畳む）
+  if (onlineMode || onlineGameOver) { _resetOnlineState(); disconnectOnline(); }
+
+  const plies = parsed.plies.map(p => ({ sUsi: p.s, gUsi: p.g }));
+  try {
+    loadPlies(plies, parsed.initial_sfen);
+  } catch (e) {
+    alert('棋譜の再生に失敗しました: ' + e.message);
+    return;
+  }
+
+  loadedMeta = parsed.meta;
+  render();
+}
+
+// 読み込んだアーカイブの版タプル・結果を鑑賞表示する。版不一致なら注意を返す。
+function archiveInfoText() {
+  if (!loadedMeta) return { text: '', mismatch: false };
+
+  const versionLine = loadedMeta.app
+    ? `ルール ${loadedMeta.rule} / プロトコル ${loadedMeta.protocol} / v${loadedMeta.app}`
+    : `ルール ${loadedMeta.rule} / プロトコル ${loadedMeta.protocol}`;
+  const resultLine = formatResult(loadedMeta.result);
+
+  const mismatch = !!(versionTuple && loadedMeta.rule !== versionTuple.rule);
+  if (!mismatch) {
+    return { text: `${versionLine} — ${resultLine}`, mismatch: false };
+  }
+  const warning =
+    `この棋譜はルール ${loadedMeta.rule} で指されました。現在の再生エンジンはルール ${versionTuple.rule} です。` +
+    `再生結果が当時と異なる可能性があります。`;
+  return { text: `${versionLine} — ${resultLine} ／ ${warning}`, mismatch: true };
 }
 
 // ── Input management ──────────────────────────────────────────────────────────
@@ -865,6 +942,11 @@ function render() {
   document.getElementById('move-display').textContent = moveText;
   document.getElementById('event-label').textContent  = eventText || ' ';
 
+  const archiveInfo = archiveInfoText();
+  const archiveInfoEl = document.getElementById('archive-info');
+  archiveInfoEl.textContent = archiveInfo.text;
+  archiveInfoEl.classList.toggle('mismatch', archiveInfo.mismatch);
+
   const total = kifu.plies.length * 2 + 1;
   const step  = cursor * 2 + (phase === 'reveal' ? 1 : 0) + 1;
   document.getElementById('step-label').textContent = `${step} / ${total}`;
@@ -913,14 +995,19 @@ function render() {
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 // Escape キーと閉じるボタンの両方から呼べるようモジュールスコープに置く
-let closeModal = () => {};
+let closeModal     = () => {};
+let closeLoadModal  = () => {};
 
 document.addEventListener('DOMContentLoaded', async () => {
   window.__fukanzenDebug = () => console.table(debugState());
   document.getElementById('board').addEventListener('click', handleSvgClick);
   document.getElementById('btn-next').addEventListener('click', goNext);
   document.getElementById('btn-prev').addEventListener('click', goPrev);
-  document.getElementById('btn-demo').addEventListener('click', () => { loadPlies(DEMO_PLIES); render(); });
+  document.getElementById('btn-demo').addEventListener('click', () => {
+    loadPlies(DEMO_PLIES);
+    loadedMeta = null;
+    render();
+  });
   document.getElementById('btn-save').addEventListener('click', saveKifu);
   document.getElementById('btn-new').addEventListener('click', () => {
     if (onlineGameOver) _resetOnlineState();
@@ -943,9 +1030,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (e.key === 'ArrowRight' || e.key === 'ArrowDown') goNext();
     if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   goPrev();
     if (e.key === 'Escape') {
-      const modal = document.getElementById('online-modal');
-      if (modal.classList.contains('visible')) {
+      const onlineModalEl = document.getElementById('online-modal');
+      const loadModalEl   = document.getElementById('load-modal');
+      if (onlineModalEl.classList.contains('visible')) {
         closeModal();
+      } else if (loadModalEl.classList.contains('visible')) {
+        closeLoadModal();
       } else {
         resetInput(); render();
       }
@@ -1083,6 +1173,43 @@ document.addEventListener('DOMContentLoaded', async () => {
       };
 
       await connectOnline(roomKey, secret, callbacks);
+    });
+  }
+
+  // ── 棋譜読込モーダル ────────────────────────────────────────────────────────
+  {
+    const modal      = document.getElementById('load-modal');
+    const inputFile  = document.getElementById('input-file');
+    const inputPaste = document.getElementById('input-paste');
+
+    closeLoadModal = () => {
+      modal.classList.remove('visible');
+      inputPaste.value = '';
+      inputFile.value  = '';
+    };
+
+    document.getElementById('btn-load').addEventListener('click', () => {
+      modal.classList.add('visible');
+    });
+    document.getElementById('btn-load-close').addEventListener('click', closeLoadModal);
+
+    document.getElementById('btn-load-file').addEventListener('click', () => inputFile.click());
+    inputFile.addEventListener('change', () => {
+      const file = inputFile.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        loadArchive(String(reader.result));
+        closeLoadModal();
+      };
+      reader.readAsText(file);
+    });
+
+    document.getElementById('btn-load-paste').addEventListener('click', () => {
+      const text = inputPaste.value.trim();
+      if (!text) return;
+      loadArchive(text);
+      closeLoadModal();
     });
   }
 

@@ -32,6 +32,17 @@ export function game_status(sfen: string): string;
 export function legal_actions(sfen: string, side: string): string;
 
 /**
+ * アーカイブ書式 v1（または旧 sfen 始まり）のテキストを解釈して対局データを返す。
+ * `build_archive` の対。
+ *
+ * 成功: `{"ok":true,"initial_sfen":"...","plies":[{"s":"7g7f","g":"3c3d"},...],
+ *        "meta":{"rule":"0.5","protocol":2,"app":"0.8.0","sente":null,"gote":null,
+ *                "result":{"kind":"mate","outcome":"gote_wins"}}}`
+ * 失敗: `{"ok":false,"error":"<理由>"}`
+ */
+export function parse_archive(text: string): string;
+
+/**
  * 両着手を解決して次局面と発生事象を返す。
  *
  * - sfen: 現局面の SFEN 文字列
@@ -50,6 +61,7 @@ export interface InitOutput {
     readonly build_archive: (a: number, b: number) => [number, number];
     readonly game_status: (a: number, b: number) => [number, number];
     readonly legal_actions: (a: number, b: number, c: number, d: number) => [number, number];
+    readonly parse_archive: (a: number, b: number) => [number, number];
     readonly resolve_ply: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;

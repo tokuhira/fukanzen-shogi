@@ -4,6 +4,7 @@ export const memory: WebAssembly.Memory;
 export const build_archive: (a: number, b: number) => [number, number];
 export const game_status: (a: number, b: number) => [number, number];
 export const legal_actions: (a: number, b: number, c: number, d: number) => [number, number];
+export const parse_archive: (a: number, b: number) => [number, number];
 export const resolve_ply: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
 export const __wbindgen_externrefs: WebAssembly.Table;
 export const __wbindgen_malloc: (a: number, b: number) => number;

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>不完全将棋</title>
-  <link rel="stylesheet" href="style.css?v=0.8.0">
+  <link rel="stylesheet" href="style.css?v=0.8.1">
 </head>
 <body>
   <div id="container">
@@ -12,6 +12,7 @@
     <p id="phase-label"></p>
     <p id="move-display"></p>
     <p id="event-label"></p>
+    <p id="archive-info"></p>
     <div id="board-wrap">
       <svg id="board" xmlns="http://www.w3.org/2000/svg"></svg>
       <div id="promotion-overlay">
@@ -33,6 +34,23 @@
       <button id="btn-online">対戦</button>
       <button id="btn-resign">投了</button>
       <button id="btn-save">棋譜を保存</button>
+      <button id="btn-load">棋譜を読込</button>
+      <input id="input-file" type="file" accept=".kifu,.txt,text/plain" hidden>
+    </div>
+  </div>
+
+  <div id="load-modal">
+    <div id="load-panel">
+      <h2>棋譜を読込</h2>
+      <p class="load-hint">ファイルを選ぶか、アーカイブ本文を貼り付けてください。</p>
+      <div id="load-btns">
+        <button id="btn-load-file">ファイルを選ぶ</button>
+      </div>
+      <textarea id="input-paste" placeholder="ここに棋譜アーカイブのテキストを貼り付け" spellcheck="false"></textarea>
+      <div id="load-btns">
+        <button id="btn-load-paste">貼り付けた内容を読込</button>
+        <button id="btn-load-close">閉じる</button>
+      </div>
     </div>
   </div>
 
@@ -55,6 +73,6 @@
     </div>
   </div>
 
-  <script type="module" src="board.js?v=0.8.0"></script>
+  <script type="module" src="board.js?v=0.8.1"></script>
 </body>
 </html>
