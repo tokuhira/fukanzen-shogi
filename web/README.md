@@ -19,7 +19,7 @@ Interactive board with offline single-player and online browser-vs-browser battl
 - **Japanese notation** — move labels use human-readable kifu notation (e.g. ５八金右, ７六歩) with disambiguation suffixes only when needed.
 - **デモ局面 / 新局** buttons load the built-in 6-turn demo or reset to a blank board.
 - **棋譜を保存** — save the current game (mid-game or finished) as a version-tuple-stamped archive file (`.kifu`, download + clipboard copy). The archive embeds `(rule_version, protocol_version)` so old records replay correctly even after rule changes.
-- **棋譜を読込** — load a saved archive back in, via file picker or pasted text. Replays through the same navigation (← / →, sumi ink, Japanese notation); branching from a past position still works. The embedded version tuple and result are shown; if the archive's rule version doesn't match the running engine, a plain-language warning is shown (replay still proceeds — it just may not reproduce the original outcome exactly). Old bare-kifu files (pre-v0.8.0) still load.
+- **棋譜を読込** — load a saved archive back in, via file picker or pasted text. Replays through the same navigation (← / →, sumi ink, Japanese notation); branching from a past position still works. The embedded version tuple and result are shown; if the archive's rule version doesn't match the running engine, a plain-language warning is shown (replay still proceeds — it just may not reproduce the original outcome exactly). Old bare-kifu files (pre-v0.8.0) still load. Since this reads externally-supplied text, it rejects archives over 500 plies or 512 KB with a friendly message (client-side hygiene limit, not a game rule), and JSON escaping was hardened against control characters in free-text header fields (v0.8.2).
 
 All positions are computed by the Wasm engine at runtime. No hardcoded SFEN data.
 
@@ -92,7 +92,7 @@ Config: `wrangler.toml` at repository root (`pages_build_output_dir = "web"`).
 - **日本語棋譜表記** — ５八金右・７六歩など、曖昧さがある場合のみ区別符（右・左・直・上・引・寄）を付加。
 - **デモ局面 / 新局** ボタンで 6 組手デモ局を再生、または初期局面にリセット。
 - **棋譜を保存** — 対局中・終局後を問わず、版タプル付きアーカイブ書式（`.kifu`、ダウンロード＋クリップボードコピー）で現在の対局を保存。`(ルール版, プロトコル版)` を埋め込むため、ルール変更後も旧記録を正しく再現できる。
-- **棋譜を読込** — 保存したアーカイブをファイル選択または貼り付けで読み込み、既存の棋譜ナビ（← / →・水墨盤・日本語表記）でそのまま鑑賞できる。読み込んだ局面から盤クリックで分岐再指しも可能。刻まれた版タプルと結果を表示し、読み込んだアーカイブのルール版と現行エンジンが食い違う場合は平易な注意文を表示する（再生自体は止めない）。v0.8.0 より前の素の棋譜ファイルも読み込める。
+- **棋譜を読込** — 保存したアーカイブをファイル選択または貼り付けで読み込み、既存の棋譜ナビ（← / →・水墨盤・日本語表記）でそのまま鑑賞できる。読み込んだ局面から盤クリックで分岐再指しも可能。刻まれた版タプルと結果を表示し、読み込んだアーカイブのルール版と現行エンジンが食い違う場合は平易な注意文を表示する（再生自体は止めない）。v0.8.0 より前の素の棋譜ファイルも読み込める。外部由来の文字列を扱う機能のため、500組手・512KBを超えるアーカイブは穏当なメッセージで拒否する（ゲームルールではなくクライアント側の安全弁）。自由記述欄への制御文字混入に対する JSON エスケープも強化済み（v0.8.2）。
 
 全局面は Wasm エンジンがブラウザ上でリアルタイム計算。ハードコードされた局面データはない。
 

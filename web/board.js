@@ -23,6 +23,15 @@ import {
 
 const INITIAL_SFEN = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1";
 
+// engine-wasm::parse_archive の MAX_ARCHIVE_PLIES と一致させること（表示用）。
+// 正式なゲームルールではなく、外部アーカイブ読込に対する暫定の安全弁。
+const MAX_ARCHIVE_PLIES = 500;
+
+// 読込を受け付けるアーカイブテキストの最大バイト数（安全弁）。
+// 500組手の正当なアーカイブは概算 13〜14KB（着手行 500×24B＋ヘッダ約1.2KB）。
+// 巨大な悪意あるファイルでブラウザを固まらせないための、十分な安全マージン。
+const MAX_ARCHIVE_BYTES = 512 * 1024;
+
 const DEMO_PLIES = [
   { sUsi:"7g7f",  gUsi:"3c3d",  sText:"☗7六歩",   gText:"☖3四歩"  },
   { sUsi:"2g2f",  gUsi:"8c8d",  sText:"☗2六歩",   gText:"☖8四歩"  },
@@ -342,17 +351,29 @@ async function saveKifu() {
   }
 }
 
-// アーカイブ書式（または旧 sfen 始まり棋譜）のテキストをパースする。失敗時は null。
+// アーカイブ書式（または旧 sfen 始まり棋譜）のテキストをパースする。
+// 常に { ok, error?, initial_sfen?, plies?, meta? } を返す（例外を投げない）。
 function parseArchiveText(text) {
-  const r = JSON.parse(wasmParseArchive(text));
-  if (!r.ok) return null;
-  return r;   // { ok, initial_sfen, plies:[{s,g}], meta }
+  try {
+    return JSON.parse(wasmParseArchive(text));
+  } catch {
+    // wasm 側の手組み JSON がもし壊れていても（本来は起きない想定）、
+    // ここで確実に食い止めて穏当な失敗にする（多層防御）。
+    return { ok: false, error: 'invalid_json' };
+  }
 }
+
+const ARCHIVE_LOAD_ERROR_JA = {
+  too_many_plies: `棋譜の着手数が多すぎます（上限 ${MAX_ARCHIVE_PLIES} 組手）。読み込みを中止しました。`,
+};
 
 // 読み込んだアーカイブを既存の再生機構（棋譜ナビ・水墨盤・日本語表記）へ流し込む。
 function loadArchive(text) {
   const parsed = parseArchiveText(text);
-  if (!parsed) { alert('棋譜を読み込めませんでした'); return; }
+  if (!parsed.ok) {
+    alert(ARCHIVE_LOAD_ERROR_JA[parsed.error] || '棋譜を読み込めませんでした');
+    return;
+  }
 
   // ローカル鑑賞として読む（オンライン状態は畳む）
   if (onlineMode || onlineGameOver) { _resetOnlineState(); disconnectOnline(); }
@@ -1197,6 +1218,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     inputFile.addEventListener('change', () => {
       const file = inputFile.files?.[0];
       if (!file) return;
+      if (file.size > MAX_ARCHIVE_BYTES) {
+        alert(`ファイルが大きすぎます（上限 ${MAX_ARCHIVE_BYTES / 1024} KB）。読み込みを中止しました。`);
+        inputFile.value = '';
+        return;
+      }
       const reader = new FileReader();
       reader.onload = () => {
         loadArchive(String(reader.result));
@@ -1208,6 +1234,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('btn-load-paste').addEventListener('click', () => {
       const text = inputPaste.value.trim();
       if (!text) return;
+      if (text.length > MAX_ARCHIVE_BYTES) {
+        alert(`テキストが大きすぎます（上限 ${MAX_ARCHIVE_BYTES / 1024} KB）。読み込みを中止しました。`);
+        return;
+      }
       loadArchive(text);
       closeLoadModal();
     });

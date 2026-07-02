@@ -85,7 +85,7 @@ export function legal_actions(sfen, side) {
  * 成功: `{"ok":true,"initial_sfen":"...","plies":[{"s":"7g7f","g":"3c3d"},...],
  *        "meta":{"rule":"0.5","protocol":2,"app":"0.8.0","sente":null,"gote":null,
  *                "result":{"kind":"mate","outcome":"gote_wins"}}}`
- * 失敗: `{"ok":false,"error":"<理由>"}`
+ * 失敗: `{"ok":false,"error":"<理由>"}`（着手数超過時は `"too_many_plies"`）
  * @param {string} text
  * @returns {string}
  */

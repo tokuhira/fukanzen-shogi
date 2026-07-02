@@ -168,19 +168,33 @@ pub fn build_archive(request_json: &str) -> String {
     engine::archive::kifu_to_archive(&kifu, &meta)
 }
 
+/// 読み込みを許す着手数（組手）の暫定上限。
+///
+/// これは対局の正式なルール（500組手で引き分け等）ではなく、外部から読み込む
+/// アーカイブに対する Wasm 境界の安全弁である。巨大な着手列を持つファイルを
+/// 読み込ませてブラウザのメインスレッドを固まらせる（クライアント側リソース
+/// 枯渇）攻撃を防ぐための、実装上の制限にすぎない。実際のゲームルールとして
+/// 組手数上限を導入する際は engine::terminate 側に持たせ、RULE_VERSION を
+/// 上げる（淀川第三歩で予定）。
+const MAX_ARCHIVE_PLIES: usize = 500;
+
 /// アーカイブ書式 v1（または旧 sfen 始まり）のテキストを解釈して対局データを返す。
 /// `build_archive` の対。
 ///
 /// 成功: `{"ok":true,"initial_sfen":"...","plies":[{"s":"7g7f","g":"3c3d"},...],
 ///        "meta":{"rule":"0.5","protocol":2,"app":"0.8.0","sente":null,"gote":null,
 ///                "result":{"kind":"mate","outcome":"gote_wins"}}}`
-/// 失敗: `{"ok":false,"error":"<理由>"}`
+/// 失敗: `{"ok":false,"error":"<理由>"}`（着手数超過時は `"too_many_plies"`）
 #[wasm_bindgen]
 pub fn parse_archive(text: &str) -> String {
     let (kifu, meta) = match engine::archive::archive_to_kifu(text) {
         Some(v) => v,
         None => return r#"{"ok":false,"error":"parse_failed"}"#.to_string(),
     };
+
+    if kifu.plies.len() > MAX_ARCHIVE_PLIES {
+        return r#"{"ok":false,"error":"too_many_plies"}"#.to_string();
+    }
 
     let initial_sfen = engine::serialize::position_to_sfen(&kifu.initial_position);
     let plies: Vec<String> = kifu
@@ -221,8 +235,27 @@ pub fn parse_archive(text: &str) -> String {
     )
 }
 
+/// JSON 文字列リテラルとして安全な形にエスケープする。
+///
+/// `\` と `"` に加え、JSON 仕様上リテラル埋め込みが禁止されている制御文字
+/// （U+0000〜U+001F）も `\uXXXX` へエスケープする。ここを漏らすと、外部から
+/// 読み込んだアーカイブのヘッダ自由記述欄（app/sente/gote）に生の制御文字が
+/// 混入した場合に、手組み JSON の構文が壊れて JSON.parse が例外を投げる
+/// （実際に確認済み: タブ混入で "Bad control character in string literal"）。
 fn escape_json(s: &str) -> String {
-    s.replace('\\', r"\\").replace('"', r#"\""#)
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str(r"\\"),
+            '"'  => out.push_str("\\\""),
+            '\n' => out.push_str(r"\n"),
+            '\r' => out.push_str(r"\r"),
+            '\t' => out.push_str(r"\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -287,5 +320,59 @@ mod tests {
         let parsed_json = parse_archive("");
         let v: serde_json::Value = serde_json::from_str(&parsed_json).unwrap();
         assert_eq!(v["ok"], false);
+    }
+
+    fn request_with_n_plies(n: usize) -> String {
+        let plies_json = std::iter::repeat(r#"{"s":"7g7f","g":"3c3d"}"#)
+            .take(n)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            r#"{{"initial_sfen":"lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1",
+                "plies":[{}],
+                "rule":"0.5","protocol":2,"app":"0.8.1",
+                "sente":null,"gote":null,
+                "result":{{"kind":"unfinished","outcome":"none"}}}}"#,
+            plies_json
+        )
+    }
+
+    #[test]
+    fn parse_accepts_exactly_max_plies() {
+        let archive = build_archive(&request_with_n_plies(MAX_ARCHIVE_PLIES));
+        assert!(!archive.starts_with("ERROR"), "build_archive failed: {}", archive);
+        let v: serde_json::Value = serde_json::from_str(&parse_archive(&archive)).unwrap();
+        assert_eq!(v["ok"], true);
+        assert_eq!(v["plies"].as_array().unwrap().len(), MAX_ARCHIVE_PLIES);
+    }
+
+    #[test]
+    fn parse_rejects_too_many_plies() {
+        let archive = build_archive(&request_with_n_plies(MAX_ARCHIVE_PLIES + 1));
+        assert!(!archive.starts_with("ERROR"), "build_archive failed: {}", archive);
+        let v: serde_json::Value = serde_json::from_str(&parse_archive(&archive)).unwrap();
+        assert_eq!(v["ok"], false);
+        assert_eq!(v["error"], "too_many_plies");
+    }
+
+    #[test]
+    fn escape_json_escapes_control_characters() {
+        // タブ混入の app 欄を持つアーカイブが、壊れた JSON にならず正しく
+        // 往復することを確認する（修正前は手組み JSON が構文エラーになっていた）。
+        let archive = concat!(
+            "fukanzen-shogi-archive 1\n",
+            "rule 0.5\n",
+            "protocol 2\n",
+            "app foo\tbar\n",
+            "sente -\n",
+            "gote -\n",
+            "result unfinished none\n",
+            "sfen lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1\n",
+        );
+        let parsed_json = parse_archive(archive);
+        let v: serde_json::Value = serde_json::from_str(&parsed_json)
+            .expect("parse_archive の出力が不正な JSON になっている");
+        assert_eq!(v["ok"], true);
+        assert_eq!(v["meta"]["app"], "foo\tbar");
     }
 }
