@@ -29,6 +29,35 @@ export function build_archive(request_json) {
 }
 
 /**
+ * 棋譜（初期局面＋着手列）から盤上の終局を評価する（投了を除く。ルール v0.6 §5.8）。
+ * `build_archive` と同じ流儀で initial_sfen＋plies から Kifu を構成し、
+ * `engine::terminate::evaluate` を呼んで、結果を archive の語彙
+ * （`ResultKind`/`Outcome`）に対応づけて返す。
+ *
+ * request_json: `{"initial_sfen":"...","plies":[{"s":"7g7f","g":"3c3d"}, ...]}`
+ *
+ * 成功: `{"status":"ongoing"}` または
+ *       `{"status":"terminal","kind":"mate","outcome":"gote_wins"}`
+ * 失敗: `{"status":"error","error":"<理由>"}`
+ * @param {string} request_json
+ * @returns {string}
+ */
+export function evaluate_terminal(request_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(request_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.evaluate_terminal(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
  * 指定局面のゲーム状態を返す（着手選択前の確定詰みチェック）。
  *
  * 返値: "ongoing" | "sente_loses" | "gote_loses" | "draw" | "error"
@@ -76,6 +105,17 @@ export function legal_actions(sfen, side) {
     } finally {
         wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
     }
+}
+
+/**
+ * ルール v0.6 の最長手数（組手）。`engine::terminate::MAX_TURNS` が単一の値であり、
+ * アーカイブ読込の安全網（`parse_archive`）もここから参照する（ハードコードの
+ * 重複を持たない）。web 側もこの getter から値を取得し、JS 側に定数を複製しない。
+ * @returns {number}
+ */
+export function max_turns() {
+    const ret = wasm.max_turns();
+    return ret >>> 0;
 }
 
 /**

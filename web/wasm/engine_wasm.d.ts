@@ -15,6 +15,20 @@
 export function build_archive(request_json: string): string;
 
 /**
+ * 棋譜（初期局面＋着手列）から盤上の終局を評価する（投了を除く。ルール v0.6 §5.8）。
+ * `build_archive` と同じ流儀で initial_sfen＋plies から Kifu を構成し、
+ * `engine::terminate::evaluate` を呼んで、結果を archive の語彙
+ * （`ResultKind`/`Outcome`）に対応づけて返す。
+ *
+ * request_json: `{"initial_sfen":"...","plies":[{"s":"7g7f","g":"3c3d"}, ...]}`
+ *
+ * 成功: `{"status":"ongoing"}` または
+ *       `{"status":"terminal","kind":"mate","outcome":"gote_wins"}`
+ * 失敗: `{"status":"error","error":"<理由>"}`
+ */
+export function evaluate_terminal(request_json: string): string;
+
+/**
  * 指定局面のゲーム状態を返す（着手選択前の確定詰みチェック）。
  *
  * 返値: "ongoing" | "sente_loses" | "gote_loses" | "draw" | "error"
@@ -30,6 +44,13 @@ export function game_status(sfen: string): string;
  * 返値: `["7g7f","P*5e",...]`（空なら `[]`）
  */
 export function legal_actions(sfen: string, side: string): string;
+
+/**
+ * ルール v0.6 の最長手数（組手）。`engine::terminate::MAX_TURNS` が単一の値であり、
+ * アーカイブ読込の安全網（`parse_archive`）もここから参照する（ハードコードの
+ * 重複を持たない）。web 側もこの getter から値を取得し、JS 側に定数を複製しない。
+ */
+export function max_turns(): number;
 
 /**
  * アーカイブ書式 v1（または旧 sfen 始まり）のテキストを解釈して対局データを返す。
@@ -59,8 +80,10 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly build_archive: (a: number, b: number) => [number, number];
+    readonly evaluate_terminal: (a: number, b: number) => [number, number];
     readonly game_status: (a: number, b: number) => [number, number];
     readonly legal_actions: (a: number, b: number, c: number, d: number) => [number, number];
+    readonly max_turns: () => number;
     readonly parse_archive: (a: number, b: number) => [number, number];
     readonly resolve_ply: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;

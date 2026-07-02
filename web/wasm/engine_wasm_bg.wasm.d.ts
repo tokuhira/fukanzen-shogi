@@ -2,8 +2,10 @@
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
 export const build_archive: (a: number, b: number) => [number, number];
+export const evaluate_terminal: (a: number, b: number) => [number, number];
 export const game_status: (a: number, b: number) => [number, number];
 export const legal_actions: (a: number, b: number, c: number, d: number) => [number, number];
+export const max_turns: () => number;
 export const parse_archive: (a: number, b: number) => [number, number];
 export const resolve_ply: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
 export const __wbindgen_externrefs: WebAssembly.Table;

@@ -11,7 +11,7 @@ A static web board for Fukanzen Shogi, backed by a Cloudflare Workers serverless
 
 Interactive board with offline single-player and online browser-vs-browser battle.
 
-- **Click a piece** to see legal moves as subtle ink dots on the board (v0.5 rules enforced by engine).
+- **Click a piece** to see legal moves as subtle ink dots on the board (v0.6 rules enforced by engine — draw is a first-class result: definite mate, king's death, sennichite, and the new 500-kumite max length all end the game and are recorded correctly, not just mate/king's death/resignation as before).
 - **Offline mode** — one person plays both sides with mouse/click; both moves commit simultaneously per turn.
 - **Online mode** — two players in the same room via commit-reveal: each side commits secretly, then both are revealed simultaneously.
 - **Navigate** with ← / → buttons or arrow keys; revisiting any past position and playing from there branches the kifu.
@@ -19,7 +19,7 @@ Interactive board with offline single-player and online browser-vs-browser battl
 - **Japanese notation** — move labels use human-readable kifu notation (e.g. ５八金右, ７六歩) with disambiguation suffixes only when needed.
 - **デモ局面 / 新局** buttons load the built-in 6-turn demo or reset to a blank board.
 - **棋譜を保存** — save the current game (mid-game or finished) as a version-tuple-stamped archive file (`.kifu`, download + clipboard copy). The archive embeds `(rule_version, protocol_version)` so old records replay correctly even after rule changes.
-- **棋譜を読込** — load a saved archive back in, via file picker or pasted text. Replays through the same navigation (← / →, sumi ink, Japanese notation); branching from a past position still works. The embedded version tuple and result are shown; if the archive's rule version doesn't match the running engine, a plain-language warning is shown (replay still proceeds — it just may not reproduce the original outcome exactly). Old bare-kifu files (pre-v0.8.0) still load. Since this reads externally-supplied text, it rejects archives over 500 plies or 512 KB with a friendly message (client-side hygiene limit, not a game rule), and JSON escaping was hardened against control characters in free-text header fields (v0.8.2).
+- **棋譜を読込** — load a saved archive back in, via file picker or pasted text. Replays through the same navigation (← / →, sumi ink, Japanese notation); branching from a past position still works. The embedded version tuple and result are shown; if the archive's rule version doesn't match the running engine, a plain-language warning is shown (replay still proceeds — it just may not reproduce the original outcome exactly). Old bare-kifu files (pre-v0.8.0) still load. Since this reads externally-supplied text, it rejects archives over 512 KB with a friendly message (client-side hygiene limit), and JSON escaping was hardened against control characters in free-text header fields (v0.8.2). The 500-ply cap now reads the real rule constant (`engine::terminate::MAX_TURNS`, v0.9.0) rather than a hardcoded duplicate — no legitimate game can exceed it.
 
 All positions are computed by the Wasm engine at runtime. No hardcoded SFEN data.
 
@@ -84,7 +84,7 @@ Config: `wrangler.toml` at repository root (`pages_build_output_dir = "web"`).
 
 オフラインのひとり操作とブラウザ間オンライン対戦の両方に対応したインタラクティブ盤。
 
-- **駒をクリック**すると合法手が淡い点で表示される（エンジンが v0.5 ルールを適用）。
+- **駒をクリック**すると合法手が淡い点で表示される（エンジンが v0.6 ルールを適用。引き分けが正式な結果に——確定的詰み・玉の死・千日手・新設の最長手数500組手のいずれも終局として正しく検出・記録される。以前は詰み・玉の死・投了しか終局にならなかった）。
 - **オフラインモード** — 一人で先後両方を操作。毎ターン両着手を同時確定。
 - **オンラインモード** — 同一ルームの 2 名がコミット秘匿→同時開示方式で対戦（秘密情報保護）。
 - **← / → ナビ** — 過去局面へ戻ってそこから指し直すと棋譜が分岐。
@@ -92,7 +92,7 @@ Config: `wrangler.toml` at repository root (`pages_build_output_dir = "web"`).
 - **日本語棋譜表記** — ５八金右・７六歩など、曖昧さがある場合のみ区別符（右・左・直・上・引・寄）を付加。
 - **デモ局面 / 新局** ボタンで 6 組手デモ局を再生、または初期局面にリセット。
 - **棋譜を保存** — 対局中・終局後を問わず、版タプル付きアーカイブ書式（`.kifu`、ダウンロード＋クリップボードコピー）で現在の対局を保存。`(ルール版, プロトコル版)` を埋め込むため、ルール変更後も旧記録を正しく再現できる。
-- **棋譜を読込** — 保存したアーカイブをファイル選択または貼り付けで読み込み、既存の棋譜ナビ（← / →・水墨盤・日本語表記）でそのまま鑑賞できる。読み込んだ局面から盤クリックで分岐再指しも可能。刻まれた版タプルと結果を表示し、読み込んだアーカイブのルール版と現行エンジンが食い違う場合は平易な注意文を表示する（再生自体は止めない）。v0.8.0 より前の素の棋譜ファイルも読み込める。外部由来の文字列を扱う機能のため、500組手・512KBを超えるアーカイブは穏当なメッセージで拒否する（ゲームルールではなくクライアント側の安全弁）。自由記述欄への制御文字混入に対する JSON エスケープも強化済み（v0.8.2）。
+- **棋譜を読込** — 保存したアーカイブをファイル選択または貼り付けで読み込み、既存の棋譜ナビ（← / →・水墨盤・日本語表記）でそのまま鑑賞できる。読み込んだ局面から盤クリックで分岐再指しも可能。刻まれた版タプルと結果を表示し、読み込んだアーカイブのルール版と現行エンジンが食い違う場合は平易な注意文を表示する（再生自体は止めない）。v0.8.0 より前の素の棋譜ファイルも読み込める。外部由来の文字列を扱う機能のため、512KBを超えるアーカイブは穏当なメッセージで拒否する（クライアント側の安全弁）。自由記述欄への制御文字混入に対する JSON エスケープも強化済み（v0.8.2）。500組手の上限は、v0.9.0 でハードコードの重複をやめ、実際のルール定数（`engine::terminate::MAX_TURNS`）を直接参照するようになった——正当な対局はこれを超えない。
 
 全局面は Wasm エンジンがブラウザ上でリアルタイム計算。ハードコードされた局面データはない。
 

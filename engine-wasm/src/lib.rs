@@ -168,15 +168,13 @@ pub fn build_archive(request_json: &str) -> String {
     engine::archive::kifu_to_archive(&kifu, &meta)
 }
 
-/// 読み込みを許す着手数（組手）の暫定上限。
-///
-/// これは対局の正式なルール（500組手で引き分け等）ではなく、外部から読み込む
-/// アーカイブに対する Wasm 境界の安全弁である。巨大な着手列を持つファイルを
-/// 読み込ませてブラウザのメインスレッドを固まらせる（クライアント側リソース
-/// 枯渇）攻撃を防ぐための、実装上の制限にすぎない。実際のゲームルールとして
-/// 組手数上限を導入する際は engine::terminate 側に持たせ、RULE_VERSION を
-/// 上げる（淀川第三歩で予定）。
-const MAX_ARCHIVE_PLIES: usize = 500;
+/// ルール v0.6 の最長手数（組手）。`engine::terminate::MAX_TURNS` が単一の値であり、
+/// アーカイブ読込の安全網（`parse_archive`）もここから参照する（ハードコードの
+/// 重複を持たない）。web 側もこの getter から値を取得し、JS 側に定数を複製しない。
+#[wasm_bindgen]
+pub fn max_turns() -> usize {
+    engine::terminate::MAX_TURNS
+}
 
 /// アーカイブ書式 v1（または旧 sfen 始まり）のテキストを解釈して対局データを返す。
 /// `build_archive` の対。
@@ -192,7 +190,7 @@ pub fn parse_archive(text: &str) -> String {
         None => return r#"{"ok":false,"error":"parse_failed"}"#.to_string(),
     };
 
-    if kifu.plies.len() > MAX_ARCHIVE_PLIES {
+    if kifu.plies.len() > engine::terminate::MAX_TURNS {
         return r#"{"ok":false,"error":"too_many_plies"}"#.to_string();
     }
 
@@ -232,6 +230,84 @@ pub fn parse_archive(text: &str) -> String {
         gote_json,
         meta.result.kind.to_str(),
         meta.result.outcome.to_str(),
+    )
+}
+
+/// 棋譜（初期局面＋着手列）から盤上の終局を評価する（投了を除く。ルール v0.6 §5.8）。
+/// `build_archive` と同じ流儀で initial_sfen＋plies から Kifu を構成し、
+/// `engine::terminate::evaluate` を呼んで、結果を archive の語彙
+/// （`ResultKind`/`Outcome`）に対応づけて返す。
+///
+/// request_json: `{"initial_sfen":"...","plies":[{"s":"7g7f","g":"3c3d"}, ...]}`
+///
+/// 成功: `{"status":"ongoing"}` または
+///       `{"status":"terminal","kind":"mate","outcome":"gote_wins"}`
+/// 失敗: `{"status":"error","error":"<理由>"}`
+#[wasm_bindgen]
+pub fn evaluate_terminal(request_json: &str) -> String {
+    let v: serde_json::Value = match serde_json::from_str(request_json) {
+        Ok(v) => v,
+        Err(_) => return r#"{"status":"error","error":"invalid_json"}"#.to_string(),
+    };
+
+    let initial_sfen = match v["initial_sfen"].as_str() {
+        Some(s) => s,
+        None => return r#"{"status":"error","error":"missing initial_sfen"}"#.to_string(),
+    };
+    let initial = match engine::serialize::sfen_to_position(initial_sfen) {
+        Some(p) => p,
+        None => return r#"{"status":"error","error":"bad initial_sfen"}"#.to_string(),
+    };
+    let mut kifu = engine::kifu::Kifu::new(initial);
+
+    let plies = match v["plies"].as_array() {
+        Some(a) => a,
+        None => return r#"{"status":"error","error":"missing plies"}"#.to_string(),
+    };
+    for p in plies {
+        let s_usi = match p["s"].as_str() {
+            Some(s) => s,
+            None => return r#"{"status":"error","error":"missing ply.s"}"#.to_string(),
+        };
+        let g_usi = match p["g"].as_str() {
+            Some(s) => s,
+            None => return r#"{"status":"error","error":"missing ply.g"}"#.to_string(),
+        };
+        let sente = match engine::types::Action::from_usi(s_usi) {
+            Some(a) => a,
+            None => return format!(r#"{{"status":"error","error":"bad ply.s: {}"}}"#, escape_json(s_usi)),
+        };
+        let gote = match engine::types::Action::from_usi(g_usi) {
+            Some(a) => a,
+            None => return format!(r#"{{"status":"error","error":"bad ply.g: {}"}}"#, escape_json(g_usi)),
+        };
+        kifu.push(engine::types::Ply { sente, gote });
+    }
+
+    use engine::archive::{Outcome, ResultKind};
+    use engine::terminate::{DrawKind, LossKind, Terminal};
+    use engine::types::Side;
+
+    let (kind, outcome) = match engine::terminate::evaluate(&kifu) {
+        Terminal::Ongoing => return r#"{"status":"ongoing"}"#.to_string(),
+        Terminal::Loss { loser: Side::Sente, kind: LossKind::Mate } => (ResultKind::Mate, Outcome::GoteWins),
+        Terminal::Loss { loser: Side::Gote, kind: LossKind::Mate } => (ResultKind::Mate, Outcome::SenteWins),
+        Terminal::Loss { loser: Side::Sente, kind: LossKind::KingDeath } => {
+            (ResultKind::KingDeath, Outcome::GoteWins)
+        }
+        Terminal::Loss { loser: Side::Gote, kind: LossKind::KingDeath } => {
+            (ResultKind::KingDeath, Outcome::SenteWins)
+        }
+        Terminal::Draw { kind: DrawKind::MutualMate } => (ResultKind::Mate, Outcome::Draw),
+        Terminal::Draw { kind: DrawKind::BothKingsDied } => (ResultKind::SwapDraw, Outcome::Draw),
+        Terminal::Draw { kind: DrawKind::Sennichite } => (ResultKind::Sennichite, Outcome::Draw),
+        Terminal::Draw { kind: DrawKind::MaxTurns } => (ResultKind::MaxTurns, Outcome::Draw),
+    };
+
+    format!(
+        r#"{{"status":"terminal","kind":"{}","outcome":"{}"}}"#,
+        kind.to_str(),
+        outcome.to_str()
     )
 }
 
@@ -339,16 +415,16 @@ mod tests {
 
     #[test]
     fn parse_accepts_exactly_max_plies() {
-        let archive = build_archive(&request_with_n_plies(MAX_ARCHIVE_PLIES));
+        let archive = build_archive(&request_with_n_plies(engine::terminate::MAX_TURNS));
         assert!(!archive.starts_with("ERROR"), "build_archive failed: {}", archive);
         let v: serde_json::Value = serde_json::from_str(&parse_archive(&archive)).unwrap();
         assert_eq!(v["ok"], true);
-        assert_eq!(v["plies"].as_array().unwrap().len(), MAX_ARCHIVE_PLIES);
+        assert_eq!(v["plies"].as_array().unwrap().len(), engine::terminate::MAX_TURNS);
     }
 
     #[test]
     fn parse_rejects_too_many_plies() {
-        let archive = build_archive(&request_with_n_plies(MAX_ARCHIVE_PLIES + 1));
+        let archive = build_archive(&request_with_n_plies(engine::terminate::MAX_TURNS + 1));
         assert!(!archive.starts_with("ERROR"), "build_archive failed: {}", archive);
         let v: serde_json::Value = serde_json::from_str(&parse_archive(&archive)).unwrap();
         assert_eq!(v["ok"], false);
@@ -374,5 +450,106 @@ mod tests {
             .expect("parse_archive の出力が不正な JSON になっている");
         assert_eq!(v["ok"], true);
         assert_eq!(v["meta"]["app"], "foo\tbar");
+    }
+
+    #[test]
+    fn max_turns_getter_matches_engine_constant() {
+        assert_eq!(max_turns(), engine::terminate::MAX_TURNS);
+        assert_eq!(max_turns(), 500);
+    }
+
+    fn terminal_request(initial_sfen: &str, plies_json: &str) -> String {
+        format!(
+            r#"{{"initial_sfen":"{}","plies":[{}]}}"#,
+            initial_sfen, plies_json
+        )
+    }
+
+    #[test]
+    fn evaluate_terminal_ongoing() {
+        let sfen = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1";
+        let v: serde_json::Value =
+            serde_json::from_str(&evaluate_terminal(&terminal_request(sfen, ""))).unwrap();
+        assert_eq!(v["status"], "ongoing");
+    }
+
+    /// 500組手まで一度も内容が重複しない、玉2枚だけの初期局面＋着手列を
+    /// (initial_sfen, plies_json) として組み立てる。terminate.rs の
+    /// no_repeat_kifu と同じ CRT の考え方（周期36・35は互いに素）を USI 経由で再現し、
+    /// 千日手を誤検出せず最長手数だけを試験できるようにする。
+    fn no_repeat_request(n_plies: usize) -> String {
+        use engine::board::{Board, Hand, Position};
+        use engine::types::{Action, Piece, PieceKind, Side, Square};
+
+        fn half_squares(rank_lo: u8, rank_hi: u8) -> Vec<Square> {
+            let mut v = Vec::new();
+            for rank in rank_lo..=rank_hi {
+                for file in 1..=9u8 {
+                    v.push(Square::new(file, rank));
+                }
+            }
+            v
+        }
+
+        let sente_squares = half_squares(1, 4); // 36マス
+        let gote_squares: Vec<Square> = half_squares(6, 9).into_iter().take(35).collect(); // 35マス
+
+        let mut board = Board::empty();
+        board.set(sente_squares[0], Some(Piece::new(PieceKind::King, Side::Sente)));
+        board.set(gote_squares[0], Some(Piece::new(PieceKind::King, Side::Gote)));
+        let initial_sfen = engine::serialize::position_to_sfen(&Position {
+            board,
+            hand_sente: Hand::empty(),
+            hand_gote: Hand::empty(),
+            move_number: 1,
+        });
+
+        let mut sente_at = 0usize;
+        let mut gote_at = 0usize;
+        let mut plies = Vec::new();
+        for i in 0..n_plies {
+            let next_sente = (i + 1) % sente_squares.len();
+            let next_gote = (i + 1) % gote_squares.len();
+            let s_usi = Action::Move { from: sente_squares[sente_at], to: sente_squares[next_sente], promote: false }.to_usi();
+            let g_usi = Action::Move { from: gote_squares[gote_at], to: gote_squares[next_gote], promote: false }.to_usi();
+            plies.push(format!(r#"{{"s":"{}","g":"{}"}}"#, s_usi, g_usi));
+            sente_at = next_sente;
+            gote_at = next_gote;
+        }
+
+        terminal_request(&initial_sfen, &plies.join(","))
+    }
+
+    #[test]
+    fn evaluate_terminal_max_turns() {
+        let request = no_repeat_request(engine::terminate::MAX_TURNS);
+        let v: serde_json::Value = serde_json::from_str(&evaluate_terminal(&request)).unwrap();
+        assert_eq!(v["status"], "terminal");
+        assert_eq!(v["kind"], "max_turns");
+        assert_eq!(v["outcome"], "draw");
+    }
+
+    #[test]
+    fn evaluate_terminal_matches_build_archive_plies() {
+        // build_archive → parse_archive の整合（同じ着手列が正しく往復する）ことを
+        // no_repeat_request の initial_sfen＋plies を使って別途確認する。
+        let n = 3;
+        let request = no_repeat_request(n);
+        let req_v: serde_json::Value = serde_json::from_str(&request).unwrap();
+        let archive_request = format!(
+            r#"{{"initial_sfen":{},"plies":{},"rule":"0.6","protocol":2,"app":"test","sente":null,"gote":null,"result":{{"kind":"unfinished","outcome":"none"}}}}"#,
+            req_v["initial_sfen"], req_v["plies"]
+        );
+        let archive = build_archive(&archive_request);
+        assert!(!archive.starts_with("ERROR"), "build_archive failed: {}", archive);
+        let reparsed: serde_json::Value = serde_json::from_str(&parse_archive(&archive)).unwrap();
+        assert_eq!(reparsed["plies"].as_array().unwrap().len(), n);
+    }
+
+    #[test]
+    fn evaluate_terminal_bad_input() {
+        let v: serde_json::Value =
+            serde_json::from_str(&evaluate_terminal("not json")).unwrap();
+        assert_eq!(v["status"], "error");
     }
 }

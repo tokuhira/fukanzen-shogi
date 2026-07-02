@@ -1,9 +1,10 @@
 import init, {
   resolve_ply,
-  game_status  as wasmGameStatus,
   legal_actions as wasmLegalActions,
   build_archive as wasmBuildArchive,
   parse_archive as wasmParseArchive,
+  evaluate_terminal as wasmEvaluateTerminal,
+  max_turns as wasmMaxTurns,
 } from './wasm/engine_wasm.js';
 
 import initNotation, {
@@ -22,10 +23,6 @@ import {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const INITIAL_SFEN = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1";
-
-// engine-wasm::parse_archive の MAX_ARCHIVE_PLIES と一致させること（表示用）。
-// 正式なゲームルールではなく、外部アーカイブ読込に対する暫定の安全弁。
-const MAX_ARCHIVE_PLIES = 500;
 
 // 読込を受け付けるアーカイブテキストの最大バイト数（安全弁）。
 // 500組手の正当なアーカイブは概算 13〜14KB（着手行 500×24B＋ヘッダ約1.2KB）。
@@ -196,6 +193,7 @@ let gameOverCache = { cursor: -1, msg: null };
 let versionTuple    = null;  // { rule, protocol, app } — init() 完了後にキャッシュ
 let resultOverride  = null;  // { kind, outcome } | null — 投了など盤面から導出できない結果
 let loadedMeta       = null;  // 読み込んだアーカイブの ArchiveMeta（鑑賞表示・版不一致判定用）
+let maxTurns         = null;  // ルール v0.6 の最長手数（組手）。init() 完了後に engine-wasm から取得
 
 // ── Online mode state ─────────────────────────────────────────────────────────
 
@@ -270,18 +268,37 @@ function getGameOverMsg() {
   return gameOverCache.msg;
 }
 
-function computeGameOver() {
-  if (cursor > 0 && cursor === kifu.plies.length) {
-    const ev = events[cursor - 1];
-    if (ev === 'sente_died') return '後手の勝ち（先手玉が取られた）';
-    if (ev === 'gote_died')  return '先手の勝ち（後手玉が取られた）';
-    if (ev === 'both_died')  return '引き分け（両玉相討ち）';
+// kifu.plies の先頭から uptoPlies 組手までの局面を、engine::terminate::evaluate
+// （ルール v0.6 §5.8 の一元評価）で判定する。盤上で導ける終局はすべてこの一箇所
+// に集約し、web 側では順序を再実装しない（アーカイブ語彙 kind/outcome を返す）。
+function evaluateTerminalAt(uptoPlies) {
+  const request = {
+    initial_sfen: sfens[0],
+    plies: kifu.plies.slice(0, uptoPlies).map(p => ({ s: p.sUsi, g: p.gUsi })),
+  };
+  return JSON.parse(wasmEvaluateTerminal(JSON.stringify(request)));
+}
+
+function terminalMessageJa(kind, outcome) {
+  if (kind === 'mate') {
+    if (outcome === 'gote_wins')  return '後手の勝ち（先手が着手不能）';
+    if (outcome === 'sente_wins') return '先手の勝ち（後手が着手不能）';
+    if (outcome === 'draw')       return '引き分け（両者着手不能）';
   }
-  const status = wasmGameStatus(sfens[cursor]);
-  if (status === 'sente_loses') return '後手の勝ち（先手が着手不能）';
-  if (status === 'gote_loses')  return '先手の勝ち（後手が着手不能）';
-  if (status === 'draw')        return '引き分け（両者着手不能）';
+  if (kind === 'king_death') {
+    if (outcome === 'gote_wins')  return '後手の勝ち（先手玉が取られた）';
+    if (outcome === 'sente_wins') return '先手の勝ち（後手玉が取られた）';
+  }
+  if (kind === 'swap_draw'  && outcome === 'draw') return '引き分け（両玉相討ち）';
+  if (kind === 'sennichite' && outcome === 'draw') return '引き分け（千日手）';
+  if (kind === 'max_turns'  && outcome === 'draw') return `引き分け（最長手数・${maxTurns}組手）`;
   return null;
+}
+
+function computeGameOver() {
+  const term = evaluateTerminalAt(cursor);
+  if (term.status !== 'terminal') return null;
+  return terminalMessageJa(term.kind, term.outcome);
 }
 
 // ── Archive ────────────────────────────────────────────────────────────────────
@@ -289,17 +306,8 @@ function computeGameOver() {
 // 対局全体（現在の表示カーソルではなく kifu.plies の末尾）の結果をアーカイブ語彙で返す
 function currentResult() {
   if (resultOverride) return resultOverride;
-  const n = kifu.plies.length;
-  if (n > 0) {
-    const ev = events[n - 1];
-    if (ev === 'sente_died') return { kind: 'king_death', outcome: 'gote_wins' };
-    if (ev === 'gote_died')  return { kind: 'king_death', outcome: 'sente_wins' };
-    if (ev === 'both_died')  return { kind: 'swap_draw',  outcome: 'draw' };
-  }
-  const status = wasmGameStatus(sfens[n]);
-  if (status === 'sente_loses') return { kind: 'mate', outcome: 'gote_wins' };
-  if (status === 'gote_loses')  return { kind: 'mate', outcome: 'sente_wins' };
-  if (status === 'draw')        return { kind: 'mate', outcome: 'draw' };
+  const term = evaluateTerminalAt(kifu.plies.length);
+  if (term.status === 'terminal') return { kind: term.kind, outcome: term.outcome };
   return { kind: 'unfinished', outcome: 'none' };
 }
 
@@ -363,15 +371,20 @@ function parseArchiveText(text) {
   }
 }
 
-const ARCHIVE_LOAD_ERROR_JA = {
-  too_many_plies: `棋譜の着手数が多すぎます（上限 ${MAX_ARCHIVE_PLIES} 組手）。読み込みを中止しました。`,
-};
+// maxTurns は init() 完了後に engine-wasm から取得されるため、ここでは
+// 呼び出し時点の値を参照する関数にする（モジュール読込時点の定数にしない）。
+function archiveLoadErrorJa(error) {
+  if (error === 'too_many_plies') {
+    return `棋譜の着手数が多すぎます（上限 ${maxTurns} 組手）。読み込みを中止しました。`;
+  }
+  return '棋譜を読み込めませんでした';
+}
 
 // 読み込んだアーカイブを既存の再生機構（棋譜ナビ・水墨盤・日本語表記）へ流し込む。
 function loadArchive(text) {
   const parsed = parseArchiveText(text);
   if (!parsed.ok) {
-    alert(ARCHIVE_LOAD_ERROR_JA[parsed.error] || '棋譜を読み込めませんでした');
+    alert(archiveLoadErrorJa(parsed.error));
     return;
   }
 
@@ -1250,6 +1263,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     await Promise.all([init(), initNotation(), initProtocol()]);
     versionTuple = JSON.parse(wasmVersionTuple());
+    maxTurns = wasmMaxTurns();
     resetToNew();
     render();
   } catch (err) {
