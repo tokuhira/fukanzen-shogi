@@ -49,7 +49,10 @@ pub enum NegotiationOutcome {
 /// このクレートが実装するプロトコルの版。
 /// v0.6.0 でバージョン交渉が導入（版 = 1）。
 /// v0.7.0 で投了（resign）を commit-reveal フローに追加（版 = 2）。
-pub const PROTOCOL_VERSION: u32 = 2;
+/// v0.10.0 で観戦系（spectate_meta/turn/result/status/init/token）と
+/// DO の routing 拡張が加わり、ワイヤ表面が広がったため加算的に上げた（版 = 3）。
+/// 対局チャネル（commit/reveal/ack/hello）自体はバイト不変。
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// 自分の版タプル（engine::RULE_VERSION + PROTOCOL_VERSION）
 pub const MY_VERSION: VersionTuple = VersionTuple {
