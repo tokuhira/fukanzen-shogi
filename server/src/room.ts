@@ -1,5 +1,6 @@
 interface Env {
   SPECTATE_TOKENS: KVNamespace;
+  ARCHIVES: KVNamespace;
 }
 
 interface SpectateTurn {
@@ -17,6 +18,15 @@ interface SpectateRecord {
   initial_sfen: string | null;
   turns: SpectateTurn[];
   result: SpectateResult | null;
+  archived: boolean;
+}
+
+async function sha256Hex(text: string): Promise<string> {
+  const data = new TextEncoder().encode(text);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest))
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 export class GameRoom implements DurableObject {
@@ -48,8 +58,7 @@ export class GameRoom implements DurableObject {
     }
 
     // サーバ側アーカイブの取り出し: GET /room/:key/archive（淀川第三歩 §6）。
-    // 構造化レコードを返すのみ。版タプル付きアーカイブの正準テキスト化は
-    // engine を持つ消費者側（web の build_archive）が行う（書式の正本は engine）。
+    // 部屋のいまの一局（ライブ・診断用）。恒久の記録は /archive/:id（記録係一段目 §7）。
     if (request.method === "GET" && url.pathname.endsWith("/archive")) {
       const record = await this._loadRecord();
       return new Response(JSON.stringify(record, null, 2), {
@@ -169,7 +178,7 @@ export class GameRoom implements DurableObject {
     }
   }
 
-  webSocketClose(ws: WebSocket): void {
+  async webSocketClose(ws: WebSocket): Promise<void> {
     const wasSpectator = this.state.getWebSockets("spectator").includes(ws);
     if (wasSpectator) {
       // 観戦者自身の切断は記録に影響しない（淀川第三歩 §3.4）。
@@ -187,6 +196,9 @@ export class GameRoom implements DurableObject {
     this._broadcastSpectateStatus("player_disconnected");
 
     if (otherPlayers.length === 0) {
+      // 全員離脱（記録係一段目 §4-3）。gameStarted を消す前に、綴じていない
+      // 記録があれば断片として書庫へ綴じる（「綴じてから拭く」不変条件）。
+      await this._archiveCurrentIfNeeded();
       void this.state.storage.delete("gameStarted");
       this.log("all players disconnected: gameStarted cleared");
     }
@@ -194,7 +206,7 @@ export class GameRoom implements DurableObject {
 
   webSocketError(ws: WebSocket): void {
     this.log("webSocketError → webSocketClose");
-    this.webSocketClose(ws);
+    void this.webSocketClose(ws);
   }
 
   // ── 公開組手の記録（淀川第三歩 §3.3・§6） ────────────────────────────────────
@@ -204,25 +216,110 @@ export class GameRoom implements DurableObject {
     const initial_sfen = (await this.state.storage.get<string>("initial_sfen")) ?? null;
     const turns = (await this.state.storage.get<SpectateTurn[]>("turns")) ?? [];
     const result = (await this.state.storage.get<SpectateResult>("result")) ?? null;
-    return { version, initial_sfen, turns, result };
+    const archived = (await this.state.storage.get<boolean>("archived")) ?? false;
+    return { version, initial_sfen, turns, result, archived };
   }
 
   private async _applyToRecord(msg: { type?: string; [k: string]: unknown }): Promise<void> {
     if (msg.type === "spectate_meta") {
-      // 新しい対局の開始（再戦を含む）。記録を初期化する。
+      // 新しい対局の開始（再戦を含む）。記録係一段目 §4-2: 拭く（初期化する）前に、
+      // 前局が未綴じのまま残っていれば断片として書庫へ綴じる。
+      await this._archiveCurrentIfNeeded();
+
       await this.state.storage.put("version", msg.version ?? null);
       await this.state.storage.put("initial_sfen", (msg.initial_sfen as string) ?? null);
       await this.state.storage.put("turns", []);
       await this.state.storage.put("result", null);
+      await this.state.storage.put("archived", false);
     } else if (msg.type === "spectate_turn") {
       const turns = (await this.state.storage.get<SpectateTurn[]>("turns")) ?? [];
       turns.push({ s: String(msg.s ?? ""), g: String(msg.g ?? "") });
       await this.state.storage.put("turns", turns);
     } else if (msg.type === "spectate_result") {
-      await this.state.storage.put("result", {
-        kind: String(msg.kind ?? ""),
-        outcome: String(msg.outcome ?? ""),
-      });
+      const result = { kind: String(msg.kind ?? ""), outcome: String(msg.outcome ?? "") };
+      await this.state.storage.put("result", result);
+
+      // 断片綴じの元になるレコードは、外部 KV への書き込み（下の
+      // _archiveFinalized/_archiveFragment）より前に確定させておく。書庫への
+      // 書き込みは（ネットワーク越しの）KV I/O で局所ストレージより遅く、
+      // その待ち時間の間に webSocketClose（全員離脱）が先に走ると
+      // archived がまだ false のまま読まれ、断片が二重に綴じられうる
+      // （データは失われないが無駄な二重書き込みになる）。archived を
+      // 先に立てて、この競合の窓を最小化する。
+      const recordForFallback: SpectateRecord = {
+        version: (await this.state.storage.get<unknown>("version")) ?? null,
+        initial_sfen: (await this.state.storage.get<string>("initial_sfen")) ?? null,
+        turns: (await this.state.storage.get<SpectateTurn[]>("turns")) ?? [],
+        result,
+        archived: false,
+      };
+      await this.state.storage.put("archived", true);
+
+      // 記録係一段目 §4-1・§6: 正準本文（text）があれば内容ハッシュで確定綴じ。
+      // 無ければ（旧クライアント等）現レコードを断片として綴じる——いずれの
+      // 経路でもデータは失われない。
+      const text = typeof msg.text === "string" ? msg.text : null;
+      const id = text
+        ? await this._archiveFinalized(text)
+        : await this._archiveFragment(recordForFallback);
+      this._broadcastArchived(id);
+    }
+  }
+
+  // ── 書庫（記録係一段目 §2・§3・§4） ──────────────────────────────────────────
+
+  // 未綴じ（archived=false）かつ着手のある記録を、断片として書庫へ綴じる。
+  // 再戦開始（§4-2）・全員離脱（§4-3）の両方から呼ぶ共通経路。
+  private async _archiveCurrentIfNeeded(): Promise<void> {
+    const archived = (await this.state.storage.get<boolean>("archived")) ?? false;
+    if (archived) return;
+    const turns = (await this.state.storage.get<SpectateTurn[]>("turns")) ?? [];
+    if (turns.length === 0) return;
+
+    const record = await this._loadRecord();
+    await this._archiveFragment(record);
+    await this.state.storage.put("archived", true);
+  }
+
+  // 確定局: 正準アーカイブ本文の内容ハッシュ（SHA-256）を id として書庫へ綴じる。
+  // DO は本文を解さない（不透明ブロブとして content-address するだけ）。
+  private async _archiveFinalized(text: string): Promise<string> {
+    const id = await sha256Hex(text);
+    const envelope = {
+      finalized: true,
+      text,
+      archived_at: new Date().toISOString(),
+    };
+    await this.env.ARCHIVES.put(id, JSON.stringify(envelope));
+    this.log(`archived finalized id=${id}`);
+    return id;
+  }
+
+  // 放棄断片: 確定していない対局を暫定 ID（ランダム UUID）で書庫へ綴じる。
+  private async _archiveFragment(record: SpectateRecord): Promise<string> {
+    const id = crypto.randomUUID();
+    const envelope = {
+      finalized: false,
+      record: {
+        version: record.version,
+        initial_sfen: record.initial_sfen,
+        turns: record.turns,
+        result: record.result,
+      },
+      archived_at: new Date().toISOString(),
+    };
+    await this.env.ARCHIVES.put(id, JSON.stringify(envelope));
+    this.log(`archived fragment id=${id}`);
+    return id;
+  }
+
+  private _broadcastArchived(id: string): void {
+    const payload = JSON.stringify({ type: "archived", id });
+    for (const player of this.state.getWebSockets("player")) {
+      try { player.send(payload); } catch {}
+    }
+    for (const spec of this.state.getWebSockets("spectator")) {
+      try { spec.send(payload); } catch {}
     }
   }
 

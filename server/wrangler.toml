@@ -17,3 +17,8 @@ new_sqlite_classes = ["GameRoom"]
 [[kv_namespaces]]
 binding = "SPECTATE_TOKENS"
 id = "5d36ef96c86441d4ae851ad0a045bf07"
+
+# 対局の書庫（部屋のライフサイクルから独立した永続ストア。記録係一段目 §3）
+[[kv_namespaces]]
+binding = "ARCHIVES"
+id = "c37cbef62a2947eb837a46ec4b486418"

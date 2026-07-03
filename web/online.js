@@ -236,6 +236,14 @@ function _handleMessage(data) {
     return;
   }
 
+  if (msg.type === 'archived') {
+    // 書庫への恒久綴じ完了通知（記録係一段目 §4・§6）。ここで確実に処理し、
+    // 未知の type として session.feed() に渡さない（渡ると
+    // "unknown_message_type" エラー扱いになり WS が切断されてしまう）。
+    _cbs?.onArchived?.(msg.id);
+    return;
+  }
+
   if (msg.type === 'you_reconnected') {
     if (!session) {
       // session なしで再接続フロー受信 = stale gameStarted + zombie WS
@@ -421,10 +429,18 @@ export function sendSpectateMeta(version, initialSfen) {
 /**
  * 終局時に一度、結果をアーカイブ語彙（kind/outcome）で送る。
  * 先手側だけが送る。board.js が終局検出時に呼ぶ。
+ * @param {string} kind
+ * @param {string} outcome
+ * @param {string|null} [text]  版タプル付きアーカイブの正準本文（build_archive
+ *   の出力）。あれば DO がその内容ハッシュで確定綴じする（記録係一段目 §4-1・
+ *   §5）。省略時（旧クライアント等）は DO が現レコードを断片として綴じる——
+ *   いずれの経路でもデータは失われない。
  */
-export function sendSpectateResult(kind, outcome) {
+export function sendSpectateResult(kind, outcome, text = null) {
   if (!ws || mySide !== 'sente') return;
-  _wsSend(JSON.stringify({ type: 'spectate_result', kind, outcome }));
+  const msg = { type: 'spectate_result', kind, outcome };
+  if (text) msg.text = text;
+  _wsSend(JSON.stringify(msg));
 }
 
 // 対局用の ws とは別系統（読み取り専用・commit-reveal に関与しない）。
@@ -477,6 +493,11 @@ function _handleSpectateMessage(data) {
       break;
     case 'spectate_status':
       _specCbs?.onStatus?.(msg.state);
+      break;
+    case 'archived':
+      // 書庫への恒久綴じ完了通知（記録係一段目）。現時点では鑑賞UIを
+      // 持たないため、コールバックが登録されていれば渡すだけ。
+      _specCbs?.onArchived?.(msg.id);
       break;
   }
 }

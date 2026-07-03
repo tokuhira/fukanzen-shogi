@@ -627,9 +627,12 @@ function endOnlineGame(msg) {
   onlineEndMsg    = msg;
   onlineCommitted = false;
   onlineWaiting   = false;
-  // 観戦者へ結果を知らせる（disconnectOnline で ws を閉じる前に送る必要がある）
+  // 観戦者へ結果を知らせる（disconnectOnline で ws を閉じる前に送る必要がある）。
+  // 正準アーカイブ本文（buildArchiveText）も同梱し、DO が内容ハッシュで確定綴じ
+  // できるようにする（記録係一段目 §4-1・§5）。生成できなくても（null）
+  // sendSpectateResult は断片綴じの経路へ自然にフォールバックする。
   const result = currentResult();
-  sendSpectateResult(result.kind, result.outcome);
+  sendSpectateResult(result.kind, result.outcome, buildArchiveText());
   // 終局後は WS を閉じる（intentional なので onlineMode は破棄しない）
   disconnectOnline();
   render();
