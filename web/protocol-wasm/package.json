@@ -1,7 +1,7 @@
 {
   "name": "protocol-wasm",
   "type": "module",
-  "version": "0.10.2",
+  "version": "0.10.3",
   "files": [
     "protocol_wasm_bg.wasm",
     "protocol_wasm.js",

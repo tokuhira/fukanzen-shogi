@@ -21,6 +21,14 @@ interface SpectateRecord {
   archived: boolean;
 }
 
+// ルール v0.6 の最長手数（engine::terminate::MAX_TURNS）と同じ上限。悪意ある/壊れた
+// player ソケットが spectate_turn を無制限に送りつけて turns 配列を肥大化させるのを防ぐ。
+const MAX_TURNS = 500;
+
+// web/board.js の MAX_ARCHIVE_BYTES と同じ上限。spectate_result の text を書庫へ確定綴じ
+// する前のサイズ上限（KV の値サイズ上限や無駄な帯域消費を避ける）。
+const MAX_ARCHIVE_TEXT_BYTES = 512 * 1024;
+
 async function sha256Hex(text: string): Promise<string> {
   const data = new TextEncoder().encode(text);
   const digest = await crypto.subtle.digest("SHA-256", data);
@@ -233,19 +241,14 @@ export class GameRoom implements DurableObject {
       await this.state.storage.put("archived", false);
     } else if (msg.type === "spectate_turn") {
       const turns = (await this.state.storage.get<SpectateTurn[]>("turns")) ?? [];
-      turns.push({ s: String(msg.s ?? ""), g: String(msg.g ?? "") });
-      await this.state.storage.put("turns", turns);
+      if (turns.length < MAX_TURNS) {
+        turns.push({ s: String(msg.s ?? ""), g: String(msg.g ?? "") });
+        await this.state.storage.put("turns", turns);
+      }
     } else if (msg.type === "spectate_result") {
       const result = { kind: String(msg.kind ?? ""), outcome: String(msg.outcome ?? "") };
       await this.state.storage.put("result", result);
 
-      // 断片綴じの元になるレコードは、外部 KV への書き込み（下の
-      // _archiveFinalized/_archiveFragment）より前に確定させておく。書庫への
-      // 書き込みは（ネットワーク越しの）KV I/O で局所ストレージより遅く、
-      // その待ち時間の間に webSocketClose（全員離脱）が先に走ると
-      // archived がまだ false のまま読まれ、断片が二重に綴じられうる
-      // （データは失われないが無駄な二重書き込みになる）。archived を
-      // 先に立てて、この競合の窓を最小化する。
       const recordForFallback: SpectateRecord = {
         version: (await this.state.storage.get<unknown>("version")) ?? null,
         initial_sfen: (await this.state.storage.get<string>("initial_sfen")) ?? null,
@@ -253,16 +256,29 @@ export class GameRoom implements DurableObject {
         result,
         archived: false,
       };
-      await this.state.storage.put("archived", true);
 
-      // 記録係一段目 §4-1・§6: 正準本文（text）があれば内容ハッシュで確定綴じ。
-      // 無ければ（旧クライアント等）現レコードを断片として綴じる——いずれの
-      // 経路でもデータは失われない。
-      const text = typeof msg.text === "string" ? msg.text : null;
-      const id = text
-        ? await this._archiveFinalized(text)
-        : await this._archiveFragment(recordForFallback);
-      this._broadcastArchived(id);
+      // 記録係一段目 §4-1・§6: 正準本文（text）があり上限内であれば内容ハッシュで
+      // 確定綴じ。無ければ（旧クライアント・上限超過等）現レコードを断片として
+      // 綴じる——いずれの経路でもデータは失われない。
+      //
+      // archived フラグは、書庫への書き込み（KV I/O）が実際に成功した後にのみ
+      // 立てる。先に立てると、書き込みが失敗した場合に「綴じ済み」を名乗り
+      // ながら実体が存在しないサイレントな記録喪失になる（webSocketClose 側の
+      // _archiveCurrentIfNeeded はもう再試行しない）。webSocketClose との
+      // 競合で断片が二重に綴じられる可能性は残るが、二重書き込みは無害であり、
+      // サイレント喪失よりずっと軽い代償。
+      const text = typeof msg.text === "string" && msg.text.length <= MAX_ARCHIVE_TEXT_BYTES
+        ? msg.text
+        : null;
+      try {
+        const id = text
+          ? await this._archiveFinalized(text)
+          : await this._archiveFragment(recordForFallback);
+        await this.state.storage.put("archived", true);
+        this._broadcastArchived(id);
+      } catch (err) {
+        this.log(`archive write failed: ${String(err)}`);
+      }
     }
   }
 
