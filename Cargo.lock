@@ -130,7 +130,7 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "cli"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "engine",
 ]
@@ -332,11 +332,11 @@ checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 
 [[package]]
 name = "engine"
-version = "0.10.0"
+version = "0.10.1"
 
 [[package]]
 name = "engine-wasm"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "engine",
  "serde_json",
@@ -421,7 +421,7 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "fukanzen-shogi-tui"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "crossterm 0.28.1",
  "engine",
@@ -751,14 +751,14 @@ dependencies = [
 
 [[package]]
 name = "notation"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "engine",
 ]
 
 [[package]]
 name = "notation-wasm"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "engine",
  "notation",
@@ -995,7 +995,7 @@ dependencies = [
 
 [[package]]
 name = "protocol"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "engine",
  "sha2",
@@ -1003,7 +1003,7 @@ dependencies = [
 
 [[package]]
 name = "protocol-wasm"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "engine",
  "getrandom 0.2.17",

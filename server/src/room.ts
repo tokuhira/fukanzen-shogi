@@ -131,6 +131,13 @@ export class GameRoom implements DurableObject {
     }
     this.log(`recv type=${msg.type ?? "unknown"}`);
 
+    // 観戦者は読み取り専用。型を見るより先に、ここで無条件に破棄する（淀川第三歩
+    // §1-B・§10.1）。以前は request_reset の分岐がこのチェックより先にあったため、
+    // 観戦者が request_reset を送ると getWebSockets("player") 全員が
+    // 「other !== ws」を満たしてしまい（観戦ソケットは player リストに元々
+    // 含まれないため）、対局を強制リセットできてしまっていた。
+    if (this.state.getWebSockets("spectator").includes(ws)) return;
+
     if (msg.type === "request_reset") {
       this.log("request_reset: clearing gameStarted and closing other players");
       void this.state.storage.delete("gameStarted");
@@ -140,12 +147,6 @@ export class GameRoom implements DurableObject {
         }
       }
       ws.close(1000, "room reset");
-      return;
-    }
-
-    const isSpectator = this.state.getWebSockets("spectator").includes(ws);
-    if (isSpectator) {
-      // 観戦者は読み取り専用。入力は破棄する（淀川第三歩 §1-B）。
       return;
     }
 
