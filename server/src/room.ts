@@ -47,6 +47,16 @@ export class GameRoom implements DurableObject {
       });
     }
 
+    // サーバ側アーカイブの取り出し: GET /room/:key/archive（淀川第三歩 §6）。
+    // 構造化レコードを返すのみ。版タプル付きアーカイブの正準テキスト化は
+    // engine を持つ消費者側（web の build_archive）が行う（書式の正本は engine）。
+    if (request.method === "GET" && url.pathname.endsWith("/archive")) {
+      const record = await this._loadRecord();
+      return new Response(JSON.stringify(record, null, 2), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     if (request.headers.get("Upgrade") !== "websocket") {
       return new Response("WebSocket required", { status: 426 });
     }

@@ -28,7 +28,7 @@ export default {
       return stub.fetch(forwarded);
     }
 
-    const match = url.pathname.match(/^\/room\/([^/]+?)(\/status)?$/);
+    const match = url.pathname.match(/^\/room\/([^/]+?)(\/status|\/archive)?$/);
     if (!match) {
       return new Response("Not found", { status: 404 });
     }
