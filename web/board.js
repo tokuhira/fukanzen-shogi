@@ -30,15 +30,6 @@ const INITIAL_SFEN = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL 
 // 巨大な悪意あるファイルでブラウザを固まらせないための、十分な安全マージン。
 const MAX_ARCHIVE_BYTES = 512 * 1024;
 
-const DEMO_PLIES = [
-  { sUsi:"7g7f",  gUsi:"3c3d",  sText:"☗7六歩",   gText:"☖3四歩"  },
-  { sUsi:"2g2f",  gUsi:"8c8d",  sText:"☗2六歩",   gText:"☖8四歩"  },
-  { sUsi:"2f2e",  gUsi:"8d8e",  sText:"☗2五歩",   gText:"☖8五歩"  },
-  { sUsi:"8g8f",  gUsi:"8e8f",  sText:"☗8六歩",   gText:"☖8六歩"  },
-  { sUsi:"P*8f",  gUsi:"3d3e",  sText:"☗8六歩打", gText:"☖3五歩"  },
-  { sUsi:"8h3c+", gUsi:"8b8f",  sText:"☗3三角成", gText:"☖8六飛"  },
-];
-
 const CELL  = 38;
 const BX    = 6;
 const BY    = 58;
@@ -1123,11 +1114,13 @@ function render() {
     btnSave.classList.toggle('highlight', isOver);
   }
 
-  // 観戦中は対局を始める系のボタンを封じる（新局のみ、観戦終了を兼ねて有効）。
-  for (const id of ['btn-demo', 'btn-online', 'btn-load']) {
+  // 観戦中は対局を始める系のボタンを封じ、代わりに「観戦をやめる」を出す。
+  for (const id of ['btn-online', 'btn-load']) {
     const btn = document.getElementById(id);
     if (btn) btn.disabled = watchMode;
   }
+  const btnLeaveWatch = document.getElementById('btn-leave-watch');
+  if (btnLeaveWatch) btnLeaveWatch.hidden = !watchMode;
 
   const linkText = document.getElementById('watch-link-text');
   const linkBtn  = document.getElementById('btn-copy-watch-link');
@@ -1174,16 +1167,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('board').addEventListener('click', handleSvgClick);
   document.getElementById('btn-next').addEventListener('click', goNext);
   document.getElementById('btn-prev').addEventListener('click', goPrev);
-  document.getElementById('btn-demo').addEventListener('click', () => {
-    loadPlies(DEMO_PLIES);
-    loadedMeta = null;
-    render();
-  });
   document.getElementById('btn-save').addEventListener('click', saveKifu);
-  document.getElementById('btn-new').addEventListener('click', () => {
-    if (watchMode) { leaveWatchMode(); render(); return; }
-    if (onlineGameOver) _resetOnlineState();
-    resetToNew();
+  document.getElementById('btn-leave-watch').addEventListener('click', () => {
+    leaveWatchMode();
     render();
   });
   document.getElementById('btn-copy-watch-link').addEventListener('click', async (e) => {
@@ -1252,6 +1238,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     document.getElementById('btn-online').addEventListener('click', () => {
+      // 前回の対局が終局済みなら畳んでから新しい接続へ（「新局」ボタンが担っていた役割）
+      if (onlineGameOver) { _resetOnlineState(); resetToNew(); }
       modal.classList.add('visible');
       document.getElementById('input-room').focus();
     });

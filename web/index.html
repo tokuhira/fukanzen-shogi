@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>不完全将棋</title>
-  <link rel="stylesheet" href="style.css?v=0.9.1">
+  <link rel="stylesheet" href="style.css?v=0.9.2">
 </head>
 <body>
   <div id="container">
@@ -33,12 +33,11 @@
       <button id="btn-next">次 →</button>
     </div>
     <div id="kifu-controls">
-      <button id="btn-demo">デモ局面</button>
-      <button id="btn-new">新局</button>
       <button id="btn-online">対戦</button>
       <button id="btn-resign">投了</button>
       <button id="btn-save">棋譜を保存</button>
       <button id="btn-load">棋譜を読込</button>
+      <button id="btn-leave-watch" hidden>観戦をやめる</button>
       <input id="input-file" type="file" accept=".kifu,.txt,text/plain" hidden>
     </div>
   </div>
@@ -77,6 +76,6 @@
     </div>
   </div>
 
-  <script type="module" src="board.js?v=0.9.1"></script>
+  <script type="module" src="board.js?v=0.9.2"></script>
 </body>
 </html>

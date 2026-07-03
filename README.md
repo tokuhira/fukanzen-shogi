@@ -120,7 +120,9 @@ The `protocol/` crate has no dependency on `net.rs` or the TUI; it receives nonc
 ### Future directions (not yet implemented)
 
 - **CPU opponent** — search and evaluation function.
-- **Broader reach** — smartphone app; multi-language engine re-implementations with cross-diffing against the Rust reference; spectator streaming.
+- **Broader reach** — smartphone app; multi-language engine re-implementations with cross-diffing against the Rust reference.
+- **Solo verification board as its own page** — the one-person-plays-both-sides hotseat mode (formerly 新局 on the main board, removed in v0.9.2's button cleanup) deserves a page of its own, separate from the main board's online-play/spectate/archive-review focus. Likely a near-identical page reusing the same rendering code.
+- **Interactive tutorial** — distinct from just replaying [`web/sample.kifu`](web/sample.kifu): a guided walkthrough of the rules (simultaneous resolution, Sengoku Musou, etc.) for newcomers.
 
 The engine is designed so that all of the above are *shells* around an unchanged core. The engine itself will never gain I/O, networking, or randomness.
 
@@ -237,12 +239,15 @@ Web 盤を公開しています: **[fukanzen-shogi.tokuhira.net](https://fukanze
 - **ルール v0.6 — 引き分けの正式化・千日手確定・最長手数500組手**（v0.9.0、`RULE_VERSION` 0.5 → 0.6）— 基底の将棋規則は非決着（千日手・持将棋・入玉宣言）を先後入れ替えの指し直しで処理するが、本ゲームは手番そのものを廃しているため入れ替える対象がない。ゆえにすべての非決着を、正式な第三の結果である**引き分け**へ写像する。実装面では `engine::terminate::evaluate(kifu)` が終局判定の単一の権威となり、確定的詰み・玉の死・千日手・新設の最長手数（500組手）を決まった優先順序で一元評価する。基底の500手ルールにあった「王手継続中は延長」という例外は、同時着手では王手が確率的で「反復中の手がすべて王手」を定義できないため廃止し、500組手を無条件の打ち切りとした。`engine::archive::ResultKind::MaxTurns` が結果を記録し、v0.8.2 で導入した安全網の500もこの単一の定数を参照するよう寄せて重複を解消した。版交渉は既にルール版不一致を非互換として弾く実装だったため、0.5/0.6混在のオンライン対戦は正しく拒否される。アーカイブ書式・プロトコル版は不変——変わったのはルールの意味だけ。
 - **ライブ観戦・第一歩: 秘匿境界のルーティング修正**（v0.9.1）— Durable Object（`server/src/room.ts`）は「送信者以外の全ソケットへ転送」する盲目中継だった。観戦者を迎える前に、これを (役割, 型) による明示ルーティングへ改めた。全ソケットに `player` タグを付与し、2人枠は player のみで計数、そして最も肝心な点として——タグ付けされた player でないソケットには commit/reveal の生トラフィックが絶対に届かない。この時点では観戦者の入口はまだ無く、純粋な堅牢化のみ。既存の2人対局（commit-reveal）に対する回帰確認として検証した。
 - **ライブ観戦・第二歩: 対局を生で観る**（v0.9.1）— 部屋に読み取り専用の観戦者を迎えられるようになった。先手側クライアントが、組手が公開された直後にのみ公開情報をブロードキャストする（`spectate_turn`、対局開始時の `spectate_meta`、終局時の `spectate_result`）——commit/reveal/nonce には一切触れないため、commit-reveal が既に保証している秘匿境界を破らず、遅延も不要。DO は観戦者ソケットを別タグで扱い（2人枠の対象外・読み取り専用で観戦者からの送信は破棄）、公開ストリームを観戦者へ fan-out しつつ部屋のライブ記録として蓄積する。アクセスはワンタイムのランダムトークン経由（`/watch/:token`、KV の `token → roomKey` 写像で解決）とし、観戦リンクが誰かの入室鍵を兼ねてしまうことを避ける。新規接続した観戦者は、それまでの記録を `spectate_init` で受け取り、第二歩（アーカイブ取り出し）で作った同じ再生機構——水墨盤・棋譜ナビ・日本語表記——で現局面まで追いつき、以後は一手ずつライブ追従する。プレイヤー側にはトークン到着後、共有可能な観戦リンクが UI に表示される。
+- **ボタンの整理**（v0.9.2）— メイン盤のボタン列が5〜6個に膨らみ、狭い画面では折り返して窮屈になっていた。`デモ局面`・`新局` をこのページから削除。デモの役割（動く実例を見せる）は、アプリ内蔵のハードコードされたデモではなく、[`web/sample.kifu`](web/sample.kifu)（「棋譜を読込」から読み込める実物のアーカイブ）が担う。`新局` の役割（一人で両陣営を指す検証盤）は、メイン盤（オンライン対戦・観戦・棋譜鑑賞が主眼）とは異なる関心事のため、いずれ別ページへ切り出す候補として記録した（下記「今後の計画」、未着手）。ローカルのホットシート着手ロジック自体は無改変で、このページ上に専用のリセット導線が無いだけ。終局後に「対戦」で再戦を始めると自動的に状態がリセットされるようになり（旧「新局」がこのケースで担っていた役割を引き継ぐ）、観戦セッションの離脱には専用の「観戦をやめる」ボタンを新設した。
 - **Wasm ラッパー** — `engine-wasm/` がルールエンジン・アーカイブ書式（`build_archive`・`parse_archive`）・終局判定の権威（`evaluate_terminal`・`max_turns`）を、`protocol-wasm/` がプロトコルセッションと版タプル（`version_tuple`）を、`notation-wasm/` が日本語棋譜表記を公開。すべて `wasm-bindgen` の薄い cdylib であり、各クレート本体は無改変。
 
 ### 今後の計画（未実装）
 
 - **CPU 対戦** — 探索・評価関数。
-- **展開拡大** — スマートフォンアプリ・多言語実装と Rust 実装に対する差分テスト・観戦配信。
+- **展開拡大** — スマートフォンアプリ・多言語実装と Rust 実装に対する差分テスト。
+- **一人指し検証盤を独立ページへ** — 一人で両陣営を指すホットシートモード（v0.9.2 のボタン整理でメイン盤から外した旧「新局」）は、メイン盤（オンライン対戦・観戦・棋譜鑑賞が主眼）とは別の関心事として、独立したページに切り出すのが良さそう。おそらく同じ描画コードを再利用したほぼ同一のページになる。
+- **インタラクティブなチュートリアル** — [`web/sample.kifu`](web/sample.kifu) の再生だけでは伝わらない、ルール（同時解決・戦国無双特則など）を段階的に案内する初心者向けガイド。
 
 エンジンは「共通の核と交換可能な殻」の設計原則に基づき、これらはすべてエンジンの外側に積む予定である。エンジン本体にはいかなる I/O も追加しない。
 

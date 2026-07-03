@@ -18,11 +18,12 @@ Interactive board with offline single-player and online browser-vs-browser battl
 - **Navigate** with ← / → buttons or arrow keys; revisiting any past position and playing from there branches the kifu.
 - **Promotion dialog** — appears on moves that can optionally promote.
 - **Japanese notation** — move labels use human-readable kifu notation (e.g. ５八金右, ７六歩) with disambiguation suffixes only when needed.
-- **デモ局面 / 新局** buttons load the built-in 6-turn demo or reset to a blank board.
 - **棋譜を保存** — save the current game (mid-game or finished) as a version-tuple-stamped archive file (`.kifu`, download + clipboard copy). The archive embeds `(rule_version, protocol_version)` so old records replay correctly even after rule changes.
 - **棋譜を読込** — load a saved archive back in, via file picker or pasted text. Replays through the same navigation (← / →, sumi ink, Japanese notation); branching from a past position still works. The embedded version tuple and result are shown; if the archive's rule version doesn't match the running engine, a plain-language warning is shown (replay still proceeds — it just may not reproduce the original outcome exactly). Old bare-kifu files (pre-v0.8.0) still load. Since this reads externally-supplied text, it rejects archives over 512 KB with a friendly message (client-side hygiene limit), and JSON escaping was hardened against control characters in free-text header fields (v0.8.2). The 500-ply cap now reads the real rule constant (`engine::terminate::MAX_TURNS`, v0.9.0) rather than a hardcoded duplicate — no legitimate game can exceed it.
 
 All positions are computed by the Wasm engine at runtime. No hardcoded SFEN data.
+
+**Button cleanup** (v0.9.2) — the main board's button row had grown to 5–6 buttons and was wrapping awkwardly on narrow screens. `デモ局面` and `新局` were removed from this page: the demo's role (a working example to look at) is now served by [`web/sample.kifu`](sample.kifu) — a real archive, loadable via 棋譜を読込 — rather than a hardcoded in-app demo; and `新局`'s role (a one-person verification board, playing both sides yourself) is earmarked to move to its own, mostly-identical page later, since it's a different concern from this page's online-play/spectate/archive-review focus (not yet built — noted as a future direction below). The underlying local hotseat click-to-move logic is untouched, just without a dedicated reset entry point on this page for now. Starting a new online game (対戦) after a finished one now resets state automatically, taking over what `新局` used to do for that case; leaving a spectator session got a dedicated 観戦をやめる button.
 
 ### Design boundary
 
