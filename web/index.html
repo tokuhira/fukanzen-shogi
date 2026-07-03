@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>不完全将棋</title>
-  <link rel="stylesheet" href="style.css?v=0.9.0">
+  <link rel="stylesheet" href="style.css?v=0.9.1">
 </head>
 <body>
   <div id="container">
@@ -13,6 +13,10 @@
     <p id="move-display"></p>
     <p id="event-label"></p>
     <p id="archive-info"></p>
+    <div id="watch-link-row">
+      <span id="watch-link-text"></span>
+      <button id="btn-copy-watch-link" hidden>観戦リンクをコピー</button>
+    </div>
     <div id="board-wrap">
       <svg id="board" xmlns="http://www.w3.org/2000/svg"></svg>
       <div id="promotion-overlay">
@@ -73,6 +77,6 @@
     </div>
   </div>
 
-  <script type="module" src="board.js?v=0.9.0"></script>
+  <script type="module" src="board.js?v=0.9.1"></script>
 </body>
 </html>

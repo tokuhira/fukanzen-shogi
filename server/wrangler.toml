@@ -12,3 +12,8 @@ class_name = "GameRoom"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["GameRoom"]
+
+# 観戦トークン → roomKey の写像（淀川第三歩 §4）
+[[kv_namespaces]]
+binding = "SPECTATE_TOKENS"
+id = "5d36ef96c86441d4ae851ad0a045bf07"

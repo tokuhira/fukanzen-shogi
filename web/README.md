@@ -14,6 +14,7 @@ Interactive board with offline single-player and online browser-vs-browser battl
 - **Click a piece** to see legal moves as subtle ink dots on the board (v0.6 rules enforced by engine — draw is a first-class result: definite mate, king's death, sennichite, and the new 500-kumite max length all end the game and are recorded correctly, not just mate/king's death/resignation as before).
 - **Offline mode** — one person plays both sides with mouse/click; both moves commit simultaneously per turn.
 - **Online mode** — two players in the same room via commit-reveal: each side commits secretly, then both are revealed simultaneously.
+- **Live spectating** (v0.9.1) — once a room is playing, the sente-side client shares a one-time watch link (`?watch=<token>`). Anyone with the link joins read-only via a separate Durable Object socket tag — no room key, no way to interfere, and no commit/reveal traffic ever reaches them (only post-reveal turns, exactly like the archive format). A spectator catches up through the same replay engine as loading a saved archive, then follows the game live, turn by turn.
 - **Navigate** with ← / → buttons or arrow keys; revisiting any past position and playing from there branches the kifu.
 - **Promotion dialog** — appears on moves that can optionally promote.
 - **Japanese notation** — move labels use human-readable kifu notation (e.g. ５八金右, ７六歩) with disambiguation suffixes only when needed.
@@ -87,6 +88,7 @@ Config: `wrangler.toml` at repository root (`pages_build_output_dir = "web"`).
 - **駒をクリック**すると合法手が淡い点で表示される（エンジンが v0.6 ルールを適用。引き分けが正式な結果に——確定的詰み・玉の死・千日手・新設の最長手数500組手のいずれも終局として正しく検出・記録される。以前は詰み・玉の死・投了しか終局にならなかった）。
 - **オフラインモード** — 一人で先後両方を操作。毎ターン両着手を同時確定。
 - **オンラインモード** — 同一ルームの 2 名がコミット秘匿→同時開示方式で対戦（秘密情報保護）。
+- **ライブ観戦**（v0.9.1）— 対局が始まると、先手側クライアントがワンタイムの観戦リンク（`?watch=<token>`）を表示する。リンクを持つ誰でも、別タグの読み取り専用ソケットで入室できる——入室鍵は不要、対局への介入不可、commit/reveal のトラフィックも一切届かない（アーカイブ書式と同じく、公開された組手のみ）。観戦者は保存済みアーカイブの読込と同じ再生機構で現局面まで追いつき、以後は一手ずつライブで追従する。
 - **← / → ナビ** — 過去局面へ戻ってそこから指し直すと棋譜が分岐。
 - **成りダイアログ** — 任意成りが可能な着手で表示。
 - **日本語棋譜表記** — ５八金右・７六歩など、曖昧さがある場合のみ区別符（右・左・直・上・引・寄）を付加。

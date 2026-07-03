@@ -230,6 +230,12 @@ function _handleMessage(data) {
     return;
   }
 
+  if (msg.type === 'spectate_token') {
+    // 観戦リンク用トークン（淀川第三歩 §4）。対局開始時に一度だけ届く。
+    _cbs?.onSpectateToken?.(msg.token);
+    return;
+  }
+
   if (msg.type === 'you_reconnected') {
     if (!session) {
       // session なしで再接続フロー受信 = stale gameStarted + zombie WS
@@ -384,6 +390,12 @@ function _sendReveal() {
 
 function _completeTurn(senteUsi, goteUsi) {
   _resetTurnState();
+  // 公開組手のブロードキャスト（淀川第三歩 §2）。commit/reveal が終わり両者に
+  // 公開された直後にのみ送るため秘匿境界を破らない。片方が送れば足りる
+  // （§2 の最小方針）ので先手側だけが送る。
+  if (ws && mySide === 'sente') {
+    _wsSend(JSON.stringify({ type: 'spectate_turn', s: senteUsi, g: goteUsi }));
+  }
   _cbs?.onTurnComplete?.(senteUsi, goteUsi);
   _cbs?.onStatus('ready', '対局中');
 }
@@ -391,4 +403,80 @@ function _completeTurn(senteUsi, goteUsi) {
 function _resetTurnState() {
   myCommitted = false;
   revealSent  = false;
+}
+
+// ── 観戦（淀川第三歩） ────────────────────────────────────────────────────────
+
+/**
+ * 対局開始時に一度、版タプルと初期局面を観戦記録のヘッダとして送る。
+ * 先手側だけが送る（§2 の最小方針）。board.js が握手完了直後に呼ぶ。
+ * @param {object} version  protocol-wasm の version_tuple() をパースしたもの
+ * @param {string} initialSfen
+ */
+export function sendSpectateMeta(version, initialSfen) {
+  if (!ws || mySide !== 'sente') return;
+  _wsSend(JSON.stringify({ type: 'spectate_meta', version, initial_sfen: initialSfen }));
+}
+
+/**
+ * 終局時に一度、結果をアーカイブ語彙（kind/outcome）で送る。
+ * 先手側だけが送る。board.js が終局検出時に呼ぶ。
+ */
+export function sendSpectateResult(kind, outcome) {
+  if (!ws || mySide !== 'sente') return;
+  _wsSend(JSON.stringify({ type: 'spectate_result', kind, outcome }));
+}
+
+// 対局用の ws とは別系統（読み取り専用・commit-reveal に関与しない）。
+let spectateWs = null;
+let _specCbs   = null;
+// { onInit({version,initial_sfen,turns,result}), onMeta({version,initial_sfen}),
+//   onTurn(sUsi,gUsi), onResult(kind,outcome), onStatus(state) }
+//   state: 'connecting'|'open'|'closed'|'error'|'player_disconnected'|'resumed'
+
+/**
+ * 観戦トークンで部屋へ読み取り専用接続する（/watch/:token）。
+ * commit/reveal 等の対局チャネルには一切触れない。
+ */
+export function connectSpectate(token, callbacks) {
+  _specCbs = callbacks;
+  if (spectateWs) { spectateWs.close(); spectateWs = null; }
+
+  spectateWs = new WebSocket(`${WS_BASE_URL}/watch/${encodeURIComponent(token)}`);
+  spectateWs.addEventListener('open',  () => _specCbs?.onStatus?.('open'));
+  spectateWs.addEventListener('close', () => _specCbs?.onStatus?.('closed'));
+  spectateWs.addEventListener('error', () => _specCbs?.onStatus?.('error'));
+  spectateWs.addEventListener('message', (evt) => _handleSpectateMessage(evt.data));
+  _specCbs?.onStatus?.('connecting');
+}
+
+/** 観戦接続を終了する。 */
+export function disconnectSpectate() {
+  if (spectateWs) { spectateWs.close(); spectateWs = null; }
+  _specCbs = null;
+}
+
+function _handleSpectateMessage(data) {
+  let msg;
+  try { msg = JSON.parse(data); } catch { return; }
+  switch (msg.type) {
+    case 'spectate_init':
+      _specCbs?.onInit?.({
+        version: msg.version, initial_sfen: msg.initial_sfen,
+        turns: msg.turns ?? [], result: msg.result ?? null,
+      });
+      break;
+    case 'spectate_meta':
+      _specCbs?.onMeta?.({ version: msg.version, initial_sfen: msg.initial_sfen });
+      break;
+    case 'spectate_turn':
+      _specCbs?.onTurn?.(msg.s, msg.g);
+      break;
+    case 'spectate_result':
+      _specCbs?.onResult?.(msg.kind, msg.outcome);
+      break;
+    case 'spectate_status':
+      _specCbs?.onStatus?.(msg.state);
+      break;
+  }
 }
