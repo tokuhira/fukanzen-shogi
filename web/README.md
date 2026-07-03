@@ -14,7 +14,7 @@ Interactive board with offline single-player and online browser-vs-browser battl
 - **Click a piece** to see legal moves as subtle ink dots on the board (v0.6 rules enforced by engine — draw is a first-class result: definite mate, king's death, sennichite, and the new 500-kumite max length all end the game and are recorded correctly, not just mate/king's death/resignation as before).
 - **Offline mode** — one person plays both sides with mouse/click; both moves commit simultaneously per turn.
 - **Online mode** — two players in the same room via commit-reveal: each side commits secretly, then both are revealed simultaneously.
-- **Live spectating** (v0.9.1) — once a room is playing, the sente-side client shares a one-time watch link (`?watch=<token>`). Anyone with the link joins read-only via a separate Durable Object socket tag — no room key, no way to interfere, and no commit/reveal traffic ever reaches them (only post-reveal turns, exactly like the archive format). A spectator catches up through the same replay engine as loading a saved archive, then follows the game live, turn by turn. The room's public-turn record persists server-side and can be pulled via `GET /room/:key/archive` (API only, no UI wired to it — a room holds one current record, overwritten on the next game in the same key). Protocol version is 3 as of v0.10.0 (wire surface grew to include spectating; commit/reveal/hello themselves are unchanged).
+- **Live spectating** (v0.9.1) — once a room is playing, the sente-side client shares a one-time watch link (`?watch=<token>`). Anyone with the link joins read-only via a separate Durable Object socket tag — no room key, no way to interfere, and no commit/reveal traffic ever reaches them (only post-reveal turns, exactly like the archive format). A spectator catches up through the same replay engine as loading a saved archive, then follows the game live, turn by turn. The room's public-turn record persists server-side and can be pulled via `GET /room/:key/archive` (API only, no UI wired to it — a room holds one current record, overwritten on the next game in the same key). Protocol version is 3 as of v0.10.0 (wire surface grew to include spectating; commit/reveal/hello themselves are unchanged). **v0.10.1** fixed a real hole in the read-only guarantee: `request_reset` was dispatched before the spectator check in `webSocketMessage`, so a spectator socket (never tagged `player`) sending `{type:"request_reset"}` satisfied the "close every other player" loop and could blow up someone else's game with a hand-crafted message — no client button needed. The spectator check now runs first, unconditionally, before any type-based dispatch.
 - **Navigate** with ← / → buttons or arrow keys; revisiting any past position and playing from there branches the kifu.
 - **Promotion dialog** — appears on moves that can optionally promote.
 - **Japanese notation** — move labels use human-readable kifu notation (e.g. ５八金右, ７六歩) with disambiguation suffixes only when needed.
@@ -54,9 +54,9 @@ Online play requires the Cloudflare Workers backend. For local online testing, s
 Run from the repository root. After each build, remove the `.gitignore` that `wasm-pack` auto-generates.
 
 ```sh
-wasm-pack build engine-wasm    --target web --out-dir ../web/wasm           --no-pack
-wasm-pack build protocol-wasm  --target web --out-dir ../web/protocol-wasm  --no-pack
-wasm-pack build notation-wasm  --target web --out-dir ../web/notation-wasm  --no-pack
+wasm-pack build engine-wasm    --target web --out-dir ../web/wasm           --release
+wasm-pack build protocol-wasm  --target web --out-dir ../web/protocol-wasm  --release
+wasm-pack build notation-wasm  --target web --out-dir ../web/notation-wasm  --release
 
 rm -f web/wasm/.gitignore web/protocol-wasm/.gitignore web/notation-wasm/.gitignore
 ```
@@ -89,15 +89,16 @@ Config: `wrangler.toml` at repository root (`pages_build_output_dir = "web"`).
 - **駒をクリック**すると合法手が淡い点で表示される（エンジンが v0.6 ルールを適用。引き分けが正式な結果に——確定的詰み・玉の死・千日手・新設の最長手数500組手のいずれも終局として正しく検出・記録される。以前は詰み・玉の死・投了しか終局にならなかった）。
 - **オフラインモード** — 一人で先後両方を操作。毎ターン両着手を同時確定。
 - **オンラインモード** — 同一ルームの 2 名がコミット秘匿→同時開示方式で対戦（秘密情報保護）。
-- **ライブ観戦**（v0.9.1）— 対局が始まると、先手側クライアントがワンタイムの観戦リンク（`?watch=<token>`）を表示する。リンクを持つ誰でも、別タグの読み取り専用ソケットで入室できる——入室鍵は不要、対局への介入不可、commit/reveal のトラフィックも一切届かない（アーカイブ書式と同じく、公開された組手のみ）。観戦者は保存済みアーカイブの読込と同じ再生機構で現局面まで追いつき、以後は一手ずつライブで追従する。部屋の公開組手記録はサーバ側にも永続化されており `GET /room/:key/archive` で取得できる（UI導線なしのAPIのみ。部屋が保持するのは単一の最新レコードで、同じキーでの次の対局で上書きされる）。プロトコル版は v0.10.0 時点で 3（観戦機能によりワイヤ表面が拡大。commit/reveal/hello 自体は無改変）。
+- **ライブ観戦**（v0.9.1）— 対局が始まると、先手側クライアントがワンタイムの観戦リンク（`?watch=<token>`）を表示する。リンクを持つ誰でも、別タグの読み取り専用ソケットで入室できる——入室鍵は不要、対局への介入不可、commit/reveal のトラフィックも一切届かない（アーカイブ書式と同じく、公開された組手のみ）。観戦者は保存済みアーカイブの読込と同じ再生機構で現局面まで追いつき、以後は一手ずつライブで追従する。部屋の公開組手記録はサーバ側にも永続化されており `GET /room/:key/archive` で取得できる（UI導線なしのAPIのみ。部屋が保持するのは単一の最新レコードで、同じキーでの次の対局で上書きされる）。プロトコル版は v0.10.0 時点で 3（観戦機能によりワイヤ表面が拡大。commit/reveal/hello 自体は無改変）。**v0.10.1** で読み取り専用の保証にあった実際の穴を修正: `webSocketMessage` 内で `request_reset` が観戦者チェックより先に処理されていたため、観戦者ソケット（`player` タグを持たない）が `{type:"request_reset"}` を送ると「他の全プレイヤーを閉じる」ループの条件を満たしてしまい、手組みメッセージ一つで他人の対局を壊せていた（クライアントにボタンは不要）。観戦者チェックを型による分岐より前・無条件に実行するよう修正済み。
 - **← / → ナビ** — 過去局面へ戻ってそこから指し直すと棋譜が分岐。
 - **成りダイアログ** — 任意成りが可能な着手で表示。
 - **日本語棋譜表記** — ５八金右・７六歩など、曖昧さがある場合のみ区別符（右・左・直・上・引・寄）を付加。
-- **デモ局面 / 新局** ボタンで 6 組手デモ局を再生、または初期局面にリセット。
 - **棋譜を保存** — 対局中・終局後を問わず、版タプル付きアーカイブ書式（`.kifu`、ダウンロード＋クリップボードコピー）で現在の対局を保存。`(ルール版, プロトコル版)` を埋め込むため、ルール変更後も旧記録を正しく再現できる。
 - **棋譜を読込** — 保存したアーカイブをファイル選択または貼り付けで読み込み、既存の棋譜ナビ（← / →・水墨盤・日本語表記）でそのまま鑑賞できる。読み込んだ局面から盤クリックで分岐再指しも可能。刻まれた版タプルと結果を表示し、読み込んだアーカイブのルール版と現行エンジンが食い違う場合は平易な注意文を表示する（再生自体は止めない）。v0.8.0 より前の素の棋譜ファイルも読み込める。外部由来の文字列を扱う機能のため、512KBを超えるアーカイブは穏当なメッセージで拒否する（クライアント側の安全弁）。自由記述欄への制御文字混入に対する JSON エスケープも強化済み（v0.8.2）。500組手の上限は、v0.9.0 でハードコードの重複をやめ、実際のルール定数（`engine::terminate::MAX_TURNS`）を直接参照するようになった——正当な対局はこれを超えない。
 
 全局面は Wasm エンジンがブラウザ上でリアルタイム計算。ハードコードされた局面データはない。
+
+**ボタンの整理**（v0.9.2）— メイン盤のボタン列が5〜6個に膨らみ、狭い画面では折り返して窮屈になっていた。`デモ局面`・`新局` をこのページから削除。デモの役割（動く実例を見せる）は、アプリ内蔵のハードコードされたデモではなく、[`web/sample.kifu`](sample.kifu)（「棋譜を読込」から読み込める実物のアーカイブ）が担う。`新局` の役割（一人で両陣営を指す検証盤）は、メイン盤（オンライン対戦・観戦・棋譜鑑賞が主眼）とは異なる関心事のため、いずれ別ページへ切り出す候補として記録した（バックログ参照、未着手）。ローカルのホットシート着手ロジック自体は無改変で、このページ上に専用のリセット導線が無いだけ。終局後に「対戦」で再戦を始めると自動的に状態がリセットされるようになり（旧「新局」がこのケースで担っていた役割を引き継ぐ）、観戦セッションの離脱には専用の「観戦をやめる」ボタンを新設した。
 
 ### 設計の境界
 
@@ -128,9 +129,9 @@ python3 -m http.server 8080 --directory web
 リポジトリルートから実行。`wasm-pack` が自動生成する `.gitignore` を毎回削除する。
 
 ```sh
-wasm-pack build engine-wasm    --target web --out-dir ../web/wasm           --no-pack
-wasm-pack build protocol-wasm  --target web --out-dir ../web/protocol-wasm  --no-pack
-wasm-pack build notation-wasm  --target web --out-dir ../web/notation-wasm  --no-pack
+wasm-pack build engine-wasm    --target web --out-dir ../web/wasm           --release
+wasm-pack build protocol-wasm  --target web --out-dir ../web/protocol-wasm  --release
+wasm-pack build notation-wasm  --target web --out-dir ../web/notation-wasm  --release
 
 rm -f web/wasm/.gitignore web/protocol-wasm/.gitignore web/notation-wasm/.gitignore
 ```
