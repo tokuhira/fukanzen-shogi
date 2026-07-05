@@ -46,8 +46,7 @@ let myCommitted = false;  // commit 送信済み
 let revealSent  = false;  // reveal 送信済み
 
 // 記録係の招待（記録係二段目 §2・§9）。新しい対局ごとに false から始まる。
-let recording           = false;  // record_confirmed を受けて true
-let _recordInvitePending = false; // 自分が record_invite を送信済み・応答待ち
+let recording = false;  // record_confirmed を受けて true
 
 // コールバック
 let _cbs = null;
@@ -180,7 +179,6 @@ export function debugState() {
     myCommitted,
     revealSent,
     recording,
-    recordInvitePending:  _recordInvitePending,
   };
 }
 
@@ -221,8 +219,7 @@ function _handleMessage(data) {
   if (msg.type === 'peer_joined' || msg.type === 'room_ready') {
     mySide  = msg.your_side;
     session = new ProtocolSession(mySide, _secret);
-    recording            = false;
-    _recordInvitePending = false;
+    recording = false;
     _wsSend(session.hello_msg());
     const label = mySide === 'sente' ? '先手' : '後手';
     _cbs?.onStatus('handshaking', `握手中 (${label})…`);
@@ -262,14 +259,12 @@ function _handleMessage(data) {
   }
 
   if (msg.type === 'record_confirmed') {
-    recording            = true;
-    _recordInvitePending = false;
+    recording = true;
     _cbs?.onRecordConfirmed?.();
     return;
   }
 
   if (msg.type === 'record_declined') {
-    _recordInvitePending = false;
     _cbs?.onRecordDeclined?.();
     return;
   }
@@ -480,7 +475,6 @@ export function sendSpectateResult(kind, outcome) {
 /** この対局を記録係に招く提案を送る（相互同意のオプトイン。§2）。どちらの陣営からでも送れる。 */
 export function sendRecordInvite() {
   if (!ws) return;
-  _recordInvitePending = true;
   _wsSend(JSON.stringify({ type: 'record_invite' }));
 }
 
@@ -510,9 +504,6 @@ export function sendRecordTestimony(kind, outcome, text) {
 
 /** 現在の対局が記録係に招かれている（recording）かどうか。 */
 export const isRecording = () => recording;
-
-/** 自分が record_invite を送信済み・相手の応答待ちかどうか。 */
-export const isRecordInvitePending = () => _recordInvitePending;
 
 /** id から恒久書庫の取り出し URL（GET /archive/:id）を組み立てる。 */
 export function archiveUrl(id) {

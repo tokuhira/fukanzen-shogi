@@ -24,8 +24,6 @@ interface SpectateRecord {
 
 interface Testimony {
   text: string;
-  kind: string;
-  outcome: string;
 }
 
 // ルール v0.6 の最長手数（engine::terminate::MAX_TURNS）と同じ上限。悪意ある/壊れた
@@ -318,10 +316,11 @@ export class GameRoom implements DurableObject {
     const recording = (await this.state.storage.get<boolean>("recording")) ?? false;
     if (!recording) return; // 未招待の対局に証言は要らない
 
+    // kind/outcome は正準本文（text）の result 行に既に埋め込まれており、
+    // 一致判定・綴じのどちらでも参照しないため保持しない（受信メッセージには
+    // 指示書どおり乗るが、DO は text しか解さない）。
     this._testimonies.set(ws, {
       text: typeof msg.text === "string" ? msg.text : "",
-      kind: String(msg.kind ?? ""),
-      outcome: String(msg.outcome ?? ""),
     });
 
     // getWebSockets("player") との突き合わせはしない。実際のクライアントは
