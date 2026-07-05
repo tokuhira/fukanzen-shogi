@@ -51,8 +51,11 @@ pub enum NegotiationOutcome {
 /// v0.7.0 で投了（resign）を commit-reveal フローに追加（版 = 2）。
 /// v0.10.0 で観戦系（spectate_meta/turn/result/status/init/token）と
 /// DO の routing 拡張が加わり、ワイヤ表面が広がったため加算的に上げた（版 = 3）。
+/// v0.11.0 で記録係の招待（record_invite/accept/decline/confirmed/declined）と
+/// 二証人の証言（record_testimony/record_disagreement）を追加し、綴じの契機を
+/// spectate_result から record_testimony の二証人経路へ移したため上げた（版 = 4）。
 /// 対局チャネル（commit/reveal/ack/hello）自体はバイト不変。
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// 自分の版タプル（engine::RULE_VERSION + PROTOCOL_VERSION）
 pub const MY_VERSION: VersionTuple = VersionTuple {

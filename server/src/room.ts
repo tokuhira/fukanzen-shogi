@@ -19,13 +19,20 @@ interface SpectateRecord {
   turns: SpectateTurn[];
   result: SpectateResult | null;
   archived: boolean;
+  recording: boolean;
+}
+
+interface Testimony {
+  text: string;
+  kind: string;
+  outcome: string;
 }
 
 // ルール v0.6 の最長手数（engine::terminate::MAX_TURNS）と同じ上限。悪意ある/壊れた
 // player ソケットが spectate_turn を無制限に送りつけて turns 配列を肥大化させるのを防ぐ。
 const MAX_TURNS = 500;
 
-// web/board.js の MAX_ARCHIVE_BYTES と同じ上限。spectate_result の text を書庫へ確定綴じ
+// web/board.js の MAX_ARCHIVE_BYTES と同じ上限。record_testimony の text を書庫へ確定綴じ
 // する前のサイズ上限（KV の値サイズ上限や無駄な帯域消費を避ける）。
 const MAX_ARCHIVE_TEXT_BYTES = 512 * 1024;
 
@@ -41,6 +48,10 @@ export class GameRoom implements DurableObject {
   private state: DurableObjectState;
   private env: Env;
   private readonly _key: string;
+
+  // 二証人の証言収集は単一終局分の一時状態でよい（記録係二段目 §10）。
+  // ws をキーに、招かれた対局の終局時に届いた証言を溜め、綴じたらクリアする。
+  private _testimonies: Map<WebSocket, Testimony> = new Map();
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
@@ -178,6 +189,32 @@ export class GameRoom implements DurableObject {
       return;
     }
 
+    // 記録係の招待（記録係二段目 §2・§10）。対局チャネル——観戦者へは中継しない。
+    if (msg.type === "record_invite") {
+      for (const other of this.state.getWebSockets("player")) {
+        if (other !== ws) { try { other.send(message); } catch {} }
+      }
+      return;
+    }
+    if (msg.type === "record_accept") {
+      await this.state.storage.put("recording", true);
+      const payload = JSON.stringify({ type: "record_confirmed" });
+      for (const p of this.state.getWebSockets("player")) { try { p.send(payload); } catch {} }
+      for (const s of this.state.getWebSockets("spectator")) { try { s.send(payload); } catch {} }
+      return;
+    }
+    if (msg.type === "record_decline") {
+      const payload = JSON.stringify({ type: "record_declined" });
+      for (const other of this.state.getWebSockets("player")) {
+        if (other !== ws) { try { other.send(payload); } catch {} }
+      }
+      return;
+    }
+    if (msg.type === "record_testimony") {
+      await this._handleTestimony(ws, msg);
+      return;
+    }
+
     // 対局チャネル（commit/reveal/ack/hello/reconnect など）は相手プレイヤーのみへ。
     for (const other of this.state.getWebSockets("player")) {
       if (other !== ws) {
@@ -204,9 +241,26 @@ export class GameRoom implements DurableObject {
     this._broadcastSpectateStatus("player_disconnected");
 
     if (otherPlayers.length === 0) {
-      // 全員離脱（記録係一段目 §4-3）。gameStarted を消す前に、綴じていない
-      // 記録があれば断片として書庫へ綴じる（「綴じてから拭く」不変条件）。
-      await this._archiveCurrentIfNeeded();
+      // 全員離脱（記録係一段目 §4-3・記録係二段目 §4）。gameStarted を消す前に、
+      // 招かれた対局（recording=true）なら綴じる——「綴じてから拭く」不変条件。
+      // 片方だけ証言済み（相手が終局前に離脱等）なら、その一証言を witnesses:1
+      // で確定綴じする（記録係二段目 §3）。それ以外は従来どおり断片綴じへ。
+      const recording = (await this.state.storage.get<boolean>("recording")) ?? false;
+      const archived = (await this.state.storage.get<boolean>("archived")) ?? false;
+      const solo = [...this._testimonies.values()][0];
+      if (recording && !archived && this._testimonies.size === 1 && solo?.text
+          && solo.text.length <= MAX_ARCHIVE_TEXT_BYTES) {
+        try {
+          const id = await this._archiveFinalized(solo.text, 1);
+          await this.state.storage.put("archived", true);
+          this._broadcastArchived(id);
+        } catch (err) {
+          this.log(`single-witness archive failed: ${String(err)}`);
+        }
+      } else {
+        await this._archiveCurrentIfNeeded();
+      }
+      this._testimonies.clear();
       void this.state.storage.delete("gameStarted");
       this.log("all players disconnected: gameStarted cleared");
     }
@@ -225,13 +279,14 @@ export class GameRoom implements DurableObject {
     const turns = (await this.state.storage.get<SpectateTurn[]>("turns")) ?? [];
     const result = (await this.state.storage.get<SpectateResult>("result")) ?? null;
     const archived = (await this.state.storage.get<boolean>("archived")) ?? false;
-    return { version, initial_sfen, turns, result, archived };
+    const recording = (await this.state.storage.get<boolean>("recording")) ?? false;
+    return { version, initial_sfen, turns, result, archived, recording };
   }
 
   private async _applyToRecord(msg: { type?: string; [k: string]: unknown }): Promise<void> {
     if (msg.type === "spectate_meta") {
       // 新しい対局の開始（再戦を含む）。記録係一段目 §4-2: 拭く（初期化する）前に、
-      // 前局が未綴じのまま残っていれば断片として書庫へ綴じる。
+      // 前局が未綴じのまま残っていれば（招かれていた対局のみ）断片として書庫へ綴じる。
       await this._archiveCurrentIfNeeded();
 
       await this.state.storage.put("version", msg.version ?? null);
@@ -239,6 +294,9 @@ export class GameRoom implements DurableObject {
       await this.state.storage.put("turns", []);
       await this.state.storage.put("result", null);
       await this.state.storage.put("archived", false);
+      // 記録係二段目 §2: 招待は対局ごと。新局は毎回未招待から始まる。
+      await this.state.storage.put("recording", false);
+      this._testimonies.clear();
     } else if (msg.type === "spectate_turn") {
       const turns = (await this.state.storage.get<SpectateTurn[]>("turns")) ?? [];
       if (turns.length < MAX_TURNS) {
@@ -246,68 +304,112 @@ export class GameRoom implements DurableObject {
         await this.state.storage.put("turns", turns);
       }
     } else if (msg.type === "spectate_result") {
+      // ライブの終局表示のみを担う（観戦者向け）。記録係二段目 §10: 綴じ
+      // （_archiveFinalized）はここから除去し、record_testimony の二証人経路へ
+      // 移した。招かれていない対局はここで終局してもそのまま揮発する。
       const result = { kind: String(msg.kind ?? ""), outcome: String(msg.outcome ?? "") };
       await this.state.storage.put("result", result);
+    }
+  }
 
-      const recordForFallback: SpectateRecord = {
-        version: (await this.state.storage.get<unknown>("version")) ?? null,
-        initial_sfen: (await this.state.storage.get<string>("initial_sfen")) ?? null,
-        turns: (await this.state.storage.get<SpectateTurn[]>("turns")) ?? [],
-        result,
-        archived: false,
-      };
+  // ── 二証人の交差確認（記録係二段目 §3・§10） ─────────────────────────────────
 
-      // 記録係一段目 §4-1・§6: 正準本文（text）があり上限内であれば内容ハッシュで
-      // 確定綴じ。無ければ（旧クライアント・上限超過等）現レコードを断片として
-      // 綴じる——いずれの経路でもデータは失われない。
-      //
-      // archived フラグは、書庫への書き込み（KV I/O）が実際に成功した後にのみ
-      // 立てる。先に立てると、書き込みが失敗した場合に「綴じ済み」を名乗り
-      // ながら実体が存在しないサイレントな記録喪失になる（webSocketClose 側の
-      // _archiveCurrentIfNeeded はもう再試行しない）。webSocketClose との
-      // 競合で断片が二重に綴じられる可能性は残るが、二重書き込みは無害であり、
-      // サイレント喪失よりずっと軽い代償。
-      const text = typeof msg.text === "string" && msg.text.length <= MAX_ARCHIVE_TEXT_BYTES
-        ? msg.text
-        : null;
-      try {
-        const id = text
-          ? await this._archiveFinalized(text)
-          : await this._archiveFragment(recordForFallback);
+  private async _handleTestimony(ws: WebSocket, msg: { [k: string]: unknown }): Promise<void> {
+    const recording = (await this.state.storage.get<boolean>("recording")) ?? false;
+    if (!recording) return; // 未招待の対局に証言は要らない
+
+    this._testimonies.set(ws, {
+      text: typeof msg.text === "string" ? msg.text : "",
+      kind: String(msg.kind ?? ""),
+      outcome: String(msg.outcome ?? ""),
+    });
+
+    // getWebSockets("player") との突き合わせはしない。実際のクライアントは
+    // 証言を送った直後に自分の ws を閉じる（endOnlineGame → disconnectOnline）ため、
+    // 二人目の証言が届く頃には一人目の ws は既に「player」から外れている。
+    // Map は ws（=接続）をキーにしており、同じ接続からの再送は上書きになるので、
+    // size===2 は「二つの異なる接続が証言した」で足りる（記録係二段目 §10）。
+    if (this._testimonies.size < 2) return; // もう一方の証言を待つ
+
+    const [a, b] = [...this._testimonies.values()];
+    this._testimonies.clear();
+
+    if (!a.text || !b.text || a.text.length > MAX_ARCHIVE_TEXT_BYTES || b.text.length > MAX_ARCHIVE_TEXT_BYTES) {
+      // 綴じない（空・上限超過）。招待済みの放棄と同じく、後で断片綴じに
+      // フォールバックしうる（_archiveCurrentIfNeeded、archived はまだ false）。
+      this.log("testimony rejected: empty or oversized text");
+      return;
+    }
+
+    try {
+      const [idA, idB] = await Promise.all([sha256Hex(a.text), sha256Hex(b.text)]);
+      if (idA === idB) {
+        // 一致: 二人の独立した目が合致した、確かな記録。
+        await this._archiveFinalized(a.text, 2);
         await this.state.storage.put("archived", true);
-        this._broadcastArchived(id);
-      } catch (err) {
-        this.log(`archive write failed: ${String(err)}`);
+        this._broadcastArchived(idA);
+      } else {
+        // 不一致: 裁定しない（審判なし＝版図）。両証言を保存し surface する。
+        const id = await this._archiveDisputed([a.text, b.text]);
+        await this.state.storage.put("archived", true);
+        this._broadcastRecordDisagreement(idA, idB, id);
       }
+    } catch (err) {
+      this.log(`testimony archive failed: ${String(err)}`);
     }
   }
 
   // ── 書庫（記録係一段目 §2・§3・§4） ──────────────────────────────────────────
 
-  // 未綴じ（archived=false）かつ着手のある記録を、断片として書庫へ綴じる。
-  // 再戦開始（§4-2）・全員離脱（§4-3）の両方から呼ぶ共通経路。
+  // 招かれた対局（recording=true）で、未綴じ（archived=false）かつ着手のある
+  // 記録を、断片として書庫へ綴じる。再戦開始（§4-2）・全員離脱（§4-3）の両方から
+  // 呼ぶ共通経路。記録係二段目 §4: 未招待は綴じずに拭いてよい（意図的な揮発）。
   private async _archiveCurrentIfNeeded(): Promise<void> {
+    const recording = (await this.state.storage.get<boolean>("recording")) ?? false;
+    if (!recording) return;
     const archived = (await this.state.storage.get<boolean>("archived")) ?? false;
     if (archived) return;
     const turns = (await this.state.storage.get<SpectateTurn[]>("turns")) ?? [];
     if (turns.length === 0) return;
 
     const record = await this._loadRecord();
-    await this._archiveFragment(record);
-    await this.state.storage.put("archived", true);
+    try {
+      await this._archiveFragment(record);
+      await this.state.storage.put("archived", true);
+    } catch (err) {
+      this.log(`fragment archive failed: ${String(err)}`);
+    }
   }
 
   // 確定局: 正準アーカイブ本文の内容ハッシュ（SHA-256）を id として書庫へ綴じる。
   // DO は本文を解さない（不透明ブロブとして content-address するだけ）。
-  private async _archiveFinalized(text: string): Promise<string> {
+  // witnesses: 二証人が一致すれば 2、相手が終局前に離脱し片方のみなら 1
+  // （記録係二段目 §3）。
+  private async _archiveFinalized(text: string, witnesses: number): Promise<string> {
     const id = await sha256Hex(text);
     const envelope = {
       finalized: true,
       text,
       archived_at: new Date().toISOString(),
+      witnesses,
     };
     await this.env.ARCHIVES.put(id, JSON.stringify(envelope));
-    this.log(`archived finalized id=${id}`);
+    this.log(`archived finalized id=${id} witnesses=${witnesses}`);
+    return id;
+  }
+
+  // 二証人が食い違った対局: 裁定せず、両証言を暫定 ID（ランダム UUID）で
+  // 保存する。証拠は失わない（記録係二段目 §3）。
+  private async _archiveDisputed(texts: [string, string]): Promise<string> {
+    const id = crypto.randomUUID();
+    const envelope = {
+      finalized: false,
+      disputed: true,
+      texts,
+      archived_at: new Date().toISOString(),
+    };
+    await this.env.ARCHIVES.put(id, JSON.stringify(envelope));
+    this.log(`archived disputed id=${id}`);
     return id;
   }
 
@@ -331,6 +433,19 @@ export class GameRoom implements DurableObject {
 
   private _broadcastArchived(id: string): void {
     const payload = JSON.stringify({ type: "archived", id });
+    for (const player of this.state.getWebSockets("player")) {
+      try { player.send(payload); } catch {}
+    }
+    for (const spec of this.state.getWebSockets("spectator")) {
+      try { spec.send(payload); } catch {}
+    }
+  }
+
+  // 二証人の食い違いを、裁定せず両者＋観戦者へ透明に示す（記録係二段目 §3・§10）。
+  // id_a/id_b は各人が自分の証言そのものを検証できる自己完結ハッシュ、id は
+  // 両証言を保存した disputed envelope の取り出し key。
+  private _broadcastRecordDisagreement(idA: string, idB: string, id: string): void {
+    const payload = JSON.stringify({ type: "record_disagreement", id_a: idA, id_b: idB, id });
     for (const player of this.state.getWebSockets("player")) {
       try { player.send(payload); } catch {}
     }

@@ -19,6 +19,8 @@ import {
   connectOnline, disconnectOnline, commitMoveOnline, getMySide,
   reconnectOnline, hasReconnectableSession, debugState,
   sendSpectateMeta, sendSpectateResult, connectSpectate, disconnectSpectate,
+  sendRecordInvite, sendRecordAccept, sendRecordDecline, sendRecordTestimony,
+  isRecording, archiveUrl,
 } from './online.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -199,6 +201,13 @@ let onlineWaitingMsg      = '';      // 待機時の表示メッセージ
 
 // 対局時に受け取った観戦リンク用トークン（プレイヤー側。共有リンク表示に使う）
 let spectateToken = null;
+
+// ── 記録係の招待と二証人（記録係二段目） ─────────────────────────────────────
+
+let recordInviteAsked = false;  // このゲームで招待の可否を既に尋ねたか（二重prompt防止）
+let recordStatusText  = '';     // 記録係の状態表示用テキスト（最小 surface。§5）
+let archivedLink       = null;  // { id, url } 直近の archived 通知（GET /archive/:id へのリンク）
+let _pendingRecordDisconnect = false;  // 証言送信後、綴じ結果を受け取るまで切断を待っているか
 
 // ── Watch mode state（淀川第三歩） ───────────────────────────────────────────────
 
@@ -452,6 +461,8 @@ function enterWatchMode(token) {
   if (onlineMode) { _resetOnlineState(); disconnectOnline(); }
   watchMode       = true;
   watchStatusText = '';
+  recordStatusText = '';
+  archivedLink      = null;
   resetToNew();
   render();
 
@@ -476,6 +487,8 @@ function enterWatchMode(token) {
       resetToNew();
       sfens      = [initial_sfen || INITIAL_SFEN];
       loadedMeta = _metaToLoadedMeta(version, null);
+      recordStatusText = '';
+      archivedLink      = null;
       render();
     },
     onTurn: (sUsi, gUsi) => {
@@ -486,12 +499,29 @@ function enterWatchMode(token) {
       if (loadedMeta) loadedMeta.result = { kind, outcome };
       render();
     },
+    onRecordConfirmed: () => {
+      // 記録係二段目 §10: 記録係がこの対局に招かれたことを観戦者にも透明に示す。
+      recordStatusText = '記録係: 有効（この対局は書庫へ綴じられます）';
+      render();
+    },
+    onRecordDisagreement: (idA, idB, id) => {
+      recordStatusText = '記録が食い違いました（裁定はされません）';
+      archivedLink = id ? { id, url: archiveUrl(id) } : null;
+      render();
+    },
+    onArchived: (id) => {
+      recordStatusText = '記録されました';
+      archivedLink = { id, url: archiveUrl(id) };
+      render();
+    },
   });
 }
 
 function leaveWatchMode() {
   disconnectSpectate();
   watchMode       = false;
+  recordStatusText = '';
+  archivedLink      = null;
   watchStatusText = '';
   resetToNew();
 }
@@ -608,6 +638,10 @@ function _resetOnlineState() {
   onlineWaiting    = false;
   onlineWaitingMsg = '';
   resultOverride   = null;
+  recordInviteAsked = false;
+  recordStatusText  = '';
+  archivedLink      = null;
+  _pendingRecordDisconnect = false;
 }
 
 function _onlinePhaseText(gameOver) {
@@ -627,14 +661,26 @@ function endOnlineGame(msg) {
   onlineEndMsg    = msg;
   onlineCommitted = false;
   onlineWaiting   = false;
-  // 観戦者へ結果を知らせる（disconnectOnline で ws を閉じる前に送る必要がある）。
-  // 正準アーカイブ本文（buildArchiveText）も同梱し、DO が内容ハッシュで確定綴じ
-  // できるようにする（記録係一段目 §4-1・§5）。生成できなくても（null）
-  // sendSpectateResult は断片綴じの経路へ自然にフォールバックする。
+  // 観戦者へライブの終局表示を知らせる（disconnectOnline で ws を閉じる前に
+  // 送る必要がある。text は同梱しない——綴じは record_testimony 経路へ移った。
+  // 記録係二段目 §10）。
   const result = currentResult();
-  sendSpectateResult(result.kind, result.outcome, buildArchiveText());
-  // 終局後は WS を閉じる（intentional なので onlineMode は破棄しない）
-  disconnectOnline();
+  sendSpectateResult(result.kind, result.outcome);
+  if (isRecording()) {
+    // 両陣営が証言として正準本文を送る（§3・§9）。二証人の突き合わせは DO 側の
+    // 非同期処理（ハッシュ計算・KV 書き込み）を要するため、すぐ切断すると
+    // archived/record_disagreement の通知（§5）を受け取れずに終わる——両者が
+    // 証言を送った直後に自分から切断してしまうため。結果が届く（onArchived/
+    // onRecordDisagreement）まで、または保険のタイムアウトまで待ってから切断する。
+    sendRecordTestimony(result.kind, result.outcome, buildArchiveText());
+    _pendingRecordDisconnect = true;
+    setTimeout(() => {
+      if (_pendingRecordDisconnect) { _pendingRecordDisconnect = false; disconnectOnline(); }
+    }, 5000);
+  } else {
+    // 終局後は WS を閉じる（intentional なので onlineMode は破棄しない）
+    disconnectOnline();
+  }
   render();
 }
 
@@ -1138,6 +1184,19 @@ function render() {
       linkBtn.hidden = true;
     }
   }
+
+  // 記録係の状態表示（最小 surface。記録係二段目 §5）。
+  const recordText = document.getElementById('record-info-text');
+  const recordBtn   = document.getElementById('btn-copy-record-link');
+  if (recordText && recordBtn) {
+    recordText.textContent = recordStatusText;
+    if (archivedLink) {
+      recordBtn.hidden = false;
+      recordBtn.dataset.link = archivedLink.url;
+    } else {
+      recordBtn.hidden = true;
+    }
+  }
 }
 
 function _watchPhaseText(gameOver) {
@@ -1176,6 +1235,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     render();
   });
   document.getElementById('btn-copy-watch-link').addEventListener('click', async (e) => {
+    const link = e.currentTarget.dataset.link;
+    if (!link) return;
+    try {
+      await navigator.clipboard.writeText(link);
+    } catch {
+      // クリップボード API が使えない環境では選択して手動コピーしてもらう
+    }
+  });
+  document.getElementById('btn-copy-record-link').addEventListener('click', async (e) => {
     const link = e.currentTarget.dataset.link;
     if (!link) return;
     try {
@@ -1296,6 +1364,19 @@ document.addEventListener('DOMContentLoaded', async () => {
             btnConn.textContent = '入室';
             render();
 
+            // 記録係への招待の prompt（対局開始・握手完了時。記録係二段目 §5）。
+            // モーダルが閉じて盤面が見えた後に出す。招き忘れ対策——オプトイン
+            // だが必ず尋ねる。相手も同時に自分の招待を出しうる（どちらから
+            // 提案してもよい。§2）ので、二重の招待が交差しても害はない。
+            if (!recordInviteAsked) {
+              recordInviteAsked = true;
+              setTimeout(() => {
+                if (confirm('記録係をこの対局に招いて綴じてもらいますか？（相手の同意が必要です）')) {
+                  sendRecordInvite();
+                }
+              }, 0);
+            }
+
           } else if (state === 'peer_disconnected') {
             // 相手が切断: ゲーム状態維持、待機表示
             onlineWaiting    = true;
@@ -1331,6 +1412,36 @@ document.addEventListener('DOMContentLoaded', async () => {
         onTurnComplete:  handleTurnComplete,
         onPeerAborted:   (reason) => endOnlineGame(`中断: ${reason}`),
         onSpectateToken: (token) => { spectateToken = token; render(); },
+        onRecordInvite: () => {
+          // 相手からの記録係への招待提案（記録係二段目 §2・§5）。
+          if (confirm('相手が記録係をこの対局に招いて綴じることを提案しました。同意しますか？')) {
+            sendRecordAccept();
+          } else {
+            sendRecordDecline();
+          }
+        },
+        onRecordConfirmed: () => {
+          recordStatusText = '記録係: 有効（この対局は書庫へ綴じられます）';
+          render();
+        },
+        onRecordDeclined: () => {
+          recordStatusText = '';
+          alert('相手が記録を辞退しました。この対局は綴じられません。');
+          render();
+        },
+        onRecordDisagreement: (idA, idB, id) => {
+          recordStatusText = '記録が食い違いました（裁定はされません）';
+          archivedLink = id ? { id, url: archiveUrl(id) } : null;
+          alert('二人の証言が一致しませんでした。改竄検知として記録し、裁定はしません。');
+          if (_pendingRecordDisconnect) { _pendingRecordDisconnect = false; disconnectOnline(); }
+          render();
+        },
+        onArchived: (id) => {
+          recordStatusText = '記録されました';
+          archivedLink = { id, url: archiveUrl(id) };
+          if (_pendingRecordDisconnect) { _pendingRecordDisconnect = false; disconnectOnline(); }
+          render();
+        },
         getSfens:        () => sfens,
         onResumeAt:      (resumeSfen) => {
           const idx = sfens.indexOf(resumeSfen);
