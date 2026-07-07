@@ -7,25 +7,21 @@ use std::io;
 use std::time::Duration;
 
 use crossterm::event::{self, Event};
-use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use ratatui::Terminal;
 
 use engine::board::Position;
 use engine::kifu::Kifu;
 use engine::movegen::legal_actions;
 use engine::types::{Action, Side};
 use notation::ja_notation;
-use protocol::{
-    board_hash, hash_secret, Nonce, RecoverySession, SecretHash, TurnSession,
-};
+use protocol::{board_hash, hash_secret, Nonce, RecoverySession, SecretHash, TurnSession};
 
 use crate::app::{App, OnlineProtocolPhase, OnlineStatus, Phase};
 use crate::input;
 use crate::net::{
-    self, Connection, NegotiationError, NetEvent, NetMessage,
-    board_hash_from_hex, board_hash_to_hex,
-    commitment_from_hex, commitment_to_hex,
-    nonce_from_hex, nonce_to_hex,
+    self, board_hash_from_hex, board_hash_to_hex, commitment_from_hex, commitment_to_hex,
+    nonce_from_hex, nonce_to_hex, Connection, NegotiationError, NetEvent, NetMessage,
 };
 use crate::ui;
 
@@ -85,14 +81,18 @@ pub fn run_online(
     };
 
     // ── バージョン交渉（ハンドシェイク第一関門、認証より前）──────────────────
-    let version_err: Option<String> = conn.perform_version_negotiation()
+    let version_err: Option<String> = conn
+        .perform_version_negotiation()
         .err()
         .map(|e| format_negotiation_error(&e));
 
     // ── 認証・ハンドシェイク（版交渉通過後のみ実行）──────────────────────────
     let peer_secret_hash: Option<SecretHash> = if version_err.is_none() {
         let secret_hash = hash_secret(&config.secret);
-        let my_side_u8 = match config.local_side { Side::Sente => 0u8, Side::Gote => 1u8 };
+        let my_side_u8 = match config.local_side {
+            Side::Sente => 0u8,
+            Side::Gote => 1u8,
+        };
         conn.send(&NetMessage::GameStart {
             side: my_side_u8,
             secret_hash: net::to_hex(&secret_hash.0),
@@ -115,8 +115,14 @@ pub fn run_online(
         app.message = format!("{} — [q] でポータルへ戻る", msg);
         OnlinePhase::Aborted(msg.clone())
     } else {
-        app.message = format!("{}接続完了 — 着手を入力してください",
-            if config.local_side == Side::Sente { "先手: " } else { "後手: " });
+        app.message = format!(
+            "{}接続完了 — 着手を入力してください",
+            if config.local_side == Side::Sente {
+                "先手: "
+            } else {
+                "後手: "
+            }
+        );
         OnlinePhase::WaitingMyMove
     };
     let mut turn_session: Option<TurnSession> = None;
@@ -128,7 +134,12 @@ pub fn run_online(
     let mut move_rolled_back = false;
 
     // 初期状態を online_status に反映（版交渉失敗時は切断扱い）
-    sync_online_status(&mut app, &online_phase, config.local_side, version_err.is_none());
+    sync_online_status(
+        &mut app,
+        &online_phase,
+        config.local_side,
+        version_err.is_none(),
+    );
 
     loop {
         // ── 描画（online_status は sync_online_status で常に最新） ────────
@@ -147,8 +158,13 @@ pub fn run_online(
                         app.sente_action = None;
                         app.gote_action = None;
                         match config.local_side {
-                            Side::Sente => { app.phase = Phase::SenteInput; }
-                            Side::Gote  => { app.phase = Phase::GoteInput; app.cursor_rank = 1; }
+                            Side::Sente => {
+                                app.phase = Phase::SenteInput;
+                            }
+                            Side::Gote => {
+                                app.phase = Phase::GoteInput;
+                                app.cursor_rank = 1;
+                            }
                         }
                         app.message = if move_rolled_back {
                             move_rolled_back = false;
@@ -179,7 +195,9 @@ pub fn run_online(
                             break;
                         }
                     }
-                    Event::Mouse(m) => { if input::handle_mouse(m, &mut app) { break; } }
+                    Event::Mouse(m) if input::handle_mouse(m, &mut app) => {
+                        break;
+                    }
                     _ => {}
                 }
             }
@@ -198,7 +216,9 @@ pub fn run_online(
                             break;
                         }
                     }
-                    Event::Mouse(m) => { if input::handle_mouse(m, &mut app) { break; } }
+                    Event::Mouse(m) if input::handle_mouse(m, &mut app) => {
+                        break;
+                    }
                     _ => {}
                 }
             }
@@ -213,7 +233,7 @@ pub fn run_online(
                         // 切断時点で着手が確定済みかを記録（再接続後のロールバック通知用）
                         let my_action = match config.local_side {
                             Side::Sente => app.sente_action,
-                            Side::Gote  => app.gote_action,
+                            Side::Gote => app.gote_action,
                         };
                         move_rolled_back = turn_session.is_some() || my_action.is_some();
 
@@ -228,15 +248,16 @@ pub fn run_online(
                         let config2 = config.clone();
                         let kifu2 = kifu.clone();
                         // 版交渉+認証を通過した場合のみ Disconnected に到達するため unwrap は安全
-                        let peer_hash2 = peer_secret_hash
-                            .expect("reconnect path requires successful version negotiation and auth");
+                        let peer_hash2 = peer_secret_hash.expect(
+                            "reconnect path requires successful version negotiation and auth",
+                        );
                         let (tx, rx) = std::sync::mpsc::channel::<ReconnectEvent>();
                         reconnect_rx = Some(rx);
                         std::thread::spawn(move || {
                             let result = reconnect(&config2, &kifu2, &peer_hash2);
                             let ev = match result {
                                 Ok(conn) => ReconnectEvent::Success(conn),
-                                Err(e)   => ReconnectEvent::Failed(e.to_string()),
+                                Err(e) => ReconnectEvent::Failed(e.to_string()),
                             };
                             let _ = tx.send(ev);
                         });
@@ -254,7 +275,9 @@ pub fn run_online(
                         &mut kifu,
                     ) {
                         online_phase = OnlinePhase::Aborted(abort_reason.clone());
-                        let _ = conn.send(&NetMessage::Abort { reason: abort_reason });
+                        let _ = conn.send(&NetMessage::Abort {
+                            reason: abort_reason,
+                        });
                     }
                     sync_online_status(&mut app, &online_phase, config.local_side, true);
                 }
@@ -291,7 +314,7 @@ pub fn run_online(
                         // オンライン投了: 即終局ではなく commit-reveal プロトコル経由で投了
                         match config.local_side {
                             Side::Sente => app.sente_action = Some(Action::Resign),
-                            Side::Gote  => app.gote_action  = Some(Action::Resign),
+                            Side::Gote => app.gote_action = Some(Action::Resign),
                         }
                         app.message = "投了申告 — 相手の確定を待っています...".to_string();
                     } else {
@@ -311,7 +334,7 @@ pub fn run_online(
         // ── 着手が確定したか検出 ─────────────────────────────────────────
         let my_action = match config.local_side {
             Side::Sente => app.sente_action,
-            Side::Gote  => app.gote_action,
+            Side::Gote => app.gote_action,
         };
 
         if let Some(action) = my_action {
@@ -361,6 +384,10 @@ pub fn run_online(
 
 // ─── ネットメッセージハンドラ ────────────────────────────────────────────────
 
+// 8引数は TUI のオンライン対局ループが抱える状態一式（App・接続・進行フェーズ・
+// ターンセッション等）をそのまま渡しているため。まとめ役の構造体を導入する
+// リファクタは本整備の範囲外（挙動は変えない）。
+#[allow(clippy::too_many_arguments)]
 fn handle_net_message(
     msg: NetMessage,
     online_phase: &mut OnlinePhase,
@@ -378,21 +405,25 @@ fn handle_net_message(
 
             if let Some(session) = turn_session.as_mut() {
                 // 自分の着手確定後にコミットが届いた（通常ケース）
-                session.receive_peer_commit(commit)
+                session
+                    .receive_peer_commit(commit)
                     .map_err(|e| format!("commit 受信エラー: {:?}", e))?;
 
                 if session.both_committed() {
-                    let reveal = session.local_reveal()
+                    let reveal = session
+                        .local_reveal()
                         .map_err(|e| format!("reveal 生成エラー: {:?}", e))?;
                     conn.send(&NetMessage::Reveal {
                         action_usi: reveal.action.to_usi(),
                         nonce: nonce_to_hex(&reveal.nonce),
                         board_hash: board_hash_to_hex(&reveal.board_hash),
-                    }).map_err(|e| e.to_string())?;
+                    })
+                    .map_err(|e| e.to_string())?;
                     *online_phase = OnlinePhase::WaitingPeerReveal;
                     app.message = "Reveal 送信済み — 相手の Reveal 待ち...".to_string();
                 } else {
-                    app.message = "相手のコミット受信済み — 自分の着手を確定してください".to_string();
+                    app.message =
+                        "相手のコミット受信済み — 自分の着手を確定してください".to_string();
                 }
             } else {
                 // 自分の着手確定前に相手のコミットが届いた（先着ケース）
@@ -402,37 +433,45 @@ fn handle_net_message(
             }
         }
 
-        NetMessage::Reveal { action_usi, nonce, board_hash } => {
+        NetMessage::Reveal {
+            action_usi,
+            nonce,
+            board_hash,
+        } => {
             let peer_action = Action::from_usi(&action_usi)
                 .ok_or_else(|| format!("不正な USI 文字列: {}", action_usi))?;
-            let peer_nonce = nonce_from_hex(&nonce)
-                .ok_or_else(|| "不正な nonce hex".to_string())?;
+            let peer_nonce =
+                nonce_from_hex(&nonce).ok_or_else(|| "不正な nonce hex".to_string())?;
             let peer_hash = board_hash_from_hex(&board_hash)
                 .ok_or_else(|| "不正な board_hash hex".to_string())?;
 
-            let session = turn_session.as_mut()
+            let session = turn_session
+                .as_mut()
                 .ok_or_else(|| "セッション未初期化で Reveal 受信".to_string())?;
 
-            session.receive_peer_reveal(peer_action, peer_nonce, peer_hash)
+            session
+                .receive_peer_reveal(peer_action, peer_nonce, peer_hash)
                 .map_err(|e| format!("reveal 検証エラー: {:?}", e))?;
 
             // Ack 送信
-            session.local_ack()
+            session
+                .local_ack()
                 .map_err(|e| format!("ack エラー: {:?}", e))?;
-            conn.send(&NetMessage::Ack)
-                .map_err(|e| e.to_string())?;
+            conn.send(&NetMessage::Ack).map_err(|e| e.to_string())?;
             *online_phase = OnlinePhase::WaitingPeerAck;
             app.message = "Ack 送信済み — 相手の Ack 待ち...".to_string();
         }
 
         NetMessage::Ack => {
-            let session = turn_session.as_mut()
+            let session = turn_session
+                .as_mut()
                 .ok_or_else(|| "セッション未初期化で Ack 受信".to_string())?;
 
             session.receive_peer_ack();
 
             if session.is_complete() {
-                let (sente_action, gote_action) = session.get_actions()
+                let (sente_action, gote_action) = session
+                    .get_actions()
                     .ok_or_else(|| "ターン確定後に着手ペアなし".to_string())?;
 
                 *turn_session = None;
@@ -441,9 +480,9 @@ fn handle_net_message(
                 let s_resign = sente_action.is_resign();
                 let g_resign = gote_action.is_resign();
                 if s_resign || g_resign {
-                    use crate::app::{GameOverKind, WinReason, DrawReason};
+                    use crate::app::{DrawReason, GameOverKind, WinReason};
                     let kind = match (s_resign, g_resign) {
-                        (true, true)  => GameOverKind::Draw(DrawReason::MutualResign),
+                        (true, true) => GameOverKind::Draw(DrawReason::MutualResign),
                         (true, false) => GameOverKind::GoteWins(WinReason::Resign),
                         (false, true) => GameOverKind::SenteWins(WinReason::Resign),
                         _ => unreachable!(),
@@ -458,7 +497,10 @@ fn handle_net_message(
                 app.resolve_turn();
 
                 use engine::types::Ply;
-                kifu.push(Ply { sente: sente_action, gote: gote_action });
+                kifu.push(Ply {
+                    sente: sente_action,
+                    gote: gote_action,
+                });
 
                 if !matches!(app.phase, Phase::GameOver(_)) {
                     // 次ターンへ
@@ -503,19 +545,25 @@ fn wait_game_start(conn: &mut Connection) -> io::Result<SecretHash> {
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
     loop {
         if std::time::Instant::now() > deadline {
-            return Err(io::Error::new(io::ErrorKind::TimedOut, "GameStart タイムアウト"));
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "GameStart タイムアウト",
+            ));
         }
-        if let Ok(ev) = conn.events.try_recv() {
-            if let NetEvent::Message(NetMessage::GameStart { secret_hash, .. }) = ev {
-                let bytes = net::from_hex(&secret_hash)
-                    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "bad secret_hash hex"))?;
-                if bytes.len() != 32 {
-                    return Err(io::Error::new(io::ErrorKind::InvalidData, "secret_hash length"));
-                }
-                let mut arr = [0u8; 32];
-                arr.copy_from_slice(&bytes);
-                return Ok(SecretHash(arr));
+        if let Ok(NetEvent::Message(NetMessage::GameStart { secret_hash, .. })) =
+            conn.events.try_recv()
+        {
+            let bytes = net::from_hex(&secret_hash)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "bad secret_hash hex"))?;
+            if bytes.len() != 32 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "secret_hash length",
+                ));
             }
+            let mut arr = [0u8; 32];
+            arr.copy_from_slice(&bytes);
+            return Ok(SecretHash(arr));
         }
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -557,21 +605,34 @@ fn reconnect(
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
     loop {
         if std::time::Instant::now() > deadline {
-            return Err(io::Error::new(io::ErrorKind::TimedOut, "Reconnect タイムアウト"));
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Reconnect タイムアウト",
+            ));
         }
-        if let Ok(NetEvent::Message(NetMessage::Reconnect { secret, resume_hash })) = conn.events.try_recv() {
+        if let Ok(NetEvent::Message(NetMessage::Reconnect {
+            secret,
+            resume_hash,
+        })) = conn.events.try_recv()
+        {
             // 本人認証
             let recovery = RecoverySession::new(kifu.clone(), *peer_secret_hash);
             let secret_bytes = net::from_hex(&secret)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "bad secret hex"))?;
             if !recovery.verify_identity(&secret_bytes) {
-                return Err(io::Error::new(io::ErrorKind::PermissionDenied, "再接続: 認証失敗"));
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "再接続: 認証失敗",
+                ));
             }
             // 盤面ハッシュ照合
             let peer_hash = board_hash_from_hex(&resume_hash)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "bad resume_hash hex"))?;
             if recovery.find_resume_point(peer_hash).is_none() {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "再開点が一致しません"));
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "再開点が一致しません",
+                ));
             }
             return Ok(conn);
         }
@@ -627,21 +688,27 @@ fn random_nonce() -> Nonce {
 /// 既存の `reconnect_notice_until` は引き継ぐ（期限切れ確認は ui 側で行う）。
 fn sync_online_status(app: &mut App, phase: &OnlinePhase, local_side: Side, connected: bool) {
     let protocol = match phase {
-        OnlinePhase::WaitingMyMove     => OnlineProtocolPhase::MyTurn,
+        OnlinePhase::WaitingMyMove => OnlineProtocolPhase::MyTurn,
         OnlinePhase::WaitingPeerCommit => OnlineProtocolPhase::PeerCommitPending,
         OnlinePhase::WaitingPeerReveal => OnlineProtocolPhase::PeerRevealPending,
-        OnlinePhase::WaitingPeerAck    => OnlineProtocolPhase::PeerAckPending,
-        OnlinePhase::Disconnected      => OnlineProtocolPhase::Disconnected,
-        OnlinePhase::Aborted(r)        => OnlineProtocolPhase::Aborted(r.clone()),
+        OnlinePhase::WaitingPeerAck => OnlineProtocolPhase::PeerAckPending,
+        OnlinePhase::Disconnected => OnlineProtocolPhase::Disconnected,
+        OnlinePhase::Aborted(r) => OnlineProtocolPhase::Aborted(r.clone()),
     };
     let peer_revealed = match local_side {
         Side::Sente => app.gote_action.is_some(),
-        Side::Gote  => app.sente_action.is_some(),
+        Side::Gote => app.sente_action.is_some(),
     };
-    let reconnect_notice_until = app.online_status.as_ref()
+    let reconnect_notice_until = app
+        .online_status
+        .as_ref()
         .and_then(|s| s.reconnect_notice_until);
     app.online_status = Some(OnlineStatus {
-        local_side, protocol, connected, peer_revealed, reconnect_notice_until,
+        local_side,
+        protocol,
+        connected,
+        peer_revealed,
+        reconnect_notice_until,
     });
 }
 

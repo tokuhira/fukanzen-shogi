@@ -9,8 +9,7 @@ use crate::types::{Piece, PieceKind, Side, Square};
 
 /// 平手の初期局面を表す正本 SFEN（仕様書 v0.2 §3）。
 /// 手番フィールドは "b" 固定（意味を持たず無視される）。
-pub const INITIAL_SFEN: &str =
-    "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1";
+pub const INITIAL_SFEN: &str = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1";
 
 // -------------------------------------------------------------------------
 // SFEN 形式
@@ -130,7 +129,12 @@ pub fn content_bytes(pos: &Position) -> Vec<u8> {
 
 /// Ply を "<手数>: <先手> | <後手>" 形式の文字列へ変換
 pub fn ply_to_string(move_number: u32, ply: &crate::types::Ply) -> String {
-    format!("{}: {} | {}", move_number, ply.sente.to_usi(), ply.gote.to_usi())
+    format!(
+        "{}: {} | {}",
+        move_number,
+        ply.sente.to_usi(),
+        ply.gote.to_usi()
+    )
 }
 
 /// "<手数>: <先手> | <後手>" 形式から Ply をパース
@@ -214,10 +218,7 @@ fn parse_board(s: &str) -> Option<crate::board::Board> {
                 if file < 1 {
                     return None;
                 }
-                board.set(
-                    Square::new(file as u8, rank),
-                    Some(Piece::new(kind, side)),
-                );
+                board.set(Square::new(file as u8, rank), Some(Piece::new(kind, side)));
                 file -= 1;
             } else if c.is_ascii_digit() {
                 let n = c as i8 - b'0' as i8;
@@ -227,10 +228,7 @@ fn parse_board(s: &str) -> Option<crate::board::Board> {
                 if file < 1 {
                     return None;
                 }
-                board.set(
-                    Square::new(file as u8, rank),
-                    Some(Piece::new(kind, side)),
-                );
+                board.set(Square::new(file as u8, rank), Some(Piece::new(kind, side)));
                 file -= 1;
             }
         }
@@ -239,7 +237,11 @@ fn parse_board(s: &str) -> Option<crate::board::Board> {
 }
 
 fn parse_piece_char(c: char) -> Option<(PieceKind, Side)> {
-    let side = if c.is_ascii_uppercase() { Side::Sente } else { Side::Gote };
+    let side = if c.is_ascii_uppercase() {
+        Side::Sente
+    } else {
+        Side::Gote
+    };
     let kind = match c.to_ascii_uppercase() {
         'P' => PieceKind::Pawn,
         'L' => PieceKind::Lance,

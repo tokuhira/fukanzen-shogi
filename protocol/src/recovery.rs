@@ -1,7 +1,7 @@
-use engine::board::Position;
-use engine::kifu::Kifu;
 use crate::auth::{hash_secret, verify_secret, SecretHash};
 use crate::hash::{board_hash, BoardHash};
+use engine::board::Position;
+use engine::kifu::Kifu;
 
 /// 中断救済セッション。
 ///
@@ -70,11 +70,22 @@ mod tests {
         for i in 0..n.min(sente_moves.len()) {
             let (sf, st) = sente_moves[i];
             let (gf, gt) = gote_moves[i];
-            let sente_action = Action::Move { from: sf, to: st, promote: false };
-            let gote_action  = Action::Move { from: gf, to: gt, promote: false };
+            let sente_action = Action::Move {
+                from: sf,
+                to: st,
+                promote: false,
+            };
+            let gote_action = Action::Move {
+                from: gf,
+                to: gt,
+                promote: false,
+            };
             // resolve して局面を進める（不完全将棋の simultaneous resolve）
             pos = engine::resolve::resolve(&pos, sente_action, gote_action).next;
-            plies.push(Ply { sente: sente_action, gote: gote_action });
+            plies.push(Ply {
+                sente: sente_action,
+                gote: gote_action,
+            });
         }
         let mut kifu = Kifu::new(Position::initial());
         for ply in plies {

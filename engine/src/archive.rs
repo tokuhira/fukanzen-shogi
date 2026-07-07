@@ -1,5 +1,5 @@
 use crate::kifu::Kifu;
-use crate::serialize::{kifu_to_string, kifu_from_string};
+use crate::serialize::{kifu_from_string, kifu_to_string};
 
 pub const ARCHIVE_FORMAT_VERSION: u32 = 1;
 const MAGIC: &str = "fukanzen-shogi-archive";
@@ -43,28 +43,32 @@ pub enum Outcome {
 impl ResultKind {
     pub fn to_str(&self) -> &'static str {
         match self {
-            ResultKind::Mate       => "mate",
-            ResultKind::KingDeath  => "king_death",
-            ResultKind::SwapDraw   => "swap_draw",
+            ResultKind::Mate => "mate",
+            ResultKind::KingDeath => "king_death",
+            ResultKind::SwapDraw => "swap_draw",
             ResultKind::Sennichite => "sennichite",
-            ResultKind::MaxTurns   => "max_turns",
-            ResultKind::Resign     => "resign",
+            ResultKind::MaxTurns => "max_turns",
+            ResultKind::Resign => "resign",
             ResultKind::Unfinished => "unfinished",
-            ResultKind::Other      => "other",
+            ResultKind::Other => "other",
         }
     }
 
+    // std::str::FromStr は Result を返す規約だが、この書式は「不正な語は None」で
+    // 十分（呼び出し側もそう使っている）。改名すると engine-wasm 越しの呼び出し元まで
+    // 波及するため、アーカイブ書式を変えない本整備では現状の名前を維持する。
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
-            "mate"       => Some(ResultKind::Mate),
+            "mate" => Some(ResultKind::Mate),
             "king_death" => Some(ResultKind::KingDeath),
-            "swap_draw"  => Some(ResultKind::SwapDraw),
+            "swap_draw" => Some(ResultKind::SwapDraw),
             "sennichite" => Some(ResultKind::Sennichite),
-            "max_turns"  => Some(ResultKind::MaxTurns),
-            "resign"     => Some(ResultKind::Resign),
+            "max_turns" => Some(ResultKind::MaxTurns),
+            "resign" => Some(ResultKind::Resign),
             "unfinished" => Some(ResultKind::Unfinished),
-            "other"      => Some(ResultKind::Other),
-            _            => None,
+            "other" => Some(ResultKind::Other),
+            _ => None,
         }
     }
 }
@@ -73,19 +77,21 @@ impl Outcome {
     pub fn to_str(&self) -> &'static str {
         match self {
             Outcome::SenteWins => "sente_wins",
-            Outcome::GoteWins  => "gote_wins",
-            Outcome::Draw      => "draw",
-            Outcome::None      => "none",
+            Outcome::GoteWins => "gote_wins",
+            Outcome::Draw => "draw",
+            Outcome::None => "none",
         }
     }
 
+    // 同上（ResultKind::from_str のコメント参照）。
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "sente_wins" => Some(Outcome::SenteWins),
-            "gote_wins"  => Some(Outcome::GoteWins),
-            "draw"       => Some(Outcome::Draw),
-            "none"       => Some(Outcome::None),
-            _            => None,
+            "gote_wins" => Some(Outcome::GoteWins),
+            "draw" => Some(Outcome::Draw),
+            "none" => Some(Outcome::None),
+            _ => None,
         }
     }
 }
@@ -174,20 +180,35 @@ pub fn archive_to_kifu(s: &str) -> Option<(Kifu, ArchiveMeta)> {
                     protocol = value.parse().ok();
                 }
                 "app" => {
-                    app = if value == "-" { None } else { Some(value.to_string()) };
+                    app = if value == "-" {
+                        None
+                    } else {
+                        Some(value.to_string())
+                    };
                 }
                 "sente" => {
-                    sente = if value == "-" { None } else { Some(value.to_string()) };
+                    sente = if value == "-" {
+                        None
+                    } else {
+                        Some(value.to_string())
+                    };
                 }
                 "gote" => {
-                    gote = if value == "-" { None } else { Some(value.to_string()) };
+                    gote = if value == "-" {
+                        None
+                    } else {
+                        Some(value.to_string())
+                    };
                 }
                 "result" => {
                     if let Some((ks, os)) = value.split_once(' ') {
                         if let (Some(k), Some(o)) =
                             (ResultKind::from_str(ks), Outcome::from_str(os))
                         {
-                            result = Some(ArchiveResult { kind: k, outcome: o });
+                            result = Some(ArchiveResult {
+                                kind: k,
+                                outcome: o,
+                            });
                         }
                     }
                 }
@@ -216,7 +237,7 @@ pub fn archive_to_kifu(s: &str) -> Option<(Kifu, ArchiveMeta)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::serialize::{INITIAL_SFEN, sfen_to_position};
+    use crate::serialize::{sfen_to_position, INITIAL_SFEN};
     use crate::types::{Action, Ply, Square};
 
     fn initial_kifu() -> Kifu {
@@ -297,7 +318,8 @@ mod tests {
 
     #[test]
     fn backward_compat_old_kifu() {
-        let old = "sfen lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1\n1: 7g7f | 3c3d";
+        let old =
+            "sfen lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1\n1: 7g7f | 3c3d";
         let (kifu, meta) = archive_to_kifu(old).expect("old format should parse");
         assert_eq!(kifu.plies.len(), 1);
         assert_eq!(meta.result.kind, ResultKind::Unfinished);

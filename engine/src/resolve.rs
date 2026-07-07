@@ -47,7 +47,7 @@ pub fn resolve(pos: &Position, sente: Action, gote: Action) -> Resolution {
     // ----------------------------------------------------------------
     if ts == tg {
         let sente_piece = get_moving_piece(pos, sente, Side::Sente);
-        let gote_piece  = get_moving_piece(pos, gote,  Side::Gote);
+        let gote_piece = get_moving_piece(pos, gote, Side::Gote);
         return if sente_piece.kind == PieceKind::King {
             resolve_king_wins(pos, sente, gote, Side::Sente)
         } else if gote_piece.kind == PieceKind::King {
@@ -66,7 +66,7 @@ pub fn resolve(pos: &Position, sente: Action, gote: Action) -> Resolution {
     if let (Some(fs_sq), Some(fg_sq)) = (fs, fg) {
         if ts == fg_sq && tg == fs_sq {
             let sente_piece = get_moving_piece(pos, sente, Side::Sente);
-            let gote_piece  = get_moving_piece(pos, gote,  Side::Gote);
+            let gote_piece = get_moving_piece(pos, gote, Side::Gote);
             return if sente_piece.kind == PieceKind::King && gote_piece.kind == PieceKind::King {
                 // 両玉スワップ: 戦国無双が相殺 → 通常の相討ち（両玉取られて引き分け）
                 resolve_clash(pos, sente, gote)
@@ -154,7 +154,10 @@ fn resolve_king_wins(
     king_side: Side,
 ) -> Resolution {
     let king_dest = king_act.to_sq();
-    let enemy_side = match king_side { Side::Sente => Side::Gote, Side::Gote => Side::Sente };
+    let enemy_side = match king_side {
+        Side::Sente => Side::Gote,
+        Side::Gote => Side::Sente,
+    };
 
     let enemy_piece = get_moving_piece(pos, enemy_act, enemy_side);
     debug_assert!(
@@ -242,7 +245,7 @@ fn resolve_independent(pos: &Position, sente: Action, gote: Action) -> Resolutio
     // sente_king_died: 後手が先手玉を取得 → gote_cap が先手玉
     // gote_king_died:  先手が後手玉を取得 → sente_cap が後手玉
     let sente_king_died = gote_cap.is_some_and(|p| p.kind == PieceKind::King);
-    let gote_king_died  = sente_cap.is_some_and(|p| p.kind == PieceKind::King);
+    let gote_king_died = sente_cap.is_some_and(|p| p.kind == PieceKind::King);
 
     if let Some(cap) = sente_cap {
         if cap.kind != PieceKind::King {
@@ -294,9 +297,7 @@ fn resolve_independent(pos: &Position, sente: Action, gote: Action) -> Resolutio
 /// 着手する駒（移動元の駒、または打つ駒種）を返す
 fn get_moving_piece(pos: &Position, action: Action, side: Side) -> Piece {
     match action {
-        Action::Move { from, .. } => {
-            pos.board.get(from).expect("no piece at from")
-        }
+        Action::Move { from, .. } => pos.board.get(from).expect("no piece at from"),
         Action::Drop { kind, .. } => Piece::new(kind, side),
         Action::Resign => unreachable!("Resign has no moving piece"),
     }
@@ -327,8 +328,8 @@ mod tests {
         let s5e = Square::new(5, 5);
         let s5f = Square::new(5, 6);
         let pos = make_pos(&[
-            (s5f, Piece::new(PieceKind::Pawn, Side::Sente)),  // 先手歩 5f
-            (s5e, Piece::new(PieceKind::Rook, Side::Gote)),   // 後手飛 5e（留まる）
+            (s5f, Piece::new(PieceKind::Pawn, Side::Sente)), // 先手歩 5f
+            (s5e, Piece::new(PieceKind::Rook, Side::Gote)),  // 後手飛 5e（留まる）
             (Square::new(5, 9), Piece::new(PieceKind::King, Side::Sente)),
             (Square::new(5, 1), Piece::new(PieceKind::King, Side::Gote)),
         ]);
@@ -360,7 +361,7 @@ mod tests {
         let y = Square::new(5, 4);
         let pos = make_pos(&[
             (Square::new(5, 8), Piece::new(PieceKind::Rook, Side::Sente)), // 先手飛 → x へ
-            (x, Piece::new(PieceKind::Bishop, Side::Gote)),                 // 後手角 x → y へ逃げ
+            (x, Piece::new(PieceKind::Bishop, Side::Gote)),                // 後手角 x → y へ逃げ
             (Square::new(5, 9), Piece::new(PieceKind::King, Side::Sente)),
             (Square::new(9, 1), Piece::new(PieceKind::King, Side::Gote)),
         ]);
@@ -399,8 +400,16 @@ mod tests {
             (Square::new(9, 9), Piece::new(PieceKind::King, Side::Sente)),
             (Square::new(9, 1), Piece::new(PieceKind::King, Side::Gote)),
         ]);
-        let sente_act = Action::Move { from: Square::new(5, 7), to: z, promote: false };
-        let gote_act = Action::Move { from: Square::new(5, 3), to: z, promote: false };
+        let sente_act = Action::Move {
+            from: Square::new(5, 7),
+            to: z,
+            promote: false,
+        };
+        let gote_act = Action::Move {
+            from: Square::new(5, 3),
+            to: z,
+            promote: false,
+        };
         let res = resolve(&pos, sente_act, gote_act);
         // 両駒が交換されて持ち駒へ
         assert_eq!(res.next.hand_sente.count(PieceKind::Pawn), 1);
@@ -420,8 +429,16 @@ mod tests {
             (Square::new(9, 9), Piece::new(PieceKind::King, Side::Sente)),
             (Square::new(9, 1), Piece::new(PieceKind::King, Side::Gote)),
         ]);
-        let sente_act = Action::Move { from: a, to: b, promote: false };
-        let gote_act = Action::Move { from: b, to: a, promote: false };
+        let sente_act = Action::Move {
+            from: a,
+            to: b,
+            promote: false,
+        };
+        let gote_act = Action::Move {
+            from: b,
+            to: a,
+            promote: false,
+        };
         let res = resolve(&pos, sente_act, gote_act);
         // 双方相討ち
         assert_eq!(res.next.hand_sente.count(PieceKind::Silver), 1);
@@ -433,20 +450,31 @@ mod tests {
     /// テスト4.7-1: 戦国無双・先手玉がスワップで後手銀を一方的に取得
     #[test]
     fn sengoku_musou_sente_king_wins() {
-        let king_sq   = Square::new(5, 5); // 先手玉 5五
+        let king_sq = Square::new(5, 5); // 先手玉 5五
         let silver_sq = Square::new(5, 4); // 後手銀 5四
         let pos = make_pos(&[
-            (king_sq,   Piece::new(PieceKind::King,   Side::Sente)),
+            (king_sq, Piece::new(PieceKind::King, Side::Sente)),
             (silver_sq, Piece::new(PieceKind::Silver, Side::Gote)),
             (Square::new(9, 1), Piece::new(PieceKind::King, Side::Gote)),
         ]);
         // スワップ: 先手玉 5五→5四、後手銀 5四→5五
-        let sente_act = Action::Move { from: king_sq,   to: silver_sq, promote: false };
-        let gote_act  = Action::Move { from: silver_sq, to: king_sq,   promote: false };
+        let sente_act = Action::Move {
+            from: king_sq,
+            to: silver_sq,
+            promote: false,
+        };
+        let gote_act = Action::Move {
+            from: silver_sq,
+            to: king_sq,
+            promote: false,
+        };
         let res = resolve(&pos, sente_act, gote_act);
 
         // 先手玉が 5四 にいる
-        assert_eq!(res.next.board.get(silver_sq), Some(Piece::new(PieceKind::King, Side::Sente)));
+        assert_eq!(
+            res.next.board.get(silver_sq),
+            Some(Piece::new(PieceKind::King, Side::Sente))
+        );
         // 5五（玉の旧位置）は空（後手銀は到達しない）
         assert_eq!(res.next.board.get(king_sq), None);
         // 先手の持ち駒: 銀1枚
@@ -455,27 +483,41 @@ mod tests {
         // イベント: Normal（先手が銀を取得）
         assert!(matches!(
             res.event,
-            ResolutionEvent::Normal { sente_capture: Some(PieceKind::Silver), gote_capture: None }
+            ResolutionEvent::Normal {
+                sente_capture: Some(PieceKind::Silver),
+                gote_capture: None
+            }
         ));
     }
 
     /// テスト4.7-2: 戦国無双・後手玉がスワップで先手銀を一方的に取得
     #[test]
     fn sengoku_musou_gote_king_wins() {
-        let king_sq   = Square::new(5, 5); // 後手玉 5五
+        let king_sq = Square::new(5, 5); // 後手玉 5五
         let silver_sq = Square::new(5, 6); // 先手銀 5六
         let pos = make_pos(&[
-            (king_sq,   Piece::new(PieceKind::King,   Side::Gote)),
+            (king_sq, Piece::new(PieceKind::King, Side::Gote)),
             (silver_sq, Piece::new(PieceKind::Silver, Side::Sente)),
             (Square::new(9, 9), Piece::new(PieceKind::King, Side::Sente)),
         ]);
         // スワップ: 後手玉 5五→5六、先手銀 5六→5五
-        let sente_act = Action::Move { from: silver_sq, to: king_sq,   promote: false };
-        let gote_act  = Action::Move { from: king_sq,   to: silver_sq, promote: false };
+        let sente_act = Action::Move {
+            from: silver_sq,
+            to: king_sq,
+            promote: false,
+        };
+        let gote_act = Action::Move {
+            from: king_sq,
+            to: silver_sq,
+            promote: false,
+        };
         let res = resolve(&pos, sente_act, gote_act);
 
         // 後手玉が 5六 にいる
-        assert_eq!(res.next.board.get(silver_sq), Some(Piece::new(PieceKind::King, Side::Gote)));
+        assert_eq!(
+            res.next.board.get(silver_sq),
+            Some(Piece::new(PieceKind::King, Side::Gote))
+        );
         // 5五（玉の旧位置）は空
         assert_eq!(res.next.board.get(king_sq), None);
         // 後手の持ち駒: 銀1枚
@@ -486,46 +528,71 @@ mod tests {
     /// テスト4.7-3: 玉が留まると取られる（戦国無双はスワップ限定、主経路 5.2 は不変）
     #[test]
     fn sengoku_musou_stationary_king_dies() {
-        let king_sq   = Square::new(5, 5); // 先手玉 5五（留まる）
+        let king_sq = Square::new(5, 5); // 先手玉 5五（留まる）
         let silver_sq = Square::new(5, 4); // 後手銀 5四（→5五 へ取りに来る）
-        let gold_sq   = Square::new(3, 9); // 先手金（先手の別の着手用）
+        let gold_sq = Square::new(3, 9); // 先手金（先手の別の着手用）
         let pos = make_pos(&[
-            (king_sq,   Piece::new(PieceKind::King,   Side::Sente)),
-            (gold_sq,   Piece::new(PieceKind::Gold,   Side::Sente)),
+            (king_sq, Piece::new(PieceKind::King, Side::Sente)),
+            (gold_sq, Piece::new(PieceKind::Gold, Side::Sente)),
             (silver_sq, Piece::new(PieceKind::Silver, Side::Gote)),
             (Square::new(9, 1), Piece::new(PieceKind::King, Side::Gote)),
         ]);
         // 先手: 金を動かす（玉は留まる）、後手: 銀 5四→5五（玉を取りに）
-        let sente_act = Action::Move { from: gold_sq,   to: Square::new(4, 9), promote: false };
-        let gote_act  = Action::Move { from: silver_sq, to: king_sq,           promote: false };
+        let sente_act = Action::Move {
+            from: gold_sq,
+            to: Square::new(4, 9),
+            promote: false,
+        };
+        let gote_act = Action::Move {
+            from: silver_sq,
+            to: king_sq,
+            promote: false,
+        };
         let res = resolve(&pos, sente_act, gote_act);
 
         // 先手玉は取られた
         assert!(matches!(res.event, ResolutionEvent::SenteDied));
         // 後手銀が 5五 を占める
-        assert_eq!(res.next.board.get(king_sq), Some(Piece::new(PieceKind::Silver, Side::Gote)));
+        assert_eq!(
+            res.next.board.get(king_sq),
+            Some(Piece::new(PieceKind::Silver, Side::Gote))
+        );
     }
 
     /// テスト4.7-4: 逃げた駒は取得されない（スワップ非成立、4.2 の確認）
     #[test]
     fn sengoku_musou_escape_no_capture() {
-        let king_sq   = Square::new(5, 5); // 先手玉 5五
+        let king_sq = Square::new(5, 5); // 先手玉 5五
         let silver_sq = Square::new(5, 4); // 後手銀 5四
         let escape_sq = Square::new(4, 4); // 後手銀の逃げ先（玉の旧位置でない）
         let pos = make_pos(&[
-            (king_sq,   Piece::new(PieceKind::King,   Side::Sente)),
+            (king_sq, Piece::new(PieceKind::King, Side::Sente)),
             (silver_sq, Piece::new(PieceKind::Silver, Side::Gote)),
             (Square::new(9, 1), Piece::new(PieceKind::King, Side::Gote)),
         ]);
         // 先手玉 5五→5四、後手銀 5四→4四（5五=玉の旧位置ではなく別マスへ逃げる）
-        let sente_act = Action::Move { from: king_sq,   to: silver_sq, promote: false };
-        let gote_act  = Action::Move { from: silver_sq, to: escape_sq, promote: false };
+        let sente_act = Action::Move {
+            from: king_sq,
+            to: silver_sq,
+            promote: false,
+        };
+        let gote_act = Action::Move {
+            from: silver_sq,
+            to: escape_sq,
+            promote: false,
+        };
         let res = resolve(&pos, sente_act, gote_act);
 
         // 先手玉が 5四 にいる（銀は逃げた）
-        assert_eq!(res.next.board.get(silver_sq), Some(Piece::new(PieceKind::King, Side::Sente)));
+        assert_eq!(
+            res.next.board.get(silver_sq),
+            Some(Piece::new(PieceKind::King, Side::Sente))
+        );
         // 後手銀は逃げ先 4四 にいる
-        assert_eq!(res.next.board.get(escape_sq), Some(Piece::new(PieceKind::Silver, Side::Gote)));
+        assert_eq!(
+            res.next.board.get(escape_sq),
+            Some(Piece::new(PieceKind::Silver, Side::Gote))
+        );
         // 取得なし
         assert_eq!(res.next.hand_sente.count(PieceKind::Silver), 0);
     }
@@ -543,8 +610,16 @@ mod tests {
             (sr, Piece::new(PieceKind::Rook, Side::Sente)),
             (gr, Piece::new(PieceKind::Rook, Side::Gote)),
         ]);
-        let sente_act = Action::Move { from: sr, to: gk, promote: false };
-        let gote_act  = Action::Move { from: gr, to: sk, promote: false };
+        let sente_act = Action::Move {
+            from: sr,
+            to: gk,
+            promote: false,
+        };
+        let gote_act = Action::Move {
+            from: gr,
+            to: sk,
+            promote: false,
+        };
         let res = resolve(&pos, sente_act, gote_act);
 
         assert!(matches!(res.event, ResolutionEvent::BothDied));
@@ -554,7 +629,7 @@ mod tests {
     /// 玉が安全な空きマス X へ退避し、同時に相手が X へ持ち駒を打ち込む → 玉が勝つ
     #[test]
     fn sengoku_musou_drop_clash_sente_king() {
-        let king_sq   = Square::new(5, 5); // 先手玉 5五
+        let king_sq = Square::new(5, 5); // 先手玉 5五
         let escape_sq = Square::new(5, 4); // 逃げ先 X（空きマス）
         let mut pos = make_pos(&[
             (king_sq, Piece::new(PieceKind::King, Side::Sente)),
@@ -563,12 +638,22 @@ mod tests {
         pos.hand_gote.add(PieceKind::Silver);
 
         // 先手玉 5五→5四、後手 銀を 5四 に打ち込み（同一マス衝突）
-        let sente_act = Action::Move { from: king_sq, to: escape_sq, promote: false };
-        let gote_act  = Action::Drop { kind: PieceKind::Silver, to: escape_sq };
+        let sente_act = Action::Move {
+            from: king_sq,
+            to: escape_sq,
+            promote: false,
+        };
+        let gote_act = Action::Drop {
+            kind: PieceKind::Silver,
+            to: escape_sq,
+        };
         let res = resolve(&pos, sente_act, gote_act);
 
         // 先手玉が 5四 にいる（打ち込みに勝った）
-        assert_eq!(res.next.board.get(escape_sq), Some(Piece::new(PieceKind::King, Side::Sente)));
+        assert_eq!(
+            res.next.board.get(escape_sq),
+            Some(Piece::new(PieceKind::King, Side::Sente))
+        );
         // 5五 は空
         assert_eq!(res.next.board.get(king_sq), None);
         // 先手の持ち駒: 銀1枚（打ち込まれた銀を取得）
@@ -577,14 +662,17 @@ mod tests {
         assert_eq!(res.next.hand_gote.count(PieceKind::Silver), 0);
         assert!(matches!(
             res.event,
-            ResolutionEvent::Normal { sente_capture: Some(PieceKind::Silver), gote_capture: None }
+            ResolutionEvent::Normal {
+                sente_capture: Some(PieceKind::Silver),
+                gote_capture: None
+            }
         ));
     }
 
     /// テスト4.7-6: 戦国無双・後手玉の逃げ先への打ち込み（4.3 同一マス拡張、後手玉版）
     #[test]
     fn sengoku_musou_drop_clash_gote_king() {
-        let king_sq   = Square::new(5, 5); // 後手玉 5五
+        let king_sq = Square::new(5, 5); // 後手玉 5五
         let escape_sq = Square::new(5, 6); // 逃げ先 X（空きマス）
         let mut pos = make_pos(&[
             (king_sq, Piece::new(PieceKind::King, Side::Gote)),
@@ -593,19 +681,32 @@ mod tests {
         pos.hand_sente.add(PieceKind::Silver);
 
         // 後手玉 5五→5六、先手 銀を 5六 に打ち込み（同一マス衝突）
-        let sente_act = Action::Drop { kind: PieceKind::Silver, to: escape_sq };
-        let gote_act  = Action::Move { from: king_sq, to: escape_sq, promote: false };
+        let sente_act = Action::Drop {
+            kind: PieceKind::Silver,
+            to: escape_sq,
+        };
+        let gote_act = Action::Move {
+            from: king_sq,
+            to: escape_sq,
+            promote: false,
+        };
         let res = resolve(&pos, sente_act, gote_act);
 
         // 後手玉が 5六 にいる
-        assert_eq!(res.next.board.get(escape_sq), Some(Piece::new(PieceKind::King, Side::Gote)));
+        assert_eq!(
+            res.next.board.get(escape_sq),
+            Some(Piece::new(PieceKind::King, Side::Gote))
+        );
         assert_eq!(res.next.board.get(king_sq), None);
         // 後手の持ち駒: 銀1枚
         assert_eq!(res.next.hand_gote.count(PieceKind::Silver), 1);
         assert_eq!(res.next.hand_sente.count(PieceKind::Silver), 0);
         assert!(matches!(
             res.event,
-            ResolutionEvent::Normal { sente_capture: None, gote_capture: Some(PieceKind::Silver) }
+            ResolutionEvent::Normal {
+                sente_capture: None,
+                gote_capture: Some(PieceKind::Silver)
+            }
         ));
     }
 
@@ -613,27 +714,41 @@ mod tests {
     /// 先手が王手駒を別の駒で取りに行くが、その王手駒が同時に玉のマスへ移動 → 先手玉が取られる
     #[test]
     fn king_dies_counterplay_backfire() {
-        let king_sq   = Square::new(5, 5); // 先手玉 5五（留まる）
+        let king_sq = Square::new(5, 5); // 先手玉 5五（留まる）
         let silver_sq = Square::new(5, 4); // 後手銀 5四（王手駒）
-        let gold_sq   = Square::new(6, 4); // 先手金 6四（銀を取りに行く）
+        let gold_sq = Square::new(6, 4); // 先手金 6四（銀を取りに行く）
         let pos = make_pos(&[
-            (king_sq,   Piece::new(PieceKind::King,   Side::Sente)),
-            (gold_sq,   Piece::new(PieceKind::Gold,   Side::Sente)),
+            (king_sq, Piece::new(PieceKind::King, Side::Sente)),
+            (gold_sq, Piece::new(PieceKind::Gold, Side::Sente)),
             (silver_sq, Piece::new(PieceKind::Silver, Side::Gote)),
             (Square::new(9, 1), Piece::new(PieceKind::King, Side::Gote)),
         ]);
         // 先手: 金 6四→5四（銀を取りに）、後手: 銀 5四→5五（玉を取りに）
         // 後手銀が逃げながら玉を取るため resolve_independent に落ちる
-        let sente_act = Action::Move { from: gold_sq,   to: silver_sq, promote: false };
-        let gote_act  = Action::Move { from: silver_sq, to: king_sq,   promote: false };
+        let sente_act = Action::Move {
+            from: gold_sq,
+            to: silver_sq,
+            promote: false,
+        };
+        let gote_act = Action::Move {
+            from: silver_sq,
+            to: king_sq,
+            promote: false,
+        };
         let res = resolve(&pos, sente_act, gote_act);
 
         // 先手玉は取られた（戦国無双は玉が動いた場合のみ適用、留まった玉は救われない）
         assert!(matches!(res.event, ResolutionEvent::SenteDied));
         // 後手銀が 5五 を占める
-        assert_eq!(res.next.board.get(king_sq), Some(Piece::new(PieceKind::Silver, Side::Gote)));
+        assert_eq!(
+            res.next.board.get(king_sq),
+            Some(Piece::new(PieceKind::Silver, Side::Gote))
+        );
         // 先手金は 5四 へ（銀の旧位置）
-        assert_eq!(res.next.board.get(silver_sq), Some(Piece::new(PieceKind::Gold, Side::Sente)));
+        assert_eq!(
+            res.next.board.get(silver_sq),
+            Some(Piece::new(PieceKind::Gold, Side::Sente))
+        );
     }
 
     /// テスト4.7-v0.5: 両玉スワップ → 相討ち引き分け（v0.5 §4.7 追加条項）
@@ -647,8 +762,16 @@ mod tests {
             (gk, Piece::new(PieceKind::King, Side::Gote)),
         ]);
         // 両玉が互いに相手のマスへスワップ
-        let sente_act = Action::Move { from: sk, to: gk, promote: false };
-        let gote_act  = Action::Move { from: gk, to: sk, promote: false };
+        let sente_act = Action::Move {
+            from: sk,
+            to: gk,
+            promote: false,
+        };
+        let gote_act = Action::Move {
+            from: gk,
+            to: sk,
+            promote: false,
+        };
         let res = resolve(&pos, sente_act, gote_act);
 
         // 両玉が取られ引き分け
@@ -668,22 +791,36 @@ mod tests {
         let sv = Square::new(5, 4); // 後手銀 5四（玉でない）
         let gk = Square::new(9, 1); // 後手玉（別マス）
         let pos = make_pos(&[
-            (sk, Piece::new(PieceKind::King,   Side::Sente)),
+            (sk, Piece::new(PieceKind::King, Side::Sente)),
             (sv, Piece::new(PieceKind::Silver, Side::Gote)),
-            (gk, Piece::new(PieceKind::King,   Side::Gote)),
+            (gk, Piece::new(PieceKind::King, Side::Gote)),
         ]);
         // 先手玉スワップ: 先手玉 5五→5四、後手銀 5四→5五
-        let sente_act = Action::Move { from: sk, to: sv, promote: false };
-        let gote_act  = Action::Move { from: sv, to: sk, promote: false };
+        let sente_act = Action::Move {
+            from: sk,
+            to: sv,
+            promote: false,
+        };
+        let gote_act = Action::Move {
+            from: sv,
+            to: sk,
+            promote: false,
+        };
         let res = resolve(&pos, sente_act, gote_act);
 
         // 戦国無双: 先手玉が 5四 にいて銀を取得
-        assert_eq!(res.next.board.get(sv), Some(Piece::new(PieceKind::King, Side::Sente)));
+        assert_eq!(
+            res.next.board.get(sv),
+            Some(Piece::new(PieceKind::King, Side::Sente))
+        );
         assert_eq!(res.next.board.get(sk), None);
         assert_eq!(res.next.hand_sente.count(PieceKind::Silver), 1);
         assert!(matches!(
             res.event,
-            ResolutionEvent::Normal { sente_capture: Some(PieceKind::Silver), gote_capture: None }
+            ResolutionEvent::Normal {
+                sente_capture: Some(PieceKind::Silver),
+                gote_capture: None
+            }
         ));
     }
 
@@ -691,9 +828,9 @@ mod tests {
     /// 走り駒の王手に合駒するが、経路非干渉（4.6）で走り駒が合駒を素通りして玉を取る
     #[test]
     fn king_dies_rook_passthrough() {
-        let king_sq  = Square::new(5, 5); // 先手玉 5五（留まる）
+        let king_sq = Square::new(5, 5); // 先手玉 5五（留まる）
         let block_sq = Square::new(5, 4); // 先手が歩を合駒するマス
-        let rook_sq  = Square::new(5, 2); // 後手飛 5二（5五へ走り込む）
+        let rook_sq = Square::new(5, 2); // 後手飛 5二（5五へ走り込む）
         let mut pos = make_pos(&[
             (king_sq, Piece::new(PieceKind::King, Side::Sente)),
             (rook_sq, Piece::new(PieceKind::Rook, Side::Gote)),
@@ -702,16 +839,29 @@ mod tests {
         pos.hand_sente.add(PieceKind::Pawn);
 
         // 先手: 歩を 5四 に合駒、後手飛: 5二→5五（経路非干渉で 5四 を素通り）
-        let sente_act = Action::Drop { kind: PieceKind::Pawn, to: block_sq };
-        let gote_act  = Action::Move { from: rook_sq, to: king_sq, promote: false };
+        let sente_act = Action::Drop {
+            kind: PieceKind::Pawn,
+            to: block_sq,
+        };
+        let gote_act = Action::Move {
+            from: rook_sq,
+            to: king_sq,
+            promote: false,
+        };
         let res = resolve(&pos, sente_act, gote_act);
 
         // 先手玉は取られた（合駒が貫かれた）
         assert!(matches!(res.event, ResolutionEvent::SenteDied));
         // 後手飛が 5五 を占める
-        assert_eq!(res.next.board.get(king_sq), Some(Piece::new(PieceKind::Rook, Side::Gote)));
+        assert_eq!(
+            res.next.board.get(king_sq),
+            Some(Piece::new(PieceKind::Rook, Side::Gote))
+        );
         // 先手歩は 5四 に着地している（玉とは別のマス）
-        assert_eq!(res.next.board.get(block_sq), Some(Piece::new(PieceKind::Pawn, Side::Sente)));
+        assert_eq!(
+            res.next.board.get(block_sq),
+            Some(Piece::new(PieceKind::Pawn, Side::Sente))
+        );
         // 先手の持ち駒から歩が減った
         assert_eq!(res.next.hand_sente.count(PieceKind::Pawn), 0);
     }
@@ -732,7 +882,11 @@ mod tests {
             to: Square::new(8, 1),
             promote: false,
         };
-        let sente_act = Action::Move { from: s5f, to: s5e, promote: false };
+        let sente_act = Action::Move {
+            from: s5f,
+            to: s5e,
+            promote: false,
+        };
         let res = resolve(&pos, sente_act, gote_act);
         // 龍→飛として先手の持ち駒へ
         assert_eq!(res.next.hand_sente.count(PieceKind::Rook), 1);

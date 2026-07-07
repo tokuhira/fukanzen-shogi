@@ -110,10 +110,9 @@ fn main() {
             break;
         }
 
-        // 千日手チェック
+        // 千日手チェック（ルール v0.6 §5.6: 千日手＝引き分けで確定）
         if engine::terminate::check_sennichite(&kifu) {
-            // TODO: 仕様書 §7（未確定）— 指し直しか引き分けかは要再検討。暫定引き分け。
-            println!("千日手成立（同一局面4回）。暫定引き分け。[要再検討 §7]");
+            println!("千日手成立（同一局面4回）。引き分け。");
             game_result = Some(GameResult::Draw(DrawReason::Sennichite));
             break;
         }
@@ -212,12 +211,7 @@ fn parse_side_arg(arg: &str) -> Option<Side> {
     }
 }
 
-fn handle_command(
-    input: &str,
-    pos: &Position,
-    side: Side,
-    kifu: &mut Kifu,
-) -> Option<InputResult> {
+fn handle_command(input: &str, pos: &Position, side: Side, kifu: &mut Kifu) -> Option<InputResult> {
     let parts: Vec<&str> = input.splitn(3, ' ').collect();
     match parts[0] {
         ":moves" => {
@@ -233,7 +227,10 @@ fn handle_command(
                 side
             };
             let actions = legal_actions(pos, target);
-            let label = match target { Side::Sente => "先手", Side::Gote => "後手" };
+            let label = match target {
+                Side::Sente => "先手",
+                Side::Gote => "後手",
+            };
             println!("  {} の合法手 ({} 手):", label, actions.len());
             for a in &actions {
                 print!("  {}", a.to_usi());
@@ -295,8 +292,14 @@ fn handle_command(
                         return None;
                     }
                     Some(s) if s != side => {
-                        let side_label = match side { Side::Sente => "先手", Side::Gote => "後手" };
-                        let other_label = match s { Side::Sente => "先手", Side::Gote => "後手" };
+                        let side_label = match side {
+                            Side::Sente => "先手",
+                            Side::Gote => "後手",
+                        };
+                        let other_label = match s {
+                            Side::Sente => "先手",
+                            Side::Gote => "後手",
+                        };
                         println!("  現在は{}の入力フェーズです。{}の投了はその入力フェーズで行ってください。",
                             side_label, other_label);
                         return None;
@@ -341,7 +344,7 @@ fn game_result_line(result: &GameResult, n: usize) -> String {
     match result {
         GameResult::SenteWins(reason) => {
             let r = match reason {
-                WinReason::Resign   => "後手投了",
+                WinReason::Resign => "後手投了",
                 WinReason::KingDied => "後手玉死",
                 WinReason::Checkmate => "後手着手不能",
             };
@@ -349,7 +352,7 @@ fn game_result_line(result: &GameResult, n: usize) -> String {
         }
         GameResult::GoteWins(reason) => {
             let r = match reason {
-                WinReason::Resign   => "先手投了",
+                WinReason::Resign => "先手投了",
                 WinReason::KingDied => "先手玉死",
                 WinReason::Checkmate => "先手着手不能",
             };
@@ -357,10 +360,10 @@ fn game_result_line(result: &GameResult, n: usize) -> String {
         }
         GameResult::Draw(reason) => {
             let r = match reason {
-                DrawReason::BothResign    => "両者投了",
-                DrawReason::BothKingDied  => "両玉死",
+                DrawReason::BothResign => "両者投了",
+                DrawReason::BothKingDied => "両玉死",
                 DrawReason::BothCheckmate => "両者着手不能",
-                DrawReason::Sennichite    => "千日手",
+                DrawReason::Sennichite => "千日手",
             };
             format!("まで{}組手で引き分け（{}）", n, r)
         }
@@ -369,11 +372,15 @@ fn game_result_line(result: &GameResult, n: usize) -> String {
 
 fn diagnose_illegal(pos: &Position, side: Side, action: Action) {
     match action {
-        Action::Drop { kind: PieceKind::Pawn, to } => {
+        Action::Drop {
+            kind: PieceKind::Pawn,
+            to,
+        } => {
             let file = to.file();
-            let has_own_pawn = pos.board.iter().any(|(sq, p)| {
-                p.side == side && p.kind == PieceKind::Pawn && sq.file() == file
-            });
+            let has_own_pawn = pos
+                .board
+                .iter()
+                .any(|(sq, p)| p.side == side && p.kind == PieceKind::Pawn && sq.file() == file);
             if has_own_pawn {
                 println!("  理由: 二歩（同じ筋にすでに歩があります）");
                 return;
@@ -391,7 +398,11 @@ fn diagnose_illegal(pos: &Position, side: Side, action: Action) {
             }
             // 成り忘れ: promote:false で非合法だが promote:true なら合法 → 成りが必須
             if !promote {
-                let with_promote = Action::Move { from, to, promote: true };
+                let with_promote = Action::Move {
+                    from,
+                    to,
+                    promote: true,
+                };
                 if legal_actions(pos, side).contains(&with_promote) {
                     println!(
                         "  理由: この移動は成りが必須です（{} と入力してください）",
@@ -475,20 +486,20 @@ fn piece_display_char(p: engine::types::Piece) -> String {
         PieceKind::Dragon => "龍",
     };
     match p.side {
-        Side::Sente => format!(" {}", name),   // 先手: 通常表示
-        Side::Gote => format!("v{}", name),    // 後手: v プレフィクス
+        Side::Sente => format!(" {}", name), // 先手: 通常表示
+        Side::Gote => format!("v{}", name),  // 後手: v プレフィクス
     }
 }
 
 fn piece_kind_ja(kind: PieceKind) -> &'static str {
     match kind {
-        PieceKind::Pawn   => "歩",
-        PieceKind::Lance  => "香",
+        PieceKind::Pawn => "歩",
+        PieceKind::Lance => "香",
         PieceKind::Knight => "桂",
         PieceKind::Silver => "銀",
-        PieceKind::Gold   => "金",
+        PieceKind::Gold => "金",
         PieceKind::Bishop => "角",
-        PieceKind::Rook   => "飛",
+        PieceKind::Rook => "飛",
         _ => "?",
     }
 }
@@ -497,7 +508,10 @@ fn print_resolution(event: &ResolutionEvent, sente: Action, gote: Action) {
     println!("  --- 解決結果 ---");
     println!("  先手: {} | 後手: {}", sente.to_usi(), gote.to_usi());
     match event {
-        ResolutionEvent::Normal { sente_capture, gote_capture } => {
+        ResolutionEvent::Normal {
+            sente_capture,
+            gote_capture,
+        } => {
             if let Some(k) = sente_capture {
                 println!("  先手が {} を取得", piece_kind_ja(k.unpromoted()));
             }
@@ -508,7 +522,10 @@ fn print_resolution(event: &ResolutionEvent, sente: Action, gote: Action) {
                 println!("  取得なし（空きマスへの移動、または逃げた駒）");
             }
         }
-        ResolutionEvent::Clash { sente_piece, gote_piece } => {
+        ResolutionEvent::Clash {
+            sente_piece,
+            gote_piece,
+        } => {
             println!(
                 "  相討ち: 先手の {} と後手の {} が交換",
                 piece_kind_ja(sente_piece.unpromoted()),

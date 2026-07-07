@@ -1,6 +1,6 @@
-use engine::types::{Action, Side};
 use crate::commit::{make_commit, verify_commit, Commitment, Nonce};
 use crate::hash::BoardHash;
+use engine::types::{Action, Side};
 
 /// reveal 時に相手へ送るデータ
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,7 +68,11 @@ impl TurnSession {
     }
 
     /// 自分の着手を確定し commit を生成する。送信すべき Commitment を返す。
-    pub fn local_commit(&mut self, action: Action, nonce: Nonce) -> Result<Commitment, ProtocolError> {
+    pub fn local_commit(
+        &mut self,
+        action: Action,
+        nonce: Nonce,
+    ) -> Result<Commitment, ProtocolError> {
         if self.local_commit.is_some() {
             return Err(ProtocolError::AlreadyCommitted);
         }
@@ -101,7 +105,11 @@ impl TurnSession {
         let action = self.local_action.ok_or(ProtocolError::NotCommittedYet)?;
         let nonce = self.local_nonce.ok_or(ProtocolError::NotCommittedYet)?;
         self.local_revealed = true;
-        Ok(Reveal { action, nonce, board_hash: self.current_pos_hash })
+        Ok(Reveal {
+            action,
+            nonce,
+            board_hash: self.current_pos_hash,
+        })
     }
 
     /// 相手の reveal を受信して commit との照合・盤面ハッシュ検証を行う。
@@ -162,7 +170,7 @@ impl TurnSession {
         let peer = self.peer_action?;
         Some(match self.local_side {
             Side::Sente => (local, peer),
-            Side::Gote  => (peer, local),
+            Side::Gote => (peer, local),
         })
     }
 }
@@ -170,10 +178,12 @@ impl TurnSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use engine::board::Position;
     use crate::hash::board_hash;
+    use engine::board::Position;
 
-    fn mv(s: &str) -> Action { Action::from_usi(s).unwrap() }
+    fn mv(s: &str) -> Action {
+        Action::from_usi(s).unwrap()
+    }
     fn session() -> TurnSession {
         let pos = Position::initial();
         TurnSession::new(Side::Sente, board_hash(&pos))
@@ -186,8 +196,8 @@ mod tests {
         // 自分だけ commit（相手の commit なし）
         s.local_commit(mv("7g7f"), Nonce([1u8; 32])).unwrap();
 
-        let peer_action  = mv("3c3d");
-        let peer_nonce   = Nonce([2u8; 32]);
+        let peer_action = mv("3c3d");
+        let peer_nonce = Nonce([2u8; 32]);
         let _peer_commit = make_commit(peer_action, &peer_nonce); // commit は相手へ送らない
 
         // _peer_commit を receive_peer_commit せずに peer_reveal を試みる
@@ -199,7 +209,10 @@ mod tests {
         let mut s2 = session();
         s2.local_commit(mv("7g7f"), Nonce([1u8; 32])).unwrap();
         // peer_commit を受信してからでないと reveal できない
-        assert_eq!(s2.local_reveal(), Err(ProtocolError::RevealBeforeBothCommitted));
+        assert_eq!(
+            s2.local_reveal(),
+            Err(ProtocolError::RevealBeforeBothCommitted)
+        );
     }
 
     /// 順序の正しさ: 自分だけ commit でも peer_commit 受信後なら reveal 可能
@@ -207,11 +220,11 @@ mod tests {
     fn order_reveal_allowed_after_both_committed() {
         let mut s = session();
         let action = mv("7g7f");
-        let nonce   = Nonce([1u8; 32]);
+        let nonce = Nonce([1u8; 32]);
         s.local_commit(action, nonce).unwrap();
 
         let peer_action = mv("3c3d");
-        let peer_nonce  = Nonce([2u8; 32]);
+        let peer_nonce = Nonce([2u8; 32]);
         let peer_commit = make_commit(peer_action, &peer_nonce);
         s.receive_peer_commit(peer_commit).unwrap();
 
@@ -225,12 +238,12 @@ mod tests {
     fn binding_commit_mismatch_detected() {
         let mut s = session();
         let action = mv("7g7f");
-        let nonce   = Nonce([1u8; 32]);
+        let nonce = Nonce([1u8; 32]);
         s.local_commit(action, nonce).unwrap();
 
-        let peer_action  = mv("3c3d");
-        let peer_nonce   = Nonce([2u8; 32]);
-        let peer_commit  = make_commit(peer_action, &peer_nonce);
+        let peer_action = mv("3c3d");
+        let peer_nonce = Nonce([2u8; 32]);
+        let peer_commit = make_commit(peer_action, &peer_nonce);
         s.receive_peer_commit(peer_commit).unwrap();
 
         // 別の着手で reveal しようとする（後出し）
@@ -244,11 +257,11 @@ mod tests {
     fn board_hash_mismatch_detected() {
         let mut s = session();
         let action = mv("7g7f");
-        let nonce   = Nonce([1u8; 32]);
+        let nonce = Nonce([1u8; 32]);
         s.local_commit(action, nonce).unwrap();
 
         let peer_action = mv("3c3d");
-        let peer_nonce  = Nonce([2u8; 32]);
+        let peer_nonce = Nonce([2u8; 32]);
         let peer_commit = make_commit(peer_action, &peer_nonce);
         s.receive_peer_commit(peer_commit).unwrap();
 
@@ -265,16 +278,17 @@ mod tests {
         let mut s = TurnSession::new(Side::Sente, hash);
 
         let local_action = mv("7g7f");
-        let local_nonce  = Nonce([1u8; 32]);
+        let local_nonce = Nonce([1u8; 32]);
         s.local_commit(local_action, local_nonce).unwrap();
 
         let peer_action = mv("3c3d");
-        let peer_nonce  = Nonce([2u8; 32]);
+        let peer_nonce = Nonce([2u8; 32]);
         let peer_commit = make_commit(peer_action, &peer_nonce);
         s.receive_peer_commit(peer_commit).unwrap();
 
         s.local_reveal().unwrap();
-        s.receive_peer_reveal(peer_action, peer_nonce, hash).unwrap();
+        s.receive_peer_reveal(peer_action, peer_nonce, hash)
+            .unwrap();
 
         // 自分だけ ack → まだ未完了
         s.local_ack().unwrap();
@@ -313,15 +327,16 @@ mod tests {
         let mut s = TurnSession::new(Side::Gote, hash);
 
         let local_action = mv("3c3d"); // 後手の着手
-        let local_nonce  = Nonce([10u8; 32]);
+        let local_nonce = Nonce([10u8; 32]);
         s.local_commit(local_action, local_nonce).unwrap();
 
         let peer_action = mv("7g7f"); // 先手の着手
-        let peer_nonce  = Nonce([20u8; 32]);
+        let peer_nonce = Nonce([20u8; 32]);
         let peer_commit = make_commit(peer_action, &peer_nonce);
         s.receive_peer_commit(peer_commit).unwrap();
         s.local_reveal().unwrap();
-        s.receive_peer_reveal(peer_action, peer_nonce, hash).unwrap();
+        s.receive_peer_reveal(peer_action, peer_nonce, hash)
+            .unwrap();
         s.local_ack().unwrap();
         s.receive_peer_ack();
 
@@ -344,12 +359,13 @@ mod tests {
 
         // 後手（相手）は通常着手
         let peer_action = mv("3c3d");
-        let peer_nonce  = Nonce([2u8; 32]);
+        let peer_nonce = Nonce([2u8; 32]);
         let peer_commit = make_commit(peer_action, &peer_nonce);
         s.receive_peer_commit(peer_commit).unwrap();
 
         s.local_reveal().unwrap();
-        s.receive_peer_reveal(peer_action, peer_nonce, hash).unwrap();
+        s.receive_peer_reveal(peer_action, peer_nonce, hash)
+            .unwrap();
         s.local_ack().unwrap();
         s.receive_peer_ack();
 
@@ -369,12 +385,13 @@ mod tests {
         let local_nonce = Nonce([1u8; 32]);
         s.local_commit(Action::Resign, local_nonce).unwrap();
 
-        let peer_nonce  = Nonce([2u8; 32]);
+        let peer_nonce = Nonce([2u8; 32]);
         let peer_commit = make_commit(Action::Resign, &peer_nonce);
         s.receive_peer_commit(peer_commit).unwrap();
 
         s.local_reveal().unwrap();
-        s.receive_peer_reveal(Action::Resign, peer_nonce, hash).unwrap();
+        s.receive_peer_reveal(Action::Resign, peer_nonce, hash)
+            .unwrap();
         s.local_ack().unwrap();
         s.receive_peer_ack();
 
@@ -395,7 +412,7 @@ mod tests {
         s.local_commit(Action::Resign, local_nonce).unwrap();
 
         // 相手は resign で commit したが別着手で reveal しようとする
-        let peer_nonce  = Nonce([2u8; 32]);
+        let peer_nonce = Nonce([2u8; 32]);
         let peer_commit = make_commit(Action::Resign, &peer_nonce);
         s.receive_peer_commit(peer_commit).unwrap();
 

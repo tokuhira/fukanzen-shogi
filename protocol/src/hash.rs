@@ -1,6 +1,6 @@
-use sha2::{Digest, Sha256};
 use engine::board::Position;
 use engine::serialize::canonical_bytes;
+use sha2::{Digest, Sha256};
 
 /// 盤面正準直列化の SHA-256（盤面＋持ち駒＋手数）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

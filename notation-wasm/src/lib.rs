@@ -14,15 +14,15 @@ use wasm_bindgen::prelude::*;
 pub fn ja_notation(usi: &str, side: &str, legal_json: &str, sfen: &str) -> String {
     let action = match engine::types::Action::from_usi(usi) {
         Some(a) => a,
-        None    => return String::new(),
+        None => return String::new(),
     };
     let s = match side {
         "gote" => engine::types::Side::Gote,
-        _      => engine::types::Side::Sente,
+        _ => engine::types::Side::Sente,
     };
     let pos = match engine::serialize::sfen_to_position(sfen) {
         Some(p) => p,
-        None    => return String::new(),
+        None => return String::new(),
     };
     let legal_actions = parse_legal_json(legal_json);
 

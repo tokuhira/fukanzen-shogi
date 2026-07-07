@@ -1,7 +1,9 @@
 /// ポータルメニュー — 単体検証卓・通信対戦の選択と接続設定
 use std::io;
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
+};
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -11,8 +13,8 @@ use ratatui::{
     Frame, Terminal,
 };
 
-use engine::types::Side;
 use crate::online::{ConnectMode, OnlineConfig};
+use engine::types::Side;
 
 pub enum PortalResult {
     Local,
@@ -21,7 +23,9 @@ pub enum PortalResult {
 }
 
 enum Screen {
-    Menu { selected: usize },
+    Menu {
+        selected: usize,
+    },
     OnlineForm {
         listen: bool,
         addr_or_port: String,
@@ -68,7 +72,13 @@ fn make_form(listen: bool, last: Option<&LastConnection>) -> Screen {
             (aop, secret)
         }
     };
-    Screen::OnlineForm { listen, addr_or_port, secret, focused: 0, error: None }
+    Screen::OnlineForm {
+        listen,
+        addr_or_port,
+        secret,
+        focused: 0,
+        error: None,
+    }
 }
 
 pub fn run_portal(
@@ -91,8 +101,7 @@ pub fn run_portal(
                     let col = me.column;
                     let row = me.row;
                     let hit = |r: Rect| {
-                        col >= r.x && col < r.x + r.width
-                            && row >= r.y && row < r.y + r.height
+                        col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height
                     };
 
                     let mut next_screen: Option<Screen> = None;
@@ -105,7 +114,7 @@ pub fn run_portal(
                                     *selected = i;
                                     match i {
                                         0 => portal_result = Some(PortalResult::Local),
-                                        1 => next_screen = Some(make_form(true,  last)),
+                                        1 => next_screen = Some(make_form(true, last)),
                                         2 => next_screen = Some(make_form(false, last)),
                                         _ => portal_result = Some(PortalResult::Quit),
                                     }
@@ -115,13 +124,20 @@ pub fn run_portal(
                         }
                         Screen::OnlineForm { focused, .. } => {
                             let (f1, f2) = form_field_rects(last_area);
-                            if hit(f1) { *focused = 0; }
-                            else if hit(f2) { *focused = 1; }
+                            if hit(f1) {
+                                *focused = 0;
+                            } else if hit(f2) {
+                                *focused = 1;
+                            }
                         }
                     }
 
-                    if let Some(s) = next_screen { screen = s; }
-                    if let Some(r) = portal_result { return Ok(r); }
+                    if let Some(s) = next_screen {
+                        screen = s;
+                    }
+                    if let Some(r) = portal_result {
+                        return Ok(r);
+                    }
                 }
             }
 
@@ -132,9 +148,7 @@ pub fn run_portal(
                 }
 
                 // Ctrl+C は常に終了
-                if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && key.code == KeyCode::Char('c')
-                {
+                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
                     return Ok(PortalResult::Quit);
                 }
 
@@ -155,7 +169,7 @@ pub fn run_portal(
                         }
                         KeyCode::Enter | KeyCode::Char(' ') => match *selected {
                             0 => portal_result = Some(PortalResult::Local),
-                            1 => next_screen = Some(make_form(true,  last)),
+                            1 => next_screen = Some(make_form(true, last)),
                             2 => next_screen = Some(make_form(false, last)),
                             _ => portal_result = Some(PortalResult::Quit),
                         },
@@ -231,9 +245,10 @@ pub fn run_portal(
 
 fn try_submit(listen: bool, addr_or_port: &str, secret: &str) -> Result<OnlineConfig, String> {
     let mode = if listen {
-        let port = addr_or_port.trim().parse::<u16>().map_err(|_| {
-            "ポート番号は 1〜65535 の整数で入力してください".to_string()
-        })?;
+        let port = addr_or_port
+            .trim()
+            .parse::<u16>()
+            .map_err(|_| "ポート番号は 1〜65535 の整数で入力してください".to_string())?;
         ConnectMode::Listen(port)
     } else {
         let addr = addr_or_port.trim();
@@ -298,7 +313,13 @@ fn form_field_rects(area: Rect) -> (Rect, Rect) {
 fn render(f: &mut Frame, screen: &Screen) {
     match screen {
         Screen::Menu { selected } => render_menu(f, *selected),
-        Screen::OnlineForm { listen, addr_or_port, secret, focused, error } => {
+        Screen::OnlineForm {
+            listen,
+            addr_or_port,
+            secret,
+            focused,
+            error,
+        } => {
             render_form(f, *listen, addr_or_port, secret, *focused, error.as_deref());
         }
     }
@@ -412,7 +433,11 @@ fn render_form(
         .split(inner);
 
     // フィールド1
-    let label1 = if listen { "待ち受けポート番号:" } else { "接続先 (host:port):" };
+    let label1 = if listen {
+        "待ち受けポート番号:"
+    } else {
+        "接続先 (host:port):"
+    };
     f.render_widget(
         Paragraph::new(Span::styled(label1, Style::default().fg(Color::Gray))),
         chunks[1],
@@ -422,7 +447,10 @@ fn render_form(
 
     // フィールド2
     f.render_widget(
-        Paragraph::new(Span::styled("共有パスワード:", Style::default().fg(Color::Gray))),
+        Paragraph::new(Span::styled(
+            "共有パスワード:",
+            Style::default().fg(Color::Gray),
+        )),
         chunks[4],
     );
     let masked = "*".repeat(secret.len());
@@ -456,9 +484,6 @@ fn input_display(value: &str, active: bool) -> (String, Style) {
                 .add_modifier(Modifier::BOLD),
         )
     } else {
-        (
-            format!("[{}]", value),
-            Style::default().fg(Color::DarkGray),
-        )
+        (format!("[{}]", value), Style::default().fg(Color::DarkGray))
     }
 }

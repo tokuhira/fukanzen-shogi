@@ -22,9 +22,10 @@ impl Board {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (Square, Piece)> + '_ {
-        self.squares.iter().enumerate().filter_map(|(i, p)| {
-            p.map(|piece| (Square::from_index(i as u8), piece))
-        })
+        self.squares
+            .iter()
+            .enumerate()
+            .filter_map(|(i, p)| p.map(|piece| (Square::from_index(i as u8), piece)))
     }
 }
 

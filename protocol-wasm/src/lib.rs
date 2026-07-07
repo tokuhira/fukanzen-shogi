@@ -85,7 +85,11 @@ impl ProtocolSession {
     /// - `secret`: 対戦相手と共有するパスワード
     #[wasm_bindgen(constructor)]
     pub fn new(side: &str, secret: &str) -> ProtocolSession {
-        let s = if side == "sente" { Side::Sente } else { Side::Gote };
+        let s = if side == "sente" {
+            Side::Sente
+        } else {
+            Side::Gote
+        };
         let my_auth_hash = hash_secret(secret.as_bytes());
         ProtocolSession {
             side: s,
@@ -146,19 +150,25 @@ impl ProtocolSession {
             Err(_) => return r#"{"ok":false,"error":"invalid_json"}"#.to_string(),
         };
         match v["type"].as_str() {
-            Some("hello")        => self.feed_hello(&v),
-            Some("commit")       => self.feed_commit(&v),
-            Some("reveal")       => self.feed_reveal(&v),
-            Some("ack")          => self.feed_ack(),
-            Some("reconnect")    => self.feed_reconnect(&v),
-            Some("reconnect_ack")=> self.feed_reconnect_ack(&v),
+            Some("hello") => self.feed_hello(&v),
+            Some("commit") => self.feed_commit(&v),
+            Some("reveal") => self.feed_reveal(&v),
+            Some("ack") => self.feed_ack(),
+            Some("reconnect") => self.feed_reconnect(&v),
+            Some("reconnect_ack") => self.feed_reconnect_ack(&v),
             Some("abort") => {
                 let reason = v["reason"].as_str().unwrap_or("unknown");
-                format!(r#"{{"ok":true,"event":"peer_aborted","reason":"{}"}}"#, reason)
+                format!(
+                    r#"{{"ok":true,"event":"peer_aborted","reason":"{}"}}"#,
+                    reason
+                )
             }
             // DO が送るシステムメッセージは JS 側が先にフィルタする想定だが念のため
-            Some("peer_joined") | Some("peer_disconnected") | Some("room_ready")
-            | Some("you_reconnected") | Some("peer_reconnected") => {
+            Some("peer_joined")
+            | Some("peer_disconnected")
+            | Some("room_ready")
+            | Some("you_reconnected")
+            | Some("peer_reconnected") => {
                 format!(r#"{{"ok":true,"event":"{}"}}"#, v["type"].as_str().unwrap())
             }
             _ => r#"{"ok":false,"error":"unknown_message_type"}"#.to_string(),
@@ -198,8 +208,14 @@ impl ProtocolSession {
         let both = t.both_committed();
         self.turn = Some(t);
 
-        let inner = format!(r#"{{"type":"commit","commitment":"{}"}}"#, to_hex(&commitment.0));
-        format!(r#"{{"ok":true,"message":{},"both_committed":{}}}"#, inner, both)
+        let inner = format!(
+            r#"{{"type":"commit","commitment":"{}"}}"#,
+            to_hex(&commitment.0)
+        );
+        format!(
+            r#"{{"ok":true,"message":{},"both_committed":{}}}"#,
+            inner, both
+        )
     }
 
     /// 両者 commit 後に reveal メッセージを生成する。返り値に送るべき reveal JSON を含む。
@@ -252,7 +268,10 @@ impl ProtocolSession {
             protocol: proto_ver,
         };
         if let Err(e) = negotiate_versions(&MY_VERSION, PeerVersionResponse::Version(peer_ver)) {
-            return format!(r#"{{"ok":false,"error":"version_mismatch","detail":"{:?}"}}"#, e);
+            return format!(
+                r#"{{"ok":false,"error":"version_mismatch","detail":"{:?}"}}"#,
+                e
+            );
         }
 
         // 本人認証: peer の auth_hash を記録（再接続時の照合に使う）
@@ -283,7 +302,10 @@ impl ProtocolSession {
             match t.receive_peer_commit(commitment) {
                 Ok(()) => {
                     let both = t.both_committed();
-                    format!(r#"{{"ok":true,"event":"peer_committed","both_committed":{}}}"#, both)
+                    format!(
+                        r#"{{"ok":true,"event":"peer_committed","both_committed":{}}}"#,
+                        both
+                    )
                 }
                 Err(e) => format!(r#"{{"ok":false,"error":"{:?}"}}"#, e),
             }
@@ -318,7 +340,10 @@ impl ProtocolSession {
         match t.receive_peer_reveal(action, Nonce(nonce_bytes), BoardHash(hash_bytes)) {
             Ok(()) => {
                 let both = t.both_revealed();
-                format!(r#"{{"ok":true,"event":"peer_revealed","both_revealed":{}}}"#, both)
+                format!(
+                    r#"{{"ok":true,"event":"peer_revealed","both_revealed":{}}}"#,
+                    both
+                )
             }
             Err(e) => format!(r#"{{"ok":false,"error":"{:?}"}}"#, e),
         }
@@ -350,12 +375,11 @@ impl ProtocolSession {
     /// 相手から届いた reconnect メッセージを受け取る。
     /// JS 側でハッシュ照合・本人確認を行うための情報を返す。
     fn feed_reconnect(&mut self, v: &serde_json::Value) -> String {
-        let auth_hash  = v["auth_hash"].as_str().unwrap_or("");
+        let auth_hash = v["auth_hash"].as_str().unwrap_or("");
         let board_hash = v["board_hash"].as_str().unwrap_or("");
         format!(
             r#"{{"ok":true,"event":"peer_reconnect_request","auth_hash":"{}","board_hash":"{}"}}"#,
-            auth_hash,
-            board_hash
+            auth_hash, board_hash
         )
     }
 

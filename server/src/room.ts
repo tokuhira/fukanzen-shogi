@@ -1,45 +1,25 @@
+import {
+  routeDecision,
+  evaluateTestimonies,
+  isValidTestimonyText,
+  buildFinalizedEnvelope,
+  buildDisputedEnvelope,
+  buildFragmentEnvelope,
+  shouldArchiveFragment,
+  canAppendTurn,
+  sha256Hex,
+  type SpectateTurn,
+  type SpectateResult,
+  type SpectateRecord,
+} from "./logic";
+
 interface Env {
   SPECTATE_TOKENS: KVNamespace;
   ARCHIVES: KVNamespace;
 }
 
-interface SpectateTurn {
-  s: string;
-  g: string;
-}
-
-interface SpectateResult {
-  kind: string;
-  outcome: string;
-}
-
-interface SpectateRecord {
-  version: unknown;
-  initial_sfen: string | null;
-  turns: SpectateTurn[];
-  result: SpectateResult | null;
-  archived: boolean;
-  recording: boolean;
-}
-
 interface Testimony {
   text: string;
-}
-
-// ルール v0.6 の最長手数（engine::terminate::MAX_TURNS）と同じ上限。悪意ある/壊れた
-// player ソケットが spectate_turn を無制限に送りつけて turns 配列を肥大化させるのを防ぐ。
-const MAX_TURNS = 500;
-
-// web/board.js の MAX_ARCHIVE_BYTES と同じ上限。record_testimony の text を書庫へ確定綴じ
-// する前のサイズ上限（KV の値サイズ上限や無駄な帯域消費を避ける）。
-const MAX_ARCHIVE_TEXT_BYTES = 512 * 1024;
-
-async function sha256Hex(text: string): Promise<string> {
-  const data = new TextEncoder().encode(text);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(digest))
-    .map(b => b.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 export class GameRoom implements DurableObject {
@@ -141,11 +121,11 @@ export class GameRoom implements DurableObject {
   }
 
   // 送信者の役割とメッセージ型で振り分ける（淀川第三歩 §1・§3.2 の秘匿境界の急所）。
-  // - player 送信の spectate_meta/turn/result → 観戦者へ fan-out ＋ 記録へ反映。
-  //   相手プレイヤーへの転送は不要（相手は自分で公開組手を知っている）。
-  // - player 送信のそれ以外（commit/reveal/ack/hello/reconnect 等）→ 相手プレイヤー
-  //   のみへ転送。観戦者へは絶対に送らない。
-  // - spectator 送信 → 一切転送しない（読み取り専用。入力は破棄）。
+  // 判定そのものは logic.ts の routeDecision（純粋関数・テスト済み）に委ねる。
+  // - "discard": 観戦者の入力。無条件破棄。
+  // - "spectate_fanout": 記録へ反映しつつ観戦者へ fan-out。
+  // - "server_handled": 招待・二証人・リセット等、DO 自身が個別に処理する。
+  // - "other_player_only": 対局チャネル（commit/reveal/ack/hello/reconnect 等）。
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     if (typeof message !== "string") return;
 
@@ -157,26 +137,17 @@ export class GameRoom implements DurableObject {
     }
     this.log(`recv type=${msg.type ?? "unknown"}`);
 
+    const isSpectator = this.state.getWebSockets("spectator").includes(ws);
+    const decision = routeDecision(isSpectator, msg.type ?? "");
+
     // 観戦者は読み取り専用。型を見るより先に、ここで無条件に破棄する（淀川第三歩
     // §1-B・§10.1）。以前は request_reset の分岐がこのチェックより先にあったため、
     // 観戦者が request_reset を送ると getWebSockets("player") 全員が
     // 「other !== ws」を満たしてしまい（観戦ソケットは player リストに元々
     // 含まれないため）、対局を強制リセットできてしまっていた。
-    if (this.state.getWebSockets("spectator").includes(ws)) return;
+    if (decision === "discard") return;
 
-    if (msg.type === "request_reset") {
-      this.log("request_reset: clearing gameStarted and closing other players");
-      void this.state.storage.delete("gameStarted");
-      for (const other of this.state.getWebSockets("player")) {
-        if (other !== ws) {
-          try { other.close(1000, "room reset"); } catch {}
-        }
-      }
-      ws.close(1000, "room reset");
-      return;
-    }
-
-    if (msg.type === "spectate_meta" || msg.type === "spectate_turn" || msg.type === "spectate_result") {
+    if (decision === "spectate_fanout") {
       await this._applyToRecord(msg);
       if (msg.type === "spectate_meta") {
         await this._issueSpectateToken();
@@ -187,29 +158,44 @@ export class GameRoom implements DurableObject {
       return;
     }
 
-    // 記録係の招待（記録係二段目 §2・§10）。対局チャネル——観戦者へは中継しない。
-    if (msg.type === "record_invite") {
-      for (const other of this.state.getWebSockets("player")) {
-        if (other !== ws) { try { other.send(message); } catch {} }
+    if (decision === "server_handled") {
+      if (msg.type === "request_reset") {
+        this.log("request_reset: clearing gameStarted and closing other players");
+        void this.state.storage.delete("gameStarted");
+        for (const other of this.state.getWebSockets("player")) {
+          if (other !== ws) {
+            try { other.close(1000, "room reset"); } catch {}
+          }
+        }
+        ws.close(1000, "room reset");
+        return;
       }
-      return;
-    }
-    if (msg.type === "record_accept") {
-      await this.state.storage.put("recording", true);
-      const payload = JSON.stringify({ type: "record_confirmed" });
-      for (const p of this.state.getWebSockets("player")) { try { p.send(payload); } catch {} }
-      for (const s of this.state.getWebSockets("spectator")) { try { s.send(payload); } catch {} }
-      return;
-    }
-    if (msg.type === "record_decline") {
-      const payload = JSON.stringify({ type: "record_declined" });
-      for (const other of this.state.getWebSockets("player")) {
-        if (other !== ws) { try { other.send(payload); } catch {} }
+
+      // 記録係の招待（記録係二段目 §2・§10）。対局チャネル——観戦者へは中継しない。
+      if (msg.type === "record_invite") {
+        for (const other of this.state.getWebSockets("player")) {
+          if (other !== ws) { try { other.send(message); } catch {} }
+        }
+        return;
       }
-      return;
-    }
-    if (msg.type === "record_testimony") {
-      await this._handleTestimony(ws, msg);
+      if (msg.type === "record_accept") {
+        await this.state.storage.put("recording", true);
+        const payload = JSON.stringify({ type: "record_confirmed" });
+        for (const p of this.state.getWebSockets("player")) { try { p.send(payload); } catch {} }
+        for (const s of this.state.getWebSockets("spectator")) { try { s.send(payload); } catch {} }
+        return;
+      }
+      if (msg.type === "record_decline") {
+        const payload = JSON.stringify({ type: "record_declined" });
+        for (const other of this.state.getWebSockets("player")) {
+          if (other !== ws) { try { other.send(payload); } catch {} }
+        }
+        return;
+      }
+      if (msg.type === "record_testimony") {
+        await this._handleTestimony(ws, msg);
+        return;
+      }
       return;
     }
 
@@ -246,8 +232,7 @@ export class GameRoom implements DurableObject {
       const recording = (await this.state.storage.get<boolean>("recording")) ?? false;
       const archived = (await this.state.storage.get<boolean>("archived")) ?? false;
       const solo = [...this._testimonies.values()][0];
-      if (recording && !archived && this._testimonies.size === 1 && solo?.text
-          && solo.text.length <= MAX_ARCHIVE_TEXT_BYTES) {
+      if (recording && !archived && this._testimonies.size === 1 && solo && isValidTestimonyText(solo.text)) {
         try {
           const id = await this._archiveFinalized(solo.text, 1);
           await this.state.storage.put("archived", true);
@@ -297,7 +282,7 @@ export class GameRoom implements DurableObject {
       this._testimonies.clear();
     } else if (msg.type === "spectate_turn") {
       const turns = (await this.state.storage.get<SpectateTurn[]>("turns")) ?? [];
-      if (turns.length < MAX_TURNS) {
+      if (canAppendTurn(turns.length)) {
         turns.push({ s: String(msg.s ?? ""), g: String(msg.g ?? "") });
         await this.state.storage.put("turns", turns);
       }
@@ -333,7 +318,9 @@ export class GameRoom implements DurableObject {
     const [a, b] = [...this._testimonies.values()];
     this._testimonies.clear();
 
-    if (!a.text || !b.text || a.text.length > MAX_ARCHIVE_TEXT_BYTES || b.text.length > MAX_ARCHIVE_TEXT_BYTES) {
+    const verdict = await evaluateTestimonies(a.text, b.text);
+
+    if (verdict.kind === "rejected") {
       // 綴じない（空・上限超過）。招待済みの放棄と同じく、後で断片綴じに
       // フォールバックしうる（_archiveCurrentIfNeeded、archived はまだ false）。
       this.log("testimony rejected: empty or oversized text");
@@ -341,17 +328,16 @@ export class GameRoom implements DurableObject {
     }
 
     try {
-      const [idA, idB] = await Promise.all([sha256Hex(a.text), sha256Hex(b.text)]);
-      if (idA === idB) {
+      if (verdict.kind === "matched") {
         // 一致: 二人の独立した目が合致した、確かな記録。
-        await this._archiveFinalized(a.text, 2);
+        await this._archiveFinalized(a.text, verdict.witnesses);
         await this.state.storage.put("archived", true);
-        this._broadcastArchived(idA);
+        this._broadcastArchived(verdict.id);
       } else {
         // 不一致: 裁定しない（審判なし＝版図）。両証言を保存し surface する。
         const id = await this._archiveDisputed([a.text, b.text]);
         await this.state.storage.put("archived", true);
-        this._broadcastRecordDisagreement(idA, idB, id);
+        this._broadcastRecordDisagreement(verdict.idA, verdict.idB, id);
       }
     } catch (err) {
       this.log(`testimony archive failed: ${String(err)}`);
@@ -365,11 +351,9 @@ export class GameRoom implements DurableObject {
   // 呼ぶ共通経路。記録係二段目 §4: 未招待は綴じずに拭いてよい（意図的な揮発）。
   private async _archiveCurrentIfNeeded(): Promise<void> {
     const recording = (await this.state.storage.get<boolean>("recording")) ?? false;
-    if (!recording) return;
     const archived = (await this.state.storage.get<boolean>("archived")) ?? false;
-    if (archived) return;
     const turns = (await this.state.storage.get<SpectateTurn[]>("turns")) ?? [];
-    if (turns.length === 0) return;
+    if (!shouldArchiveFragment(recording, archived, turns.length)) return;
 
     const record = await this._loadRecord();
     try {
@@ -386,12 +370,7 @@ export class GameRoom implements DurableObject {
   // （記録係二段目 §3）。
   private async _archiveFinalized(text: string, witnesses: number): Promise<string> {
     const id = await sha256Hex(text);
-    const envelope = {
-      finalized: true,
-      text,
-      archived_at: new Date().toISOString(),
-      witnesses,
-    };
+    const envelope = buildFinalizedEnvelope(text, witnesses);
     await this.env.ARCHIVES.put(id, JSON.stringify(envelope));
     this.log(`archived finalized id=${id} witnesses=${witnesses}`);
     return id;
@@ -401,12 +380,7 @@ export class GameRoom implements DurableObject {
   // 保存する。証拠は失わない（記録係二段目 §3）。
   private async _archiveDisputed(texts: [string, string]): Promise<string> {
     const id = crypto.randomUUID();
-    const envelope = {
-      finalized: false,
-      disputed: true,
-      texts,
-      archived_at: new Date().toISOString(),
-    };
+    const envelope = buildDisputedEnvelope(texts);
     await this.env.ARCHIVES.put(id, JSON.stringify(envelope));
     this.log(`archived disputed id=${id}`);
     return id;
@@ -415,16 +389,7 @@ export class GameRoom implements DurableObject {
   // 放棄断片: 確定していない対局を暫定 ID（ランダム UUID）で書庫へ綴じる。
   private async _archiveFragment(record: SpectateRecord): Promise<string> {
     const id = crypto.randomUUID();
-    const envelope = {
-      finalized: false,
-      record: {
-        version: record.version,
-        initial_sfen: record.initial_sfen,
-        turns: record.turns,
-        result: record.result,
-      },
-      archived_at: new Date().toISOString(),
-    };
+    const envelope = buildFragmentEnvelope(record);
     await this.env.ARCHIVES.put(id, JSON.stringify(envelope));
     this.log(`archived fragment id=${id}`);
     return id;

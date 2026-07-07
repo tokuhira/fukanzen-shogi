@@ -7,13 +7,13 @@
 /// --secret SECRET    → 共有パスワード（通信モード時に必須）
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-use std::io::{self, IsTerminal, Stdout};
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
+use std::io::{self, IsTerminal, Stdout};
 
 mod app;
 mod input;
@@ -90,19 +90,17 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> io::Result<()> {
                 let new_last = portal::LastConnection {
                     listen_port: match &config.mode {
                         ConnectMode::Listen(p) => p.to_string(),
-                        ConnectMode::Connect(_) => {
-                            last_conn.as_ref()
-                                .map(|l| l.listen_port.clone())
-                                .unwrap_or_default()
-                        }
+                        ConnectMode::Connect(_) => last_conn
+                            .as_ref()
+                            .map(|l| l.listen_port.clone())
+                            .unwrap_or_default(),
                     },
                     connect_addr: match &config.mode {
                         ConnectMode::Connect(a) => a.clone(),
-                        ConnectMode::Listen(_) => {
-                            last_conn.as_ref()
-                                .map(|l| l.connect_addr.clone())
-                                .unwrap_or_default()
-                        }
+                        ConnectMode::Listen(_) => last_conn
+                            .as_ref()
+                            .map(|l| l.connect_addr.clone())
+                            .unwrap_or_default(),
                     },
                     secret: String::from_utf8_lossy(&config.secret).to_string(),
                 };
@@ -158,21 +156,16 @@ fn parse_online_args(args: &[String]) -> Option<OnlineConfig> {
             mode: ConnectMode::Listen(port),
             secret: secret_bytes,
         })
-    } else if let Some(addr) = connect_addr {
-        Some(OnlineConfig {
+    } else {
+        connect_addr.map(|addr| OnlineConfig {
             local_side: Side::Gote,
             mode: ConnectMode::Connect(addr),
             secret: secret_bytes,
         })
-    } else {
-        None
     }
 }
 
-fn run_local(
-    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
-    app: &mut App,
-) -> io::Result<()> {
+fn run_local(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> io::Result<()> {
     loop {
         terminal.draw(|f| ui::draw(f, app))?;
 

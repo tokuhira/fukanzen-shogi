@@ -64,12 +64,10 @@ pub enum NetMessage {
     VersionHello {
         rule_major: u32,
         rule_minor: u32,
-        protocol:   u32,
+        protocol: u32,
     },
     /// プロトコル違反・ハッシュ不一致によるアボート
-    Abort {
-        reason: String,
-    },
+    Abort { reason: String },
 }
 
 /// net スレッドからメインスレッドへのイベント
@@ -102,7 +100,9 @@ pub enum NegotiationError {
 }
 
 impl From<std::io::Error> for NegotiationError {
-    fn from(e: std::io::Error) -> Self { NegotiationError::Io(e) }
+    fn from(e: std::io::Error) -> Self {
+        NegotiationError::Io(e)
+    }
 }
 
 // ─── TCP 固有: 接続確立 ───────────────────────────────────────────────────────
@@ -136,8 +136,8 @@ impl Connection {
     pub fn perform_version_negotiation(
         &mut self,
     ) -> Result<protocol::VersionCleared, NegotiationError> {
-        use std::time::Duration;
         use protocol::{negotiate_versions, PeerVersionResponse, VersionTuple, MY_VERSION};
+        use std::time::Duration;
 
         let mine = MY_VERSION;
 
@@ -145,23 +145,24 @@ impl Connection {
         self.send(&NetMessage::VersionHello {
             rule_major: mine.rule.0,
             rule_minor: mine.rule.1,
-            protocol:   mine.protocol,
+            protocol: mine.protocol,
         })?;
 
         // [transport-agnostic] 相手の版を受信（10 秒タイムアウト）
         let peer = match self.events.recv_timeout(Duration::from_secs(10)) {
-            Ok(NetEvent::Message(NetMessage::VersionHello { rule_major, rule_minor, protocol })) => {
-                PeerVersionResponse::Version(VersionTuple {
-                    rule: (rule_major, rule_minor),
-                    protocol,
-                })
-            }
-            Ok(_) => PeerVersionResponse::Invalid,   // 別メッセージ or 切断
-            Err(_) => PeerVersionResponse::Timeout,  // タイムアウト or チャネル閉鎖
+            Ok(NetEvent::Message(NetMessage::VersionHello {
+                rule_major,
+                rule_minor,
+                protocol,
+            })) => PeerVersionResponse::Version(VersionTuple {
+                rule: (rule_major, rule_minor),
+                protocol,
+            }),
+            Ok(_) => PeerVersionResponse::Invalid, // 別メッセージ or 切断
+            Err(_) => PeerVersionResponse::Timeout, // タイムアウト or チャネル閉鎖
         };
 
-        negotiate_versions(&mine, peer)
-            .map_err(NegotiationError::Negotiation)
+        negotiate_versions(&mine, peer).map_err(NegotiationError::Negotiation)
     }
 
     /// メッセージを1つ送信する（公開 API はトランスポート共通）
@@ -217,7 +218,7 @@ pub fn to_hex(bytes: &[u8]) -> String {
 }
 
 pub fn from_hex(s: &str) -> Option<Vec<u8>> {
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return None;
     }
     (0..s.len())
@@ -232,7 +233,9 @@ pub fn commitment_to_hex(c: &Commitment) -> String {
 
 pub fn commitment_from_hex(s: &str) -> Option<Commitment> {
     let v = from_hex(s)?;
-    if v.len() != 32 { return None; }
+    if v.len() != 32 {
+        return None;
+    }
     let mut arr = [0u8; 32];
     arr.copy_from_slice(&v);
     Some(Commitment(arr))
@@ -244,7 +247,9 @@ pub fn nonce_to_hex(n: &Nonce) -> String {
 
 pub fn nonce_from_hex(s: &str) -> Option<Nonce> {
     let v = from_hex(s)?;
-    if v.len() != 32 { return None; }
+    if v.len() != 32 {
+        return None;
+    }
     let mut arr = [0u8; 32];
     arr.copy_from_slice(&v);
     Some(Nonce(arr))
@@ -256,7 +261,9 @@ pub fn board_hash_to_hex(h: &BoardHash) -> String {
 
 pub fn board_hash_from_hex(s: &str) -> Option<BoardHash> {
     let v = from_hex(s)?;
-    if v.len() != 32 { return None; }
+    if v.len() != 32 {
+        return None;
+    }
     let mut arr = [0u8; 32];
     arr.copy_from_slice(&v);
     Some(BoardHash(arr))

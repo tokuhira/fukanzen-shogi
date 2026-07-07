@@ -1,7 +1,7 @@
-/// 接続時バージョン交渉（純粋論理）。
-///
-/// タイムアウトの計時・メッセージ送受信は殻（net.rs）が担い、
-/// このモジュールは「応答が来たか／不正か／一致するか」の判定だけを担う。
+//! 接続時バージョン交渉（純粋論理）。
+//!
+//! タイムアウトの計時・メッセージ送受信は殻（net.rs）が担い、
+//! このモジュールは「応答が来たか／不正か／一致するか」の判定だけを担う。
 
 /// 版のタプル。対戦互換性は (ルール版, プロトコル版) の完全一致で決まる。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,7 +73,7 @@ pub fn negotiate_versions(
 ) -> Result<VersionCleared, NegotiationOutcome> {
     match peer {
         PeerVersionResponse::Version(theirs) => {
-            let rule_mismatch     = mine.rule     != theirs.rule;
+            let rule_mismatch = mine.rule != theirs.rule;
             let protocol_mismatch = mine.protocol != theirs.protocol;
             if rule_mismatch || protocol_mismatch {
                 Err(NegotiationOutcome::Incompatible {
@@ -98,7 +98,10 @@ mod tests {
     use super::*;
 
     fn v(rule_major: u32, rule_minor: u32, protocol: u32) -> VersionTuple {
-        VersionTuple { rule: (rule_major, rule_minor), protocol }
+        VersionTuple {
+            rule: (rule_major, rule_minor),
+            protocol,
+        }
     }
 
     // §7 テスト1: 同一タプル → 互換
@@ -112,11 +115,15 @@ mod tests {
     // §7 テスト2: ルール版のみ不一致 → 非互換（rule_mismatch=true, protocol_mismatch=false）
     #[test]
     fn incompatible_rule_only() {
-        let mine  = v(0, 5, 1);
+        let mine = v(0, 5, 1);
         let theirs = v(0, 6, 1);
         match negotiate_versions(&mine, PeerVersionResponse::Version(theirs)) {
-            Err(NegotiationOutcome::Incompatible { rule_mismatch, protocol_mismatch, .. }) => {
-                assert!(rule_mismatch,      "ルール版不一致のはず");
+            Err(NegotiationOutcome::Incompatible {
+                rule_mismatch,
+                protocol_mismatch,
+                ..
+            }) => {
+                assert!(rule_mismatch, "ルール版不一致のはず");
                 assert!(!protocol_mismatch, "プロトコル版は一致のはず");
             }
             other => panic!("Incompatible を期待したが {:?}", other),
@@ -126,11 +133,15 @@ mod tests {
     // §7 テスト3: プロトコル版のみ不一致 → 非互換（rule_mismatch=false, protocol_mismatch=true）
     #[test]
     fn incompatible_protocol_only() {
-        let mine  = v(0, 5, 1);
+        let mine = v(0, 5, 1);
         let theirs = v(0, 5, 2);
         match negotiate_versions(&mine, PeerVersionResponse::Version(theirs)) {
-            Err(NegotiationOutcome::Incompatible { rule_mismatch, protocol_mismatch, .. }) => {
-                assert!(!rule_mismatch,    "ルール版は一致のはず");
+            Err(NegotiationOutcome::Incompatible {
+                rule_mismatch,
+                protocol_mismatch,
+                ..
+            }) => {
+                assert!(!rule_mismatch, "ルール版は一致のはず");
                 assert!(protocol_mismatch, "プロトコル版不一致のはず");
             }
             other => panic!("Incompatible を期待したが {:?}", other),
@@ -140,11 +151,15 @@ mod tests {
     // §7 テスト4: 両方不一致 → 非互換（両フラグ true）
     #[test]
     fn incompatible_both() {
-        let mine  = v(0, 5, 1);
+        let mine = v(0, 5, 1);
         let theirs = v(0, 6, 2);
         match negotiate_versions(&mine, PeerVersionResponse::Version(theirs)) {
-            Err(NegotiationOutcome::Incompatible { rule_mismatch, protocol_mismatch, .. }) => {
-                assert!(rule_mismatch,     "ルール版不一致のはず");
+            Err(NegotiationOutcome::Incompatible {
+                rule_mismatch,
+                protocol_mismatch,
+                ..
+            }) => {
+                assert!(rule_mismatch, "ルール版不一致のはず");
                 assert!(protocol_mismatch, "プロトコル版不一致のはず");
             }
             other => panic!("Incompatible を期待したが {:?}", other),
@@ -154,11 +169,13 @@ mod tests {
     // §7 テスト5: 非互換の返り値に両者の版が含まれる（更新案内・寄せ先は含まない）
     #[test]
     fn incompatible_contains_both_versions() {
-        let mine  = v(0, 5, 1);
+        let mine = v(0, 5, 1);
         let theirs = v(0, 6, 2);
         match negotiate_versions(&mine, PeerVersionResponse::Version(theirs.clone())) {
-            Err(NegotiationOutcome::Incompatible { mine: m, theirs: t, .. }) => {
-                assert_eq!(m, mine,   "自分の版が含まれるはず");
+            Err(NegotiationOutcome::Incompatible {
+                mine: m, theirs: t, ..
+            }) => {
+                assert_eq!(m, mine, "自分の版が含まれるはず");
                 assert_eq!(t, theirs, "相手の版が含まれるはず");
                 // 「どちらに更新せよ」等の案内は含まない（構造体に持たない）
             }

@@ -1,15 +1,15 @@
+use crate::app::{
+    game_over_text, piece_kind_ja, App, ClickAreas, FocusArea, GameOverKind, InputMode,
+    OnlineProtocolPhase, Phase, Selection, HAND_KINDS,
+};
+use engine::board::Hand;
+use engine::types::{PieceKind, Side, Square};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
     Frame,
-};
-use engine::board::Hand;
-use engine::types::{PieceKind, Side, Square};
-use crate::app::{
-    App, ClickAreas, FocusArea, GameOverKind, InputMode, OnlineProtocolPhase, Phase, Selection,
-    game_over_text, piece_kind_ja, HAND_KINDS,
 };
 
 // ─── 全画面描画エントリ ───────────────────────────────────────────────────────
@@ -27,22 +27,19 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     ])
     .split(area);
 
-    let main_area    = vchunks[0];
-    let status_area  = vchunks[1];
+    let main_area = vchunks[0];
+    let status_area = vchunks[1];
     let pending_area = vchunks[2];
-    let msg_area     = vchunks[3];
-    let help_area    = vchunks[4];
+    let msg_area = vchunks[3];
+    let help_area = vchunks[4];
 
     // 横分割: 盤面 | 情報パネル
     let board_panel_w = 33u16;
-    let hchunks = Layout::horizontal([
-        Constraint::Length(board_panel_w),
-        Constraint::Min(1),
-    ])
-    .split(main_area);
+    let hchunks = Layout::horizontal([Constraint::Length(board_panel_w), Constraint::Min(1)])
+        .split(main_area);
 
     let board_area = hchunks[0];
-    let info_area  = hchunks[1];
+    let info_area = hchunks[1];
 
     // ─── クリック領域を毎フレーム更新 ────────────────────────────────────────
     app.click_areas = ClickAreas::default();
@@ -56,13 +53,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if matches!(app.phase, Phase::PromotionChoice { .. }) {
         let pw = 38u16.min(area.width.saturating_sub(4));
         let pp = centered_rect(pw, 5, area);
-        let ix  = pp.x + 1;
-        let iy  = pp.y + 1;
-        let iw  = pp.width.saturating_sub(2);
+        let ix = pp.x + 1;
+        let iy = pp.y + 1;
+        let iw = pp.width.saturating_sub(2);
         let btn_y = iy + 1; // inner row 0 = blank、row 1 = ボタン行
         let half = iw / 2;
-        app.click_areas.promote_yes = Some(Rect::new(ix,        btn_y, half,      1));
-        app.click_areas.promote_no  = Some(Rect::new(ix + half, btn_y, iw - half, 1));
+        app.click_areas.promote_yes = Some(Rect::new(ix, btn_y, half, 1));
+        app.click_areas.promote_no = Some(Rect::new(ix + half, btn_y, iw - half, 1));
     }
 
     // ゲームオーバーポップアップのボタン行
@@ -71,16 +68,20 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         if app.online_status.is_some() {
             // オンライン: h=6、[q] のみ（inner row 3）
             let pp = centered_rect(pw, 6, area);
-            let ix = pp.x + 1; let iy = pp.y + 1; let iw = pp.width.saturating_sub(2);
+            let ix = pp.x + 1;
+            let iy = pp.y + 1;
+            let iw = pp.width.saturating_sub(2);
             app.click_areas.gameover_undo = None;
-            app.click_areas.gameover_new  = None;
+            app.click_areas.gameover_new = None;
             app.click_areas.gameover_quit = Some(Rect::new(ix, iy + 3, iw, 1));
         } else {
             // ローカル: h=8、[u]/[n]/[q]（inner rows 3/4/5）
             let pp = centered_rect(pw, 8, area);
-            let ix = pp.x + 1; let iy = pp.y + 1; let iw = pp.width.saturating_sub(2);
+            let ix = pp.x + 1;
+            let iy = pp.y + 1;
+            let iw = pp.width.saturating_sub(2);
             app.click_areas.gameover_undo = Some(Rect::new(ix, iy + 3, iw, 1));
-            app.click_areas.gameover_new  = Some(Rect::new(ix, iy + 4, iw, 1));
+            app.click_areas.gameover_new = Some(Rect::new(ix, iy + 4, iw, 1));
             app.click_areas.gameover_quit = Some(Rect::new(ix, iy + 5, iw, 1));
         }
     }
@@ -90,7 +91,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         let pos = app.current_pos();
         let bix = board_area.x + 1; // board ブロック inner の x
         let biy = board_area.y + 1; // board ブロック inner の y
-        app.click_areas.gote_hand  = hand_piece_rects(&pos.hand_gote,  bix, biy);
+        app.click_areas.gote_hand = hand_piece_rects(&pos.hand_gote, bix, biy);
         app.click_areas.sente_hand = hand_piece_rects(&pos.hand_sente, bix, biy + 11);
     }
 
@@ -125,7 +126,9 @@ fn hand_piece_rects(hand: &Hand, base_x: u16, base_y: u16) -> Vec<(Rect, PieceKi
     let mut v = Vec::new();
     for kind in HAND_KINDS.iter().copied() {
         let cnt = hand.count(kind);
-        if cnt == 0 { continue; }
+        if cnt == 0 {
+            continue;
+        }
         // cnt>1 → "{漢字}{数字} " = 4 cols、cnt==1 → "{漢字} " = 3 cols
         let w = if cnt > 1 { 4u16 } else { 3u16 };
         v.push((Rect::new(x, base_y, w, 1), kind));
@@ -164,12 +167,10 @@ fn render_board(f: &mut Frame, app: &mut App, area: Rect) {
     // 盤面行
     for rank in 1u8..=9 {
         let rank_char = (b'a' + rank - 1) as char;
-        let mut spans: Vec<Span> = vec![
-            Span::styled(
-                format!("{} ", rank_char),
-                Style::default().fg(Color::DarkGray),
-            ),
-        ];
+        let mut spans: Vec<Span> = vec![Span::styled(
+            format!("{} ", rank_char),
+            Style::default().fg(Color::DarkGray),
+        )];
 
         for file in (1u8..=9).rev() {
             let sq = Square::new(file, rank);
@@ -229,7 +230,7 @@ fn cell_style(is_cursor: bool, is_from: bool, is_highlight: bool, piece_fg: Colo
 fn hand_line<'a>(hand: &Hand, side: Side, app: &'a App) -> Line<'a> {
     let label = match side {
         Side::Sente => "先手持駒: ",
-        Side::Gote  => "後手持駒: ",
+        Side::Gote => "後手持駒: ",
     };
     let label_style = Style::default().add_modifier(Modifier::BOLD);
     let mut spans: Vec<Span<'a>> = vec![Span::styled(label.to_string(), label_style)];
@@ -242,8 +243,8 @@ fn hand_line<'a>(hand: &Hand, side: Side, app: &'a App) -> Line<'a> {
         if cnt == 0 {
             continue;
         }
-        let is_selected = is_current_side
-            && matches!(&app.selection, Selection::HandPiece(k) if *k == kind);
+        let is_selected =
+            is_current_side && matches!(&app.selection, Selection::HandPiece(k) if *k == kind);
 
         let text = if cnt > 1 {
             format!("{}{} ", piece_kind_ja(kind), cnt)
@@ -267,7 +268,10 @@ fn hand_line<'a>(hand: &Hand, side: Side, app: &'a App) -> Line<'a> {
         any = true;
     }
     if !any {
-        spans.push(Span::styled("なし".to_string(), Style::default().fg(Color::DarkGray)));
+        spans.push(Span::styled(
+            "なし".to_string(),
+            Style::default().fg(Color::DarkGray),
+        ));
     }
 
     // 駒台フォーカス中の表示
@@ -291,7 +295,9 @@ fn render_info(f: &mut Frame, app: &App, area: Rect) {
     if !app.last_resolution.is_empty() {
         lines.push(Line::from(Span::styled(
             "◀ 直前の解決 ▶",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         )));
         for text in &app.last_resolution {
             lines.push(Line::from(Span::raw(text.clone())));
@@ -310,9 +316,7 @@ fn render_info(f: &mut Frame, app: &App, area: Rect) {
         let w = inner.width.saturating_sub(1) as usize;
         if w > 0 {
             for chunk in sfen.as_bytes().chunks(w.max(1)) {
-                lines.push(Line::raw(
-                    String::from_utf8_lossy(chunk).to_string(),
-                ));
+                lines.push(Line::raw(String::from_utf8_lossy(chunk).to_string()));
             }
         } else {
             lines.push(Line::raw(sfen.clone()));
@@ -323,7 +327,10 @@ fn render_info(f: &mut Frame, app: &App, area: Rect) {
     // 合法手一覧
     if app.show_all_moves {
         let side = app.current_side().unwrap_or(Side::Sente);
-        let label = match side { Side::Sente => "先手", Side::Gote => "後手" };
+        let label = match side {
+            Side::Sente => "先手",
+            Side::Gote => "後手",
+        };
         lines.push(Line::from(Span::styled(
             format!("{} 合法手 ({}手):", label, app.all_moves_text.len()),
             Style::default().add_modifier(Modifier::BOLD),
@@ -356,19 +363,33 @@ fn render_status(f: &mut Frame, app: &App, area: Rect) {
     if let Some(ref os) = app.online_status {
         let side_label = match os.local_side {
             Side::Sente => "先手",
-            Side::Gote  => "後手",
+            Side::Gote => "後手",
         };
         let (conn_sym, conn_style) = if os.connected {
-            ("●", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+            (
+                "●",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            )
         } else {
-            ("✗", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+            (
+                "✗",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            )
         };
-        let conn_label = if os.connected { "接続中" } else { "切断中" };
+        let conn_label = if os.connected {
+            "接続中"
+        } else {
+            "切断中"
+        };
 
         let (proto_text, proto_style) = match &os.protocol {
             OnlineProtocolPhase::MyTurn => (
                 "着手を入力してください".to_string(),
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
             ),
             OnlineProtocolPhase::PeerCommitPending => (
                 "コミット送信済 — 相手のコミット待ち".to_string(),
@@ -398,7 +419,9 @@ fn render_status(f: &mut Frame, app: &App, area: Rect) {
                 Span::styled("◆ ", Style::default().fg(Color::DarkGray)),
                 Span::styled(
                     format!("対局終了: {}", game_over_text(kind)),
-                    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD),
                 ),
             ]);
             f.render_widget(Paragraph::new(line), area);
@@ -406,25 +429,40 @@ fn render_status(f: &mut Frame, app: &App, area: Rect) {
         }
 
         // 再接続成功通知が期限内なら優先表示
-        let notice_active = os.reconnect_notice_until
+        let notice_active = os
+            .reconnect_notice_until
             .map(|t| t > std::time::Instant::now())
             .unwrap_or(false);
 
         let line = if notice_active {
             Line::from(vec![
-                Span::styled(format!("[{} ", side_label), Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("[{} ", side_label),
+                    Style::default().fg(Color::DarkGray),
+                ),
                 Span::styled(conn_sym.to_string(), conn_style),
-                Span::styled(format!(" {}]  ", conn_label), Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!(" {}]  ", conn_label),
+                    Style::default().fg(Color::DarkGray),
+                ),
                 Span::styled(
                     "再接続しました".to_string(),
-                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
                 ),
             ])
         } else {
             Line::from(vec![
-                Span::styled(format!("[{} ", side_label), Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("[{} ", side_label),
+                    Style::default().fg(Color::DarkGray),
+                ),
                 Span::styled(conn_sym.to_string(), conn_style),
-                Span::styled(format!(" {}]  ", conn_label), Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!(" {}]  ", conn_label),
+                    Style::default().fg(Color::DarkGray),
+                ),
                 Span::styled(proto_text, proto_style),
             ])
         };
@@ -436,26 +474,40 @@ fn render_status(f: &mut Frame, app: &App, area: Rect) {
     let (phase_text, phase_style) = match &app.phase {
         Phase::SenteInput => (
             "先手 入力中".to_string(),
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         ),
         Phase::GoteInput => (
             "後手 入力中".to_string(),
-            Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::LightRed)
+                .add_modifier(Modifier::BOLD),
         ),
         Phase::PromotionChoice { side, .. } => {
-            let label = match side { Side::Sente => "先手", Side::Gote => "後手" };
+            let label = match side {
+                Side::Sente => "先手",
+                Side::Gote => "後手",
+            };
             (
                 format!("{} 成り選択中", label),
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
             )
         }
         Phase::ResolveReady => (
             "▶ 両着手を同時解決 — Enter またはクリック".to_string(),
-            Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Green)
+                .add_modifier(Modifier::BOLD),
         ),
         Phase::GameOver(kind) => (
             format!("対局終了: {}", game_over_text(kind)),
-            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
         ),
     };
 
@@ -470,31 +522,44 @@ fn render_status(f: &mut Frame, app: &App, area: Rect) {
 
 fn render_pending(f: &mut Frame, app: &App, area: Rect) {
     // オンラインモード: ピアの着手は reveal 前は ??? で秘匿
-    let (sente_str, sente_hidden, gote_str, gote_hidden) =
-        if let Some(ref os) = app.online_status {
-            let peer_revealed = os.peer_revealed;
-            let peer_placeholder = if peer_revealed { "未入力" } else { "???" };
-            match os.local_side {
-                Side::Sente => {
-                    let s = app.sente_action.map(|a| a.to_usi())
-                        .unwrap_or_else(|| "未入力".to_string());
-                    let g = app.gote_action.map(|a| a.to_usi())
-                        .unwrap_or_else(|| peer_placeholder.to_string());
-                    (s, false, g, !peer_revealed && app.gote_action.is_none())
-                }
-                Side::Gote => {
-                    let s = app.sente_action.map(|a| a.to_usi())
-                        .unwrap_or_else(|| peer_placeholder.to_string());
-                    let g = app.gote_action.map(|a| a.to_usi())
-                        .unwrap_or_else(|| "未入力".to_string());
-                    (s, !peer_revealed && app.sente_action.is_none(), g, false)
-                }
+    let (sente_str, sente_hidden, gote_str, gote_hidden) = if let Some(ref os) = app.online_status {
+        let peer_revealed = os.peer_revealed;
+        let peer_placeholder = if peer_revealed { "未入力" } else { "???" };
+        match os.local_side {
+            Side::Sente => {
+                let s = app
+                    .sente_action
+                    .map(|a| a.to_usi())
+                    .unwrap_or_else(|| "未入力".to_string());
+                let g = app
+                    .gote_action
+                    .map(|a| a.to_usi())
+                    .unwrap_or_else(|| peer_placeholder.to_string());
+                (s, false, g, !peer_revealed && app.gote_action.is_none())
             }
-        } else {
-            let s = app.sente_action.map(|a| a.to_usi()).unwrap_or_else(|| "未入力".to_string());
-            let g = app.gote_action.map(|a| a.to_usi()).unwrap_or_else(|| "未入力".to_string());
-            (s, false, g, false)
-        };
+            Side::Gote => {
+                let s = app
+                    .sente_action
+                    .map(|a| a.to_usi())
+                    .unwrap_or_else(|| peer_placeholder.to_string());
+                let g = app
+                    .gote_action
+                    .map(|a| a.to_usi())
+                    .unwrap_or_else(|| "未入力".to_string());
+                (s, !peer_revealed && app.sente_action.is_none(), g, false)
+            }
+        }
+    } else {
+        let s = app
+            .sente_action
+            .map(|a| a.to_usi())
+            .unwrap_or_else(|| "未入力".to_string());
+        let g = app
+            .gote_action
+            .map(|a| a.to_usi())
+            .unwrap_or_else(|| "未入力".to_string());
+        (s, false, g, false)
+    };
 
     let hidden_style = Style::default().fg(Color::DarkGray);
     let line1 = Line::from(vec![
@@ -521,7 +586,10 @@ fn render_pending(f: &mut Frame, app: &App, area: Rect) {
         ),
         FocusArea::Hand => "駒台選択中 (←→で駒種切替、Enter確定、Esc中止)".to_string(),
     };
-    let line2 = Line::from(Span::styled(cursor_info, Style::default().fg(Color::DarkGray)));
+    let line2 = Line::from(Span::styled(
+        cursor_info,
+        Style::default().fg(Color::DarkGray),
+    ));
 
     f.render_widget(Paragraph::new(Text::from(vec![line1, line2])), area);
 }
@@ -551,7 +619,8 @@ fn render_message(f: &mut Frame, app: &App, area: Rect) {
 // ─── ヘルプ短縮バー ──────────────────────────────────────────────────────────
 
 fn render_help_bar(f: &mut Frame, area: Rect) {
-    let help = "[q]終了 [u]戻す [r]投了 [d/Tab]駒台 [s/S]保存 [l/L]読込 [f]SFEN [m]合法手 [?]ヘルプ";
+    let help =
+        "[q]終了 [u]戻す [r]投了 [d/Tab]駒台 [s/S]保存 [l/L]読込 [f]SFEN [m]合法手 [?]ヘルプ";
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(
             help,
@@ -592,7 +661,10 @@ fn render_promotion_popup(f: &mut Frame, area: Rect) {
     let btn_line = Line::from(vec![
         Span::styled(
             " 成る (y/p) ",
-            Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Green)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::raw("    "),
         Span::styled(
@@ -635,7 +707,10 @@ fn render_game_over_popup(f: &mut Frame, kind: &GameOverKind, area: Rect, online
             Line::raw(""),
             Line::from(Span::styled(game_over_text(kind).to_string(), result_style)),
             Line::raw(""),
-            Line::from(Span::styled("  [q] ポータルへ戻る", Style::default().fg(Color::DarkGray))),
+            Line::from(Span::styled(
+                "  [q] ポータルへ戻る",
+                Style::default().fg(Color::DarkGray),
+            )),
         ]
     } else {
         let btn = |arrow: &'static str, color: Color, text: &'static str| {
@@ -649,8 +724,11 @@ fn render_game_over_popup(f: &mut Frame, kind: &GameOverKind, area: Rect, online
             Line::from(Span::styled(game_over_text(kind).to_string(), result_style)),
             Line::raw(""),
             btn("▶ ", Color::Green, "[u] 最後の手を取り消して続行"),
-            btn("▶ ", Color::Cyan,  "[n] 新規対局"),
-            Line::from(Span::styled("  [q] 終了", Style::default().fg(Color::DarkGray))),
+            btn("▶ ", Color::Cyan, "[n] 新規対局"),
+            Line::from(Span::styled(
+                "  [q] 終了",
+                Style::default().fg(Color::DarkGray),
+            )),
         ]
     };
     f.render_widget(Paragraph::new(Text::from(lines)), inner);
@@ -675,7 +753,9 @@ fn render_help_popup(f: &mut Frame, area: Rect) {
     let heading = |s: &'static str| {
         Line::from(Span::styled(
             s,
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         ))
     };
     let item = |s: &'static str| Line::from(Span::raw(s));

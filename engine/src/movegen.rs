@@ -12,12 +12,7 @@ use crate::types::{Action, Piece, PieceKind, Side, Square};
 
 /// (dfile, drank) の差分を繰り返し走る「走り駒」の利きを収集する。
 /// 障害物（味方・相手）で止まる。相手駒は利き範囲に含める（取れる）。
-fn slide_attacks(
-    pos: &Position,
-    from: Square,
-    dirs: &[(i8, i8)],
-    side: Side,
-) -> Vec<Square> {
+fn slide_attacks(pos: &Position, from: Square, dirs: &[(i8, i8)], side: Side) -> Vec<Square> {
     let mut result = Vec::new();
     for &(df, dr) in dirs {
         let mut f = from.file() as i8 + df;
@@ -44,12 +39,7 @@ fn slide_attacks(
 }
 
 /// 1マス移動の利きを収集する。
-fn step_attacks(
-    pos: &Position,
-    from: Square,
-    dirs: &[(i8, i8)],
-    side: Side,
-) -> Vec<Square> {
+fn step_attacks(pos: &Position, from: Square, dirs: &[(i8, i8)], side: Side) -> Vec<Square> {
     let mut result = Vec::new();
     for &(df, dr) in dirs {
         let f = from.file() as i8 + df;
@@ -80,13 +70,7 @@ pub fn piece_attacks(pos: &Position, sq: Square, piece: Piece) -> Vec<Square> {
         PieceKind::Silver => step_attacks(
             pos,
             sq,
-            &[
-                (0, fwd),
-                (-1, fwd),
-                (1, fwd),
-                (-1, -fwd),
-                (1, -fwd),
-            ],
+            &[(0, fwd), (-1, fwd), (1, fwd), (-1, -fwd), (1, -fwd)],
             side,
         ),
         PieceKind::Gold
@@ -102,15 +86,17 @@ pub fn piece_attacks(pos: &Position, sq: Square, piece: Piece) -> Vec<Square> {
         PieceKind::Bishop => slide_attacks(pos, sq, &[(-1, -1), (1, -1), (-1, 1), (1, 1)], side),
         PieceKind::Horse => {
             let mut v = slide_attacks(pos, sq, &[(-1, -1), (1, -1), (-1, 1), (1, 1)], side);
-            v.extend(step_attacks(pos, sq, &[(0, 1), (0, -1), (-1, 0), (1, 0)], side));
+            v.extend(step_attacks(
+                pos,
+                sq,
+                &[(0, 1), (0, -1), (-1, 0), (1, 0)],
+                side,
+            ));
             v
         }
-        PieceKind::Rook => {
-            slide_attacks(pos, sq, &[(-1, 0), (1, 0), (0, -1), (0, 1)], side)
-        }
+        PieceKind::Rook => slide_attacks(pos, sq, &[(-1, 0), (1, 0), (0, -1), (0, 1)], side),
         PieceKind::Dragon => {
-            let mut v =
-                slide_attacks(pos, sq, &[(-1, 0), (1, 0), (0, -1), (0, 1)], side);
+            let mut v = slide_attacks(pos, sq, &[(-1, 0), (1, 0), (0, -1), (0, 1)], side);
             v.extend(step_attacks(
                 pos,
                 sq,
@@ -170,9 +156,9 @@ pub fn is_in_check(pos: &Position, side: Side) -> bool {
         return false;
     };
     let opp = side.opposite();
-    pos.board.iter().any(|(sq, piece)| {
-        piece.side == opp && piece_attacks(pos, sq, piece).contains(&king_sq)
-    })
+    pos.board
+        .iter()
+        .any(|(sq, piece)| piece.side == opp && piece_attacks(pos, sq, piece).contains(&king_sq))
 }
 
 // -------------------------------------------------------------------------
@@ -196,8 +182,7 @@ fn pseudo_moves(pos: &Position, side: Side) -> Vec<Action> {
                     sq.rank() >= 7
                 }
             };
-            let can_promo = piece.kind.can_promote()
-                && (in_promo_zone(from) || in_promo_zone(to));
+            let can_promo = piece.kind.can_promote() && (in_promo_zone(from) || in_promo_zone(to));
 
             // 行き所のない駒（移動先が行き所のないマス）→ 成りを強制
             let must_promo = must_promote(piece.kind, side, to);
@@ -356,7 +341,11 @@ pub fn legal_actions(pos: &Position, side: Side) -> Vec<Action> {
                 return false;
             }
             // 打ち歩詰めの禁止（歩の打ちのみ追加チェック）
-            if let Action::Drop { kind: PieceKind::Pawn, to } = action {
+            if let Action::Drop {
+                kind: PieceKind::Pawn,
+                to,
+            } = action
+            {
                 if is_uchi_fu_dzume(pos, side, to) {
                     return false;
                 }
@@ -385,11 +374,20 @@ mod tests {
     fn king_cannot_move_into_check() {
         // 先手玉が後手飛の利きに侵入できないことを確認
         let mut pos = empty_pos();
-        pos.board.set(Square::new(5, 5), Some(Piece::new(PieceKind::King, Side::Sente)));
+        pos.board.set(
+            Square::new(5, 5),
+            Some(Piece::new(PieceKind::King, Side::Sente)),
+        );
         // 後手飛を5段に置く → 5段全マスに利き
-        pos.board.set(Square::new(1, 1), Some(Piece::new(PieceKind::Rook, Side::Gote)));
+        pos.board.set(
+            Square::new(1, 1),
+            Some(Piece::new(PieceKind::Rook, Side::Gote)),
+        );
         // 後手玉（必要）
-        pos.board.set(Square::new(9, 9), Some(Piece::new(PieceKind::King, Side::Gote)));
+        pos.board.set(
+            Square::new(9, 9),
+            Some(Piece::new(PieceKind::King, Side::Gote)),
+        );
 
         let actions = legal_actions(&pos, Side::Sente);
         // 玉が飛の利き（1段、1筋）へ侵入する手が無いことを確認（詳細は各手の行き先で検証）
@@ -406,15 +404,24 @@ mod tests {
     fn no_nifu() {
         // 二歩のチェック: 5筋に先手の歩がいる状態で歩を5筋に打てないこと
         let mut pos = empty_pos();
-        pos.board.set(Square::new(5, 9), Some(Piece::new(PieceKind::King, Side::Sente)));
-        pos.board.set(Square::new(5, 1), Some(Piece::new(PieceKind::King, Side::Gote)));
-        pos.board.set(Square::new(5, 7), Some(Piece::new(PieceKind::Pawn, Side::Sente)));
+        pos.board.set(
+            Square::new(5, 9),
+            Some(Piece::new(PieceKind::King, Side::Sente)),
+        );
+        pos.board.set(
+            Square::new(5, 1),
+            Some(Piece::new(PieceKind::King, Side::Gote)),
+        );
+        pos.board.set(
+            Square::new(5, 7),
+            Some(Piece::new(PieceKind::Pawn, Side::Sente)),
+        );
         pos.hand_sente.add(PieceKind::Pawn);
 
         let actions = legal_actions(&pos, Side::Sente);
-        let nifu = actions.iter().any(|a| {
-            matches!(a, Action::Drop { kind: PieceKind::Pawn, to } if to.file() == 5)
-        });
+        let nifu = actions
+            .iter()
+            .any(|a| matches!(a, Action::Drop { kind: PieceKind::Pawn, to } if to.file() == 5));
         assert!(!nifu, "二歩が合法手に現れた");
     }
 
@@ -425,21 +432,30 @@ mod tests {
     #[test]
     fn sengoku_musou_backed_prevents_king_move() {
         let mut pos = empty_pos();
-        let king_sq   = Square::new(5, 5); // 先手玉 5五
+        let king_sq = Square::new(5, 5); // 先手玉 5五
         let silver_sq = Square::new(5, 4); // 後手銀 5四
-        let rook_sq   = Square::new(9, 4); // 後手飛 9四 → 5四（銀）を横から支える
+        let rook_sq = Square::new(9, 4); // 後手飛 9四 → 5四（銀）を横から支える
 
-        pos.board.set(king_sq,   Some(Piece::new(PieceKind::King,   Side::Sente)));
-        pos.board.set(silver_sq, Some(Piece::new(PieceKind::Silver, Side::Gote)));
-        pos.board.set(rook_sq,   Some(Piece::new(PieceKind::Rook,   Side::Gote)));
-        pos.board.set(Square::new(9, 1), Some(Piece::new(PieceKind::King, Side::Gote)));
+        pos.board
+            .set(king_sq, Some(Piece::new(PieceKind::King, Side::Sente)));
+        pos.board
+            .set(silver_sq, Some(Piece::new(PieceKind::Silver, Side::Gote)));
+        pos.board
+            .set(rook_sq, Some(Piece::new(PieceKind::Rook, Side::Gote)));
+        pos.board.set(
+            Square::new(9, 1),
+            Some(Piece::new(PieceKind::King, Side::Gote)),
+        );
 
         let actions = legal_actions(&pos, Side::Sente);
         // 5四は後手飛の利きに入るため、玉の 5五→5四 は合法手に現れない
-        let king_to_silver = actions.iter().any(|a| {
-            matches!(a, Action::Move { from, to, .. } if *from == king_sq && *to == silver_sq)
-        });
-        assert!(!king_to_silver, "後ろ盾のある 5四 への玉の手が合法手に現れた");
+        let king_to_silver = actions.iter().any(
+            |a| matches!(a, Action::Move { from, to, .. } if *from == king_sq && *to == silver_sq),
+        );
+        assert!(
+            !king_to_silver,
+            "後ろ盾のある 5四 への玉の手が合法手に現れた"
+        );
     }
 
     /// テスト v0.5-approach: 両玉が3段離れた状態から互いに歩み寄る手は双方合法
@@ -449,24 +465,30 @@ mod tests {
         let mut pos = empty_pos();
         let sk = Square::new(5, 7); // 先手玉 5七
         let gk = Square::new(5, 4); // 後手玉 5四（3段離れている）
-        pos.board.set(sk, Some(Piece::new(PieceKind::King, Side::Sente)));
-        pos.board.set(gk, Some(Piece::new(PieceKind::King, Side::Gote)));
+        pos.board
+            .set(sk, Some(Piece::new(PieceKind::King, Side::Sente)));
+        pos.board
+            .set(gk, Some(Piece::new(PieceKind::King, Side::Gote)));
 
         // 着手開始時点: 各々の移動先は相手玉の利きの外にある
         // 先手玉 5七→5六: 5六は後手玉 5四 の利き範囲外
         // 後手玉 5四→5五: 5五は先手玉 5七 の利き範囲外
         let sente_target = Square::new(5, 6);
-        let gote_target  = Square::new(5, 5);
+        let gote_target = Square::new(5, 5);
 
         let sente_actions = legal_actions(&pos, Side::Sente);
-        let gote_actions  = legal_actions(&pos, Side::Gote);
+        let gote_actions = legal_actions(&pos, Side::Gote);
 
         assert!(
-            sente_actions.iter().any(|a| matches!(a, Action::Move { from, to, .. } if *from == sk && *to == sente_target)),
+            sente_actions.iter().any(
+                |a| matches!(a, Action::Move { from, to, .. } if *from == sk && *to == sente_target)
+            ),
             "先手玉の 5七→5六 が合法手に現れない"
         );
         assert!(
-            gote_actions.iter().any(|a| matches!(a, Action::Move { from, to, .. } if *from == gk && *to == gote_target)),
+            gote_actions.iter().any(
+                |a| matches!(a, Action::Move { from, to, .. } if *from == gk && *to == gote_target)
+            ),
             "後手玉の 5四→5五 が合法手に現れない"
         );
         // 双方が歩み寄ると 5六 と 5五 で隣接（差は1段）
@@ -482,21 +504,28 @@ mod tests {
         let sk = Square::new(5, 6); // 先手玉 5六（裸）
         let gk = Square::new(5, 5); // 後手玉 5五（隣接）
         let gr = Square::new(1, 5); // 後手飛 1五 → 5五（後手玉）を横から後ろ盾
-        pos.board.set(sk, Some(Piece::new(PieceKind::King, Side::Sente)));
-        pos.board.set(gk, Some(Piece::new(PieceKind::King, Side::Gote)));
-        pos.board.set(gr, Some(Piece::new(PieceKind::Rook, Side::Gote)));
+        pos.board
+            .set(sk, Some(Piece::new(PieceKind::King, Side::Sente)));
+        pos.board
+            .set(gk, Some(Piece::new(PieceKind::King, Side::Gote)));
+        pos.board
+            .set(gr, Some(Piece::new(PieceKind::Rook, Side::Gote)));
 
         let sente_actions = legal_actions(&pos, Side::Sente);
-        let gote_actions  = legal_actions(&pos, Side::Gote);
+        let gote_actions = legal_actions(&pos, Side::Gote);
 
         // 先手玉の 5六→5五 は不可（後手飛の利きで守られている）
         assert!(
-            !sente_actions.iter().any(|a| matches!(a, Action::Move { from, to, .. } if *from == sk && *to == gk)),
+            !sente_actions
+                .iter()
+                .any(|a| matches!(a, Action::Move { from, to, .. } if *from == sk && *to == gk)),
             "後ろ盾のある 5五 への先手玉の手が合法手に現れた"
         );
         // 後手玉の 5五→5六 は可能（先手玉の後ろ盾なし → 戦国無双で一方的に取れる）
         assert!(
-            gote_actions.iter().any(|a| matches!(a, Action::Move { from, to, .. } if *from == gk && *to == sk)),
+            gote_actions
+                .iter()
+                .any(|a| matches!(a, Action::Move { from, to, .. } if *from == gk && *to == sk)),
             "後手玉の 5五→5六（先手玉取得）が合法手に現れない"
         );
     }
@@ -507,6 +536,11 @@ mod tests {
         let pos = Position::initial();
         let actions = legal_actions(&pos, Side::Sente);
         // 初期局面: 歩9手 + 角0手 + 飛0手 + 桂2手 = 30手
-        assert_eq!(actions.len(), 30, "initial sente legal actions: {:?}", actions.len());
+        assert_eq!(
+            actions.len(),
+            30,
+            "initial sente legal actions: {:?}",
+            actions.len()
+        );
     }
 }

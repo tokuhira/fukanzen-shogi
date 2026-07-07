@@ -99,7 +99,7 @@ impl PieceKind {
             PieceKind::Bishop => 'B',
             PieceKind::Rook => 'R',
             PieceKind::King => 'K',
-            PieceKind::ProPawn => 'P',   // +P と表記するので基本文字
+            PieceKind::ProPawn => 'P', // +P と表記するので基本文字
             PieceKind::ProLance => 'L',
             PieceKind::ProKnight => 'N',
             PieceKind::ProSilver => 'S',

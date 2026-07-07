@@ -35,9 +35,9 @@ This design rests on three structural goals:
 
 **King safety** becomes probabilistic. A king may not move to a square currently attacked by the opponent (the traditional prohibition is preserved at the moment of commitment). However, since the opponent also moves simultaneously, a square that was safe at commitment time may be occupied or attacked by move-end. A king's escape to a legal square is guaranteed safe for that turn; but declining to escape — responding with a capture or interposition instead — is a gamble whose outcome depends on what the opponent actually played.
 
-**Termination** occurs in four ways: (5.1) *Definite mate* — a player has no legal moves at commitment time, which is equivalent to traditional checkmate; (5.2) *King's death* — a king is captured as the result of simultaneous resolution, which can occur even without a prior check; (5.3) *Resignation*; or (5.4) *Draw* — both kings are captured simultaneously, either by two pieces taking each other's king in the same turn or by a king swap (4.7 v0.5). If both players' kings die simultaneously, the result is a draw regardless of cause.
+**Termination** occurs in four ways: (5.1) *Definite mate* — a player has no legal moves at commitment time, which is equivalent to traditional checkmate; (5.2) *King's death* — a king is captured as the result of simultaneous resolution, which can occur even without a prior check; (5.3) *Resignation*; or (5.4) *Draw*. Draw is reached by two kings captured simultaneously (two pieces taking each other's king in the same turn, or a king swap, 4.7 v0.5), and — **confirmed as of Rule v0.6** — by repetition (sennichite, same position four times, §5.6) or by reaching the 500-kumite move limit (§5.7).
 
-> **Open questions (spec §7):** Repetition (sennichite), continuous check, the precise reading of the pawn-drop checkmate prohibition under simultaneous commitment, and the notation for entering-king declarations are all listed as undecided in the current specification. They are *not* resolved by this implementation; placeholder behavior is marked with code comments.
+> **Open questions (Rule v0.6 §7):** The precise reading of the pawn-drop checkmate prohibition under simultaneous commitment, and the notation for entering-king declarations, remain undecided. They are *not* resolved by this implementation; placeholder behavior is marked with code comments. **Repetition (sennichite) and continuous check are settled as of v0.6** (§5.6: repetition is a draw; the continuous-check exception is abolished, since check is probabilistic under simultaneous play and can't be defined as "every move in the cycle gave check").
 
 ### Demo
 
@@ -65,7 +65,7 @@ Interactive hotsheet mode. One person plays both sides with mouse clicks. Click 
 
 **Documentation:**
 
-- `docs/` — rule specifications, implementation guides, change instructions, policy documents.
+- `docs/` — rule specifications, implementation guides, change instructions, policy documents. Indexed at [docs/README.md](docs/README.md) (living design vs. rule history vs. completed implementation record).
 
 > Design principle — `engine/` is the **core**; `cli/`, `tui/`, `protocol/`, and `web/` are interchangeable **shells**. The engine never gains I/O, networking, or randomness.
 
@@ -75,7 +75,7 @@ Interactive hotsheet mode. One person plays both sides with mouse clicks. Click 
 
 - **A pure Rust rule engine** (`engine/`) — a library crate with zero I/O, no `async`, no RNG, no networking. Its public API is a set of pure functions: `legal_actions`, `resolve`, `check_status`, and serialization helpers.
 - **A verification CLI** (`cli/`) — a single-process tool where one person inputs moves for both sides in USI notation, used to manually verify that the engine behaves as specified. Kept as a machine-readable pipe interface; not modified by later phases.
-- **A regression test suite** — 41 tests covering all concrete examples from the implementation spec: collision cases (capture, escape, same-square clash, swap, path pass-through, drop clash, promoted-piece reversion, Sengoku Musou swap and drop-clash, both-kings swap draw), move generation (king safety, check evasion, nifu, uchi-fu-dzume, backed-piece prevention, both-kings legal approach, asymmetric swap legality), termination (definite mate, king's death, simultaneous king capture, draw conditions, counter-play backfire, rook pass-through), serialization round-trips, and canonical initial-position verification against the spec's authoritative SFEN.
+- **A regression test suite** — 56 tests covering all concrete examples from the implementation spec: collision cases (capture, escape, same-square clash, swap, path pass-through, drop clash, promoted-piece reversion, Sengoku Musou swap and drop-clash, both-kings swap draw), move generation (king safety, check evasion, nifu, uchi-fu-dzume, backed-piece prevention, both-kings legal approach, asymmetric swap legality), termination (definite mate, king's death, simultaneous king capture, draw conditions, counter-play backfire, rook pass-through), serialization round-trips, and canonical initial-position verification against the spec's authoritative SFEN.
 
 USI notation is used throughout for moves (`7g7f`, `P*5e`, `2b3a+`). Position serialization follows SFEN with a fixed sentinel (`b`) in place of the turn field, which does not exist in this variant; the canonical initial position is defined by a single `INITIAL_SFEN` constant rather than hardcoded piece placement, making the spec document the single source of truth. Canonical serialization — deterministic board + holdings + move-number bytes — feeds directly into the SHA-256 board-hash layer in Phase 3. A separate content serialization (board + holdings only, no move number) is used for repetition detection.
 
@@ -166,9 +166,9 @@ The engine is designed so that all of the above are *shells* around an unchanged
 
 **玉の安全性は確率的になる。** 玉は、着手開始時点で相手の利きのあるマスへは移動できない（伝統的ルールをそのまま引き継ぐ）。ただしこれは着手確定時点の判定であり、相手も同時に動くため、安全だったマスが移動後に危険になりうる。安全なマスへの玉の逃げはそのターン必ず助かる。しかし合駒や反撃で応じることは賭けであり、相手が実際に玉へ向かっていれば取られる。
 
-**終了条件は四種:** （5.1）確定的詰み（着手不能、伝統的詰みと一致）・（5.2）玉の死（衝突解決の結果として玉が取られる）・（5.3）投了・（5.4）引き分け（両玉が同時に取られる）。引き分けは「二枚の駒が互いに相手玉を取る」通常経路のほか、両玉スワップ（§4.7 v0.5）によっても成立する。
+**終了条件は四種:** （5.1）確定的詰み（着手不能、伝統的詰みと一致）・（5.2）玉の死（衝突解決の結果として玉が取られる）・（5.3）投了・（5.4）引き分け。引き分けは「二枚の駒が互いに相手玉を取る」通常経路・両玉スワップ（§4.7 v0.5）に加え、**千日手（同一局面4回・§5.6）・最長手数500組手（§5.7）でも成立する（ルール v0.6 で確定）**。
 
-> **未確定事項（仕様書 §7）:** 千日手の成立時の扱い、連続王手の千日手の読み替え、打ち歩詰めの厳密な再形式化、入玉宣言法の読み替えはいずれも未確定です。本実装ではこれらを勝手に確定させず、暫定処理とコードコメントによる印として引き継いでいます。
+> **未確定事項（ルール v0.6 §7）:** 打ち歩詰めの厳密な再形式化、入玉宣言法の読み替えは未確定です。本実装ではこれらを勝手に確定させず、暫定処理とコードコメントによる印として引き継いでいます。**千日手の成立時の扱い・連続王手の千日手の読み替えは v0.6 で確定済み**（§5.6: 千日手は引き分け。連続王手による特例は、同時着手では王手が確率的で定義できないため廃止）。
 
 ### デモ
 
@@ -196,7 +196,7 @@ Web 盤を公開しています: **[fukanzen-shogi.tokuhira.net](https://fukanze
 
 **ドキュメント:**
 
-- `docs/` — ルール仕様・実装指示書・変更指示・方針文書。
+- `docs/` — ルール仕様・実装指示書・変更指示・方針文書。索引は [docs/README.md](docs/README.md)（生きた設計／歴史／完了記録の仕分け）。
 
 > 設計哲学「共通の核と交換可能な殻」: `engine/` が核であり、`cli/`・`tui/`・`protocol/`・`web/` はすべて核を包む交換可能な殻。エンジン本体にはいかなる I/O も追加しない。
 
@@ -278,7 +278,7 @@ Web 盤を公開しています: **[fukanzen-shogi.tokuhira.net](https://fukanze
 - [不完全将棋 ルール仕様 v0.2](docs/不完全将棋_ルール仕様_v0.2.md) — 初期局面の正本 SFEN と SFEN 手番フィールドの確定的な扱い（`b` 固定）を追記
 - [不完全将棋 ルール仕様 v0.1](docs/不完全将棋_ルール仕様_v0.1.md) — 初版ルール定義
 
-**Implementation guides / 実装指示書:**
+**Implementation guides / 実装指示書:** *(see also [docs/README.md](docs/README.md) for the fuller categorized index — living design vs. rule history vs. completed implementation record)*
 
 - [Phase 1 — Rule engine + verification CLI](docs/不完全将棋_実装指示書_Phase1.md)
 - [Phase 2 — TUI verification desk](docs/不完全将棋_実装指示書_Phase2_TUI検証卓.md)
@@ -295,6 +295,8 @@ Web 盤を公開しています: **[fukanzen-shogi.tokuhira.net](https://fukanze
 - [Terminal-state revision — rule v0.6](docs/不完全将棋_実装指示書_終局判定の改訂_ルールv0.6.md) — v0.9.0
 - [Live spectating and server-side archive — Yodogawa step 3](docs/不完全将棋_実装指示書_ライブ観戦とサーバ側アーカイブ_淀川第三歩.md) — v0.9.1–v0.10.0
 - [Game persistence and identity — record-keeper step 1](docs/不完全将棋_実装指示書_対局の永続と身元_記録係一段目.md) — v0.10.2
+- [Invitation and two-witness cross-check — record-keeper step 2](docs/不完全将棋_実装指示書_記録係の招待と二証人_記録係二段目.md) — v0.11.0
+- [Scaffolding — CI gate, server tests, docs index](docs/不完全将棋_実装指示書_足場の整備_CI_serverテスト_docs索引.md) — maintenance only, no behavior change (see doc for versioning note)
 
 **Change instructions / 変更指示:**
 
@@ -321,7 +323,7 @@ Web 盤を公開しています: **[fukanzen-shogi.tokuhira.net](https://fukanze
 # Build all crates
 cargo build
 
-# Run all tests (engine: 41 tests, protocol: 31 tests, notation: 9 tests)
+# Run all tests (engine: 56 tests, protocol: 31 tests, notation: 9 tests, engine-wasm: 12 tests)
 cargo test
 
 # Run the verification CLI (text I/O, machine-readable)

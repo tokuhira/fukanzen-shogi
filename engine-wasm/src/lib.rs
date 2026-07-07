@@ -12,15 +12,30 @@ use wasm_bindgen::prelude::*;
 pub fn resolve_ply(sfen: &str, sente_usi: &str, gote_usi: &str) -> String {
     let pos = match engine::serialize::sfen_to_position(sfen) {
         Some(p) => p,
-        None => return format!(r#"{{"ok":false,"error":"bad sfen: {}"}}"#, escape_json(sfen)),
+        None => {
+            return format!(
+                r#"{{"ok":false,"error":"bad sfen: {}"}}"#,
+                escape_json(sfen)
+            )
+        }
     };
     let sente = match engine::types::Action::from_usi(sente_usi) {
         Some(a) => a,
-        None => return format!(r#"{{"ok":false,"error":"bad sente_usi: {}"}}"#, escape_json(sente_usi)),
+        None => {
+            return format!(
+                r#"{{"ok":false,"error":"bad sente_usi: {}"}}"#,
+                escape_json(sente_usi)
+            )
+        }
     };
     let gote = match engine::types::Action::from_usi(gote_usi) {
         Some(a) => a,
-        None => return format!(r#"{{"ok":false,"error":"bad gote_usi: {}"}}"#, escape_json(gote_usi)),
+        None => {
+            return format!(
+                r#"{{"ok":false,"error":"bad gote_usi: {}"}}"#,
+                escape_json(gote_usi)
+            )
+        }
     };
 
     let resolution = engine::resolve::resolve(&pos, sente, gote);
@@ -28,13 +43,17 @@ pub fn resolve_ply(sfen: &str, sente_usi: &str, gote_usi: &str) -> String {
 
     let event = match &resolution.event {
         engine::resolve::ResolutionEvent::Normal { .. } => "normal",
-        engine::resolve::ResolutionEvent::Clash { .. }  => "clash",
-        engine::resolve::ResolutionEvent::SenteDied     => "sente_died",
-        engine::resolve::ResolutionEvent::GoteDied      => "gote_died",
-        engine::resolve::ResolutionEvent::BothDied      => "both_died",
+        engine::resolve::ResolutionEvent::Clash { .. } => "clash",
+        engine::resolve::ResolutionEvent::SenteDied => "sente_died",
+        engine::resolve::ResolutionEvent::GoteDied => "gote_died",
+        engine::resolve::ResolutionEvent::BothDied => "both_died",
     };
 
-    format!(r#"{{"ok":true,"sfen":"{}","event":"{}"}}"#, escape_json(&next_sfen), event)
+    format!(
+        r#"{{"ok":true,"sfen":"{}","event":"{}"}}"#,
+        escape_json(&next_sfen),
+        event
+    )
 }
 
 /// 指定局面のゲーム状態を返す（着手選択前の確定詰みチェック）。
@@ -47,10 +66,10 @@ pub fn game_status(sfen: &str) -> String {
         None => return "error".to_string(),
     };
     match engine::terminate::check_status(&pos) {
-        engine::terminate::GameStatus::Ongoing    => "ongoing".to_string(),
+        engine::terminate::GameStatus::Ongoing => "ongoing".to_string(),
         engine::terminate::GameStatus::SenteLoses => "sente_loses".to_string(),
-        engine::terminate::GameStatus::GoteLoses  => "gote_loses".to_string(),
-        engine::terminate::GameStatus::Draw       => "draw".to_string(),
+        engine::terminate::GameStatus::GoteLoses => "gote_loses".to_string(),
+        engine::terminate::GameStatus::Draw => "draw".to_string(),
     }
 }
 
@@ -68,11 +87,12 @@ pub fn legal_actions(sfen: &str, side: &str) -> String {
     };
     let s = match side {
         "sente" => engine::types::Side::Sente,
-        "gote"  => engine::types::Side::Gote,
+        "gote" => engine::types::Side::Gote,
         _ => return "[]".to_string(),
     };
     let actions = engine::movegen::legal_actions(&pos, s);
-    let usis: Vec<String> = actions.iter()
+    let usis: Vec<String> = actions
+        .iter()
         .map(|a| format!("\"{}\"", a.to_usi()))
         .collect();
     format!("[{}]", usis.join(","))
@@ -147,11 +167,17 @@ pub fn build_archive(request_json: &str) -> String {
     let sente = v["sente"].as_str().map(|s| s.to_string());
     let gote = v["gote"].as_str().map(|s| s.to_string());
 
-    let kind = match v["result"]["kind"].as_str().and_then(engine::archive::ResultKind::from_str) {
+    let kind = match v["result"]["kind"]
+        .as_str()
+        .and_then(engine::archive::ResultKind::from_str)
+    {
         Some(k) => k,
         None => return "ERROR: bad result.kind".to_string(),
     };
-    let outcome = match v["result"]["outcome"].as_str().and_then(engine::archive::Outcome::from_str) {
+    let outcome = match v["result"]["outcome"]
+        .as_str()
+        .and_then(engine::archive::Outcome::from_str)
+    {
         Some(o) => o,
         None => return "ERROR: bad result.outcome".to_string(),
     };
@@ -198,11 +224,13 @@ pub fn parse_archive(text: &str) -> String {
     let plies: Vec<String> = kifu
         .plies
         .iter()
-        .map(|p| format!(
-            r#"{{"s":"{}","g":"{}"}}"#,
-            escape_json(&p.sente.to_usi()),
-            escape_json(&p.gote.to_usi())
-        ))
+        .map(|p| {
+            format!(
+                r#"{{"s":"{}","g":"{}"}}"#,
+                escape_json(&p.sente.to_usi()),
+                escape_json(&p.gote.to_usi())
+            )
+        })
         .collect();
 
     let app_json = match &meta.app {
@@ -275,11 +303,21 @@ pub fn evaluate_terminal(request_json: &str) -> String {
         };
         let sente = match engine::types::Action::from_usi(s_usi) {
             Some(a) => a,
-            None => return format!(r#"{{"status":"error","error":"bad ply.s: {}"}}"#, escape_json(s_usi)),
+            None => {
+                return format!(
+                    r#"{{"status":"error","error":"bad ply.s: {}"}}"#,
+                    escape_json(s_usi)
+                )
+            }
         };
         let gote = match engine::types::Action::from_usi(g_usi) {
             Some(a) => a,
-            None => return format!(r#"{{"status":"error","error":"bad ply.g: {}"}}"#, escape_json(g_usi)),
+            None => {
+                return format!(
+                    r#"{{"status":"error","error":"bad ply.g: {}"}}"#,
+                    escape_json(g_usi)
+                )
+            }
         };
         kifu.push(engine::types::Ply { sente, gote });
     }
@@ -290,18 +328,34 @@ pub fn evaluate_terminal(request_json: &str) -> String {
 
     let (kind, outcome) = match engine::terminate::evaluate(&kifu) {
         Terminal::Ongoing => return r#"{"status":"ongoing"}"#.to_string(),
-        Terminal::Loss { loser: Side::Sente, kind: LossKind::Mate } => (ResultKind::Mate, Outcome::GoteWins),
-        Terminal::Loss { loser: Side::Gote, kind: LossKind::Mate } => (ResultKind::Mate, Outcome::SenteWins),
-        Terminal::Loss { loser: Side::Sente, kind: LossKind::KingDeath } => {
-            (ResultKind::KingDeath, Outcome::GoteWins)
-        }
-        Terminal::Loss { loser: Side::Gote, kind: LossKind::KingDeath } => {
-            (ResultKind::KingDeath, Outcome::SenteWins)
-        }
-        Terminal::Draw { kind: DrawKind::MutualMate } => (ResultKind::Mate, Outcome::Draw),
-        Terminal::Draw { kind: DrawKind::BothKingsDied } => (ResultKind::SwapDraw, Outcome::Draw),
-        Terminal::Draw { kind: DrawKind::Sennichite } => (ResultKind::Sennichite, Outcome::Draw),
-        Terminal::Draw { kind: DrawKind::MaxTurns } => (ResultKind::MaxTurns, Outcome::Draw),
+        Terminal::Loss {
+            loser: Side::Sente,
+            kind: LossKind::Mate,
+        } => (ResultKind::Mate, Outcome::GoteWins),
+        Terminal::Loss {
+            loser: Side::Gote,
+            kind: LossKind::Mate,
+        } => (ResultKind::Mate, Outcome::SenteWins),
+        Terminal::Loss {
+            loser: Side::Sente,
+            kind: LossKind::KingDeath,
+        } => (ResultKind::KingDeath, Outcome::GoteWins),
+        Terminal::Loss {
+            loser: Side::Gote,
+            kind: LossKind::KingDeath,
+        } => (ResultKind::KingDeath, Outcome::SenteWins),
+        Terminal::Draw {
+            kind: DrawKind::MutualMate,
+        } => (ResultKind::Mate, Outcome::Draw),
+        Terminal::Draw {
+            kind: DrawKind::BothKingsDied,
+        } => (ResultKind::SwapDraw, Outcome::Draw),
+        Terminal::Draw {
+            kind: DrawKind::Sennichite,
+        } => (ResultKind::Sennichite, Outcome::Draw),
+        Terminal::Draw {
+            kind: DrawKind::MaxTurns,
+        } => (ResultKind::MaxTurns, Outcome::Draw),
     };
 
     format!(
@@ -323,7 +377,7 @@ fn escape_json(s: &str) -> String {
     for c in s.chars() {
         match c {
             '\\' => out.push_str(r"\\"),
-            '"'  => out.push_str("\\\""),
+            '"' => out.push_str("\\\""),
             '\n' => out.push_str(r"\n"),
             '\r' => out.push_str(r"\r"),
             '\t' => out.push_str(r"\t"),
@@ -350,7 +404,11 @@ mod tests {
     #[test]
     fn build_then_parse_round_trip() {
         let archive = build_archive(&sample_request());
-        assert!(!archive.starts_with("ERROR"), "build_archive failed: {}", archive);
+        assert!(
+            !archive.starts_with("ERROR"),
+            "build_archive failed: {}",
+            archive
+        );
 
         let parsed_json = parse_archive(&archive);
         let v: serde_json::Value = serde_json::from_str(&parsed_json).unwrap();
@@ -375,7 +433,8 @@ mod tests {
 
     #[test]
     fn parse_old_bare_kifu() {
-        let old = "sfen lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1\n1: 7g7f | 3c3d";
+        let old =
+            "sfen lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1\n1: 7g7f | 3c3d";
         let parsed_json = parse_archive(old);
         let v: serde_json::Value = serde_json::from_str(&parsed_json).unwrap();
         assert_eq!(v["ok"], true);
@@ -399,8 +458,7 @@ mod tests {
     }
 
     fn request_with_n_plies(n: usize) -> String {
-        let plies_json = std::iter::repeat(r#"{"s":"7g7f","g":"3c3d"}"#)
-            .take(n)
+        let plies_json = std::iter::repeat_n(r#"{"s":"7g7f","g":"3c3d"}"#, n)
             .collect::<Vec<_>>()
             .join(",");
         format!(
@@ -416,16 +474,27 @@ mod tests {
     #[test]
     fn parse_accepts_exactly_max_plies() {
         let archive = build_archive(&request_with_n_plies(engine::terminate::MAX_TURNS));
-        assert!(!archive.starts_with("ERROR"), "build_archive failed: {}", archive);
+        assert!(
+            !archive.starts_with("ERROR"),
+            "build_archive failed: {}",
+            archive
+        );
         let v: serde_json::Value = serde_json::from_str(&parse_archive(&archive)).unwrap();
         assert_eq!(v["ok"], true);
-        assert_eq!(v["plies"].as_array().unwrap().len(), engine::terminate::MAX_TURNS);
+        assert_eq!(
+            v["plies"].as_array().unwrap().len(),
+            engine::terminate::MAX_TURNS
+        );
     }
 
     #[test]
     fn parse_rejects_too_many_plies() {
         let archive = build_archive(&request_with_n_plies(engine::terminate::MAX_TURNS + 1));
-        assert!(!archive.starts_with("ERROR"), "build_archive failed: {}", archive);
+        assert!(
+            !archive.starts_with("ERROR"),
+            "build_archive failed: {}",
+            archive
+        );
         let v: serde_json::Value = serde_json::from_str(&parse_archive(&archive)).unwrap();
         assert_eq!(v["ok"], false);
         assert_eq!(v["error"], "too_many_plies");
@@ -495,8 +564,14 @@ mod tests {
         let gote_squares: Vec<Square> = half_squares(6, 9).into_iter().take(35).collect(); // 35マス
 
         let mut board = Board::empty();
-        board.set(sente_squares[0], Some(Piece::new(PieceKind::King, Side::Sente)));
-        board.set(gote_squares[0], Some(Piece::new(PieceKind::King, Side::Gote)));
+        board.set(
+            sente_squares[0],
+            Some(Piece::new(PieceKind::King, Side::Sente)),
+        );
+        board.set(
+            gote_squares[0],
+            Some(Piece::new(PieceKind::King, Side::Gote)),
+        );
         let initial_sfen = engine::serialize::position_to_sfen(&Position {
             board,
             hand_sente: Hand::empty(),
@@ -510,8 +585,18 @@ mod tests {
         for i in 0..n_plies {
             let next_sente = (i + 1) % sente_squares.len();
             let next_gote = (i + 1) % gote_squares.len();
-            let s_usi = Action::Move { from: sente_squares[sente_at], to: sente_squares[next_sente], promote: false }.to_usi();
-            let g_usi = Action::Move { from: gote_squares[gote_at], to: gote_squares[next_gote], promote: false }.to_usi();
+            let s_usi = Action::Move {
+                from: sente_squares[sente_at],
+                to: sente_squares[next_sente],
+                promote: false,
+            }
+            .to_usi();
+            let g_usi = Action::Move {
+                from: gote_squares[gote_at],
+                to: gote_squares[next_gote],
+                promote: false,
+            }
+            .to_usi();
             plies.push(format!(r#"{{"s":"{}","g":"{}"}}"#, s_usi, g_usi));
             sente_at = next_sente;
             gote_at = next_gote;
@@ -541,15 +626,18 @@ mod tests {
             req_v["initial_sfen"], req_v["plies"]
         );
         let archive = build_archive(&archive_request);
-        assert!(!archive.starts_with("ERROR"), "build_archive failed: {}", archive);
+        assert!(
+            !archive.starts_with("ERROR"),
+            "build_archive failed: {}",
+            archive
+        );
         let reparsed: serde_json::Value = serde_json::from_str(&parse_archive(&archive)).unwrap();
         assert_eq!(reparsed["plies"].as_array().unwrap().len(), n);
     }
 
     #[test]
     fn evaluate_terminal_bad_input() {
-        let v: serde_json::Value =
-            serde_json::from_str(&evaluate_terminal("not json")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&evaluate_terminal("not json")).unwrap();
         assert_eq!(v["status"], "error");
     }
 }

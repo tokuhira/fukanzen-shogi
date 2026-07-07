@@ -1,5 +1,5 @@
-use sha2::{Digest, Sha256};
 use engine::types::Action;
+use sha2::{Digest, Sha256};
 
 /// SHA-256(action_usi || nonce)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -12,7 +12,7 @@ pub struct Nonce(pub [u8; 32]);
 pub fn make_commit(action: Action, nonce: &Nonce) -> Commitment {
     let mut h = Sha256::new();
     h.update(action.to_usi().as_bytes());
-    h.update(&nonce.0);
+    h.update(nonce.0);
     Commitment(h.finalize().into())
 }
 
@@ -25,7 +25,9 @@ mod tests {
     use super::*;
     use engine::types::Action;
 
-    fn mv(s: &str) -> Action { Action::from_usi(s).unwrap() }
+    fn mv(s: &str) -> Action {
+        Action::from_usi(s).unwrap()
+    }
 
     /// 拘束性: 異なる着手では commit が開けない
     #[test]
@@ -34,8 +36,14 @@ mod tests {
         let action_b = mv("3c3d");
         let nonce = Nonce([1u8; 32]);
         let commit = make_commit(action_a, &nonce);
-        assert!(!verify_commit(&commit, action_b, &nonce), "wrong action must fail");
-        assert!(verify_commit(&commit, action_a, &nonce), "correct action must pass");
+        assert!(
+            !verify_commit(&commit, action_b, &nonce),
+            "wrong action must fail"
+        );
+        assert!(
+            verify_commit(&commit, action_a, &nonce),
+            "correct action must pass"
+        );
     }
 
     /// 拘束性: 正しい着手でも nonce が違えば失敗

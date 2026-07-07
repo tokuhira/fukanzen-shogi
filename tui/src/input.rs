@@ -1,7 +1,9 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use ratatui::layout::Rect;
-use engine::types::{PieceKind, Side, Square};
 use crate::app::{App, FocusArea, InputMode, Phase, Selection, HAND_KINDS};
+use crossterm::event::{
+    KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
+use engine::types::{PieceKind, Side, Square};
+use ratatui::layout::Rect;
 
 // ─── キー入力ハンドラ ─────────────────────────────────────────────────────────
 
@@ -28,8 +30,14 @@ pub fn handle_key(key: KeyEvent, app: &mut App) -> bool {
     if let Phase::GameOver(_) = &app.phase {
         match key.code {
             Char('q') | Char('Q') => return true,
-            Char('n') | Char('N') => { app.new_game(); return false; }
-            Char('u') | Char('U') => { app.undo(); return false; }
+            Char('n') | Char('N') => {
+                app.new_game();
+                return false;
+            }
+            Char('u') | Char('U') => {
+                app.undo();
+                return false;
+            }
             _ => return false,
         }
     }
@@ -37,9 +45,15 @@ pub fn handle_key(key: KeyEvent, app: &mut App) -> bool {
     // 成り選択ダイアログ中
     if let Phase::PromotionChoice { .. } = &app.phase {
         match key.code {
-            Char('y') | Char('p') | Char('P') | Enter => { app.apply_promotion(true); }
-            Char('n') | Char('N') => { app.apply_promotion(false); }
-            Esc => { app.cancel_promotion(); }
+            Char('y') | Char('p') | Char('P') | Enter => {
+                app.apply_promotion(true);
+            }
+            Char('n') | Char('N') => {
+                app.apply_promotion(false);
+            }
+            Esc => {
+                app.cancel_promotion();
+            }
             _ => {}
         }
         return false;
@@ -51,10 +65,14 @@ pub fn handle_key(key: KeyEvent, app: &mut App) -> bool {
         Char('q') | Char('Q') => return true,
 
         // キャンセル・選択解除
-        Esc => { app.on_escape(); }
+        Esc => {
+            app.on_escape();
+        }
 
         // 決定
-        Enter | Char(' ') => { app.on_enter(); }
+        Enter | Char(' ') => {
+            app.on_enter();
+        }
 
         // カーソル移動 / 駒台カーソル移動
         Up => {
@@ -88,36 +106,52 @@ pub fn handle_key(key: KeyEvent, app: &mut App) -> bool {
         }
 
         // 駒台切替
-        Tab | Char('d') | Char('D') => { app.toggle_hand_focus(); }
+        Tab | Char('d') | Char('D') => {
+            app.toggle_hand_focus();
+        }
 
         // 成り（プロモーション選択時以外は無視 — 上の Phase チェックで既に処理済み）
         Char('y') | Char('p') | Char('P') => {}
         Char('n') => {}
 
         // 補助操作
-        Char('u') | Char('U') => { app.undo(); }
-        Char('r') | Char('R') => { app.resign(); }
+        Char('u') | Char('U') => {
+            app.undo();
+        }
+        Char('r') | Char('R') => {
+            app.resign();
+        }
 
         // 保存・読込（小文字=デフォルトパス、大文字=パス入力）
-        Char('s') => { app.save("shogi_game.kifu"); }
+        Char('s') => {
+            app.save("shogi_game.kifu");
+        }
         Char('S') => {
             app.input_mode = InputMode::SavePath;
             app.input_buffer.clear();
         }
-        Char('l') => { app.load("shogi_game.kifu"); }
+        Char('l') => {
+            app.load("shogi_game.kifu");
+        }
         Char('L') => {
             app.input_mode = InputMode::LoadPath;
             app.input_buffer.clear();
         }
 
         // SFEN 表示
-        Char('f') | Char('F') => { app.toggle_sfen(); }
+        Char('f') | Char('F') => {
+            app.toggle_sfen();
+        }
 
         // 合法手一覧
-        Char('m') | Char('M') => { app.toggle_all_moves(); }
+        Char('m') | Char('M') => {
+            app.toggle_all_moves();
+        }
 
         // ヘルプ
-        Char('?') | Char('h') => { app.show_help = !app.show_help; }
+        Char('?') | Char('h') => {
+            app.show_help = !app.show_help;
+        }
 
         // 数字キーで持ち駒を直接選択（1=歩 2=香 3=桂 4=銀 5=金 6=角 7=飛）
         Char(c) if ('1'..='7').contains(&c) => {
@@ -185,16 +219,40 @@ pub fn handle_mouse(mouse: MouseEvent, app: &mut App) -> bool {
 
     // 成り選択ダイアログ（ポップアップが開いている間は他のクリックを無視）
     if matches!(app.phase, Phase::PromotionChoice { .. }) {
-        if let Some(r) = app.click_areas.promote_yes { if hit(r) { app.apply_promotion(true);  return false; } }
-        if let Some(r) = app.click_areas.promote_no  { if hit(r) { app.apply_promotion(false); return false; } }
+        if let Some(r) = app.click_areas.promote_yes {
+            if hit(r) {
+                app.apply_promotion(true);
+                return false;
+            }
+        }
+        if let Some(r) = app.click_areas.promote_no {
+            if hit(r) {
+                app.apply_promotion(false);
+                return false;
+            }
+        }
         return false; // ダイアログ外クリックは無視
     }
 
     // ゲームオーバーダイアログ
     if let Phase::GameOver(_) = &app.phase {
-        if let Some(r) = app.click_areas.gameover_undo { if hit(r) { app.undo();     return false; } }
-        if let Some(r) = app.click_areas.gameover_new  { if hit(r) { app.new_game(); return false; } }
-        if let Some(r) = app.click_areas.gameover_quit { if hit(r) { return true; } }
+        if let Some(r) = app.click_areas.gameover_undo {
+            if hit(r) {
+                app.undo();
+                return false;
+            }
+        }
+        if let Some(r) = app.click_areas.gameover_new {
+            if hit(r) {
+                app.new_game();
+                return false;
+            }
+        }
+        if let Some(r) = app.click_areas.gameover_quit {
+            if hit(r) {
+                return true;
+            }
+        }
         return false;
     }
 
@@ -202,7 +260,10 @@ pub fn handle_mouse(mouse: MouseEvent, app: &mut App) -> bool {
 
     // 解決ボタン（ResolveReady 時のステータス行）
     if let Some(r) = app.click_areas.resolve {
-        if hit(r) { app.resolve_turn(); return false; }
+        if hit(r) {
+            app.resolve_turn();
+            return false;
+        }
     }
 
     // 駒台の持ち駒を直接クリックして選択
@@ -240,8 +301,12 @@ pub fn handle_mouse(mouse: MouseEvent, app: &mut App) -> bool {
     let by = 1u16;
     const BOARD_PANEL_W: u16 = 33;
 
-    if col < bx || col >= bx + BOARD_PANEL_W - 2 { return false; }
-    if row < by || row >= by + main_h.saturating_sub(2) { return false; }
+    if col < bx || col >= bx + BOARD_PANEL_W - 2 {
+        return false;
+    }
+    if row < by || row >= by + main_h.saturating_sub(2) {
+        return false;
+    }
 
     let local_row = row - by;
 

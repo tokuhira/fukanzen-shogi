@@ -26,8 +26,13 @@ pub fn ja_notation(
             let name = piece_ja(kind);
             // 同種の盤上駒が（不成で）同マスへ動ける手があれば 打 が必要
             let need_uchi = legal_actions.iter().any(|a| {
-                if let Action::Move { from, to: t, promote: false } = *a {
-                    t == to && pos.board.get(from).map_or(false, |p| p.kind == kind)
+                if let Action::Move {
+                    from,
+                    to: t,
+                    promote: false,
+                } = *a
+                {
+                    t == to && pos.board.get(from).is_some_and(|p| p.kind == kind)
                 } else {
                     false
                 }
@@ -87,28 +92,27 @@ pub fn ja_notation(
 fn sq_ja(sq: Square) -> String {
     // 全角数字: U+FF10 = ０、U+FF17 = ７
     let file_char = char::from_u32(0xFF10 + sq.file() as u32).unwrap_or('?');
-    let rank_kanji = ["一", "二", "三", "四", "五", "六", "七", "八", "九"]
-        [sq.rank() as usize - 1];
+    let rank_kanji = ["一", "二", "三", "四", "五", "六", "七", "八", "九"][sq.rank() as usize - 1];
     format!("{}{}", file_char, rank_kanji)
 }
 
 /// 駒種の日本語名
 fn piece_ja(kind: PieceKind) -> &'static str {
     match kind {
-        PieceKind::Pawn      => "歩",
-        PieceKind::Lance     => "香",
-        PieceKind::Knight    => "桂",
-        PieceKind::Silver    => "銀",
-        PieceKind::Gold      => "金",
-        PieceKind::Bishop    => "角",
-        PieceKind::Rook      => "飛",
-        PieceKind::King      => "玉",
-        PieceKind::ProPawn   => "と",
-        PieceKind::ProLance  => "成香",
+        PieceKind::Pawn => "歩",
+        PieceKind::Lance => "香",
+        PieceKind::Knight => "桂",
+        PieceKind::Silver => "銀",
+        PieceKind::Gold => "金",
+        PieceKind::Bishop => "角",
+        PieceKind::Rook => "飛",
+        PieceKind::King => "玉",
+        PieceKind::ProPawn => "と",
+        PieceKind::ProLance => "成香",
         PieceKind::ProKnight => "成桂",
         PieceKind::ProSilver => "成銀",
-        PieceKind::Horse     => "馬",
-        PieceKind::Dragon    => "竜",
+        PieceKind::Horse => "馬",
+        PieceKind::Dragon => "竜",
     }
 }
 
@@ -116,7 +120,7 @@ fn piece_ja(kind: PieceKind) -> &'static str {
 fn in_promo_zone(side: Side, sq: Square) -> bool {
     match side {
         Side::Sente => sq.rank() <= 3,
-        Side::Gote  => sq.rank() >= 7,
+        Side::Gote => sq.rank() >= 7,
     }
 }
 
@@ -142,7 +146,7 @@ fn disambiguate(side: Side, from: Square, to: Square, candidates: &[Square]) -> 
         // 後手: 筋番号が小さい方が盤の左側（後手視点で反転）
         let is_left = match side {
             Side::Sente => sf > tf,
-            Side::Gote  => sf < tf,
+            Side::Gote => sf < tf,
         };
         Some(if is_left { "左" } else { "右" })
     };
@@ -157,10 +161,14 @@ fn disambiguate(side: Side, from: Square, to: Square, candidates: &[Square]) -> 
         }
         let forward = match side {
             Side::Sente => sr > tr, // 先手: 段が減る方向が前
-            Side::Gote  => sr < tr, // 後手: 段が増える方向が前
+            Side::Gote => sr < tr,  // 後手: 段が増える方向が前
         };
         if forward {
-            if sf == tf { "直" } else { "上" }
+            if sf == tf {
+                "直"
+            } else {
+                "上"
+            }
         } else {
             "引"
         }
@@ -171,20 +179,30 @@ fn disambiguate(side: Side, from: Square, to: Square, candidates: &[Square]) -> 
 
     // 右/左（または 直 の一部として dir で試みる）だけで一意か
     if let Some(rl) = my_rl {
-        if candidates.iter().filter(|&&sq| rl_of(sq) == Some(rl)).count() <= 1 {
+        if candidates
+            .iter()
+            .filter(|&&sq| rl_of(sq) == Some(rl))
+            .count()
+            <= 1
+        {
             return rl.to_string();
         }
     }
 
     // 方向（直/上/引/寄）だけで一意か
-    if candidates.iter().filter(|&&sq| dir_of(sq) == my_dir).count() <= 1 {
+    if candidates
+        .iter()
+        .filter(|&&sq| dir_of(sq) == my_dir)
+        .count()
+        <= 1
+    {
         return my_dir.to_string();
     }
 
     // 右左 + 方向の組み合わせ
     match my_rl {
         Some(rl) => format!("{}{}", rl, my_dir),
-        None     => my_dir.to_string(),
+        None => my_dir.to_string(),
     }
 }
 

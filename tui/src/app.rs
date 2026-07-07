@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-use ratatui::layout::Rect;
 use engine::board::Position;
 use engine::kifu::Kifu;
 use engine::movegen::legal_actions;
@@ -8,6 +6,8 @@ use engine::serialize::{kifu_from_string, kifu_to_string, position_to_sfen};
 use engine::terminate::{check_king_death, check_sennichite, check_status, GameEnd, GameStatus};
 use engine::types::{Action, PieceKind, Ply, Side, Square};
 use notation::ja_notation;
+use ratatui::layout::Rect;
+use std::collections::HashSet;
 
 // ─── オンライン状態（ui.rs が参照する表示用構造体）────────────────────────────
 
@@ -50,7 +50,11 @@ pub const HAND_KINDS: [PieceKind; 7] = [
 pub enum Phase {
     SenteInput,
     GoteInput,
-    PromotionChoice { from: Square, to: Square, side: Side },
+    PromotionChoice {
+        from: Square,
+        to: Square,
+        side: Side,
+    },
     ResolveReady,
     GameOver(GameOverKind),
 }
@@ -102,14 +106,14 @@ pub enum InputMode {
 /// 毎フレーム ui::draw が更新する。input::handle_mouse がこれを参照する。
 #[derive(Default, Clone)]
 pub struct ClickAreas {
-    pub promote_yes:   Option<Rect>, // 成りボタン（左半分）
-    pub promote_no:    Option<Rect>, // 成らないボタン（右半分）
-    pub resolve:       Option<Rect>, // 解決ボタン（ResolveReady 時のステータス行）
-    pub gameover_undo: Option<Rect>, // ゲームオーバー: 一手戻す
-    pub gameover_new:  Option<Rect>, // ゲームオーバー: 新規対局
-    pub gameover_quit: Option<Rect>, // ゲームオーバー: 終了
-    pub sente_hand:    Vec<(Rect, PieceKind)>, // 先手持ち駒の各駒
-    pub gote_hand:     Vec<(Rect, PieceKind)>, // 後手持ち駒の各駒
+    pub promote_yes: Option<Rect>,          // 成りボタン（左半分）
+    pub promote_no: Option<Rect>,           // 成らないボタン（右半分）
+    pub resolve: Option<Rect>,              // 解決ボタン（ResolveReady 時のステータス行）
+    pub gameover_undo: Option<Rect>,        // ゲームオーバー: 一手戻す
+    pub gameover_new: Option<Rect>,         // ゲームオーバー: 新規対局
+    pub gameover_quit: Option<Rect>,        // ゲームオーバー: 終了
+    pub sente_hand: Vec<(Rect, PieceKind)>, // 先手持ち駒の各駒
+    pub gote_hand: Vec<(Rect, PieceKind)>,  // 後手持ち駒の各駒
 }
 
 // ─── App 状態 ─────────────────────────────────────────────────────────────────
@@ -276,7 +280,11 @@ impl App {
             self.phase = Phase::PromotionChoice { from, to, side };
             self.message = "[y]/[p]成る  [n]成らない  [Esc]キャンセル".to_string();
         } else {
-            let action = Action::Move { from, to, promote: can_promote };
+            let action = Action::Move {
+                from,
+                to,
+                promote: can_promote,
+            };
             self.apply_action(action, side);
         }
     }
@@ -378,7 +386,11 @@ impl App {
 
         let pos = self.current_pos();
         let hand = pos.hand(side);
-        let pieces: Vec<PieceKind> = HAND_KINDS.iter().copied().filter(|&k| hand.has(k)).collect();
+        let pieces: Vec<PieceKind> = HAND_KINDS
+            .iter()
+            .copied()
+            .filter(|&k| hand.has(k))
+            .collect();
 
         if pieces.is_empty() {
             self.message = "持ち駒がありません".to_string();
@@ -390,7 +402,10 @@ impl App {
         let kind = pieces[0];
         self.selection = Selection::HandPiece(kind);
         self.update_highlights();
-        self.message = format!("駒台: {}選択中 — ←→で変更、Enterで確定、Escでキャンセル", piece_kind_ja(kind));
+        self.message = format!(
+            "駒台: {}選択中 — ←→で変更、Enterで確定、Escでキャンセル",
+            piece_kind_ja(kind)
+        );
     }
 
     pub fn move_hand_cursor(&mut self, dir: i8) {
@@ -400,7 +415,11 @@ impl App {
         };
         let pos = self.current_pos();
         let hand = pos.hand(side);
-        let pieces: Vec<PieceKind> = HAND_KINDS.iter().copied().filter(|&k| hand.has(k)).collect();
+        let pieces: Vec<PieceKind> = HAND_KINDS
+            .iter()
+            .copied()
+            .filter(|&k| hand.has(k))
+            .collect();
         if pieces.is_empty() {
             return;
         }
@@ -410,7 +429,10 @@ impl App {
         let kind = pieces[self.hand_cursor];
         self.selection = Selection::HandPiece(kind);
         self.update_highlights();
-        self.message = format!("駒台: {}選択中 — ←→で変更、Enterで確定", piece_kind_ja(kind));
+        self.message = format!(
+            "駒台: {}選択中 — ←→で変更、Enterで確定",
+            piece_kind_ja(kind)
+        );
     }
 
     pub fn select_hand_piece_direct(&mut self, kind: PieceKind) {
@@ -434,7 +456,10 @@ impl App {
     fn confirm_hand_selection(&mut self) {
         if let Selection::HandPiece(kind) = self.selection {
             self.focus = FocusArea::Board;
-            self.message = format!("{}を持っています — 打ち先のマスを選んでください", piece_kind_ja(kind));
+            self.message = format!(
+                "{}を持っています — 打ち先のマスを選んでください",
+                piece_kind_ja(kind)
+            );
         }
     }
 
@@ -464,15 +489,18 @@ impl App {
         if let Some(end) = check_king_death(&res.event) {
             let kind = match end {
                 GameEnd::SenteLoses => {
-                    self.last_resolution.push("→ 後手の勝ち（先手玉が取られた）".to_string());
+                    self.last_resolution
+                        .push("→ 後手の勝ち（先手玉が取られた）".to_string());
                     GameOverKind::GoteWins(WinReason::KingDied)
                 }
                 GameEnd::GoteLoses => {
-                    self.last_resolution.push("→ 先手の勝ち（後手玉が取られた）".to_string());
+                    self.last_resolution
+                        .push("→ 先手の勝ち（後手玉が取られた）".to_string());
                     GameOverKind::SenteWins(WinReason::KingDied)
                 }
                 GameEnd::Draw => {
-                    self.last_resolution.push("→ 引き分け（両玉が取られた）".to_string());
+                    self.last_resolution
+                        .push("→ 引き分け（両玉が取られた）".to_string());
                     GameOverKind::Draw(DrawReason::BothKingDied)
                 }
             };
@@ -482,7 +510,8 @@ impl App {
 
         // 千日手チェック
         if check_sennichite(&self.kifu) {
-            self.last_resolution.push("→ 千日手（引き分け）".to_string());
+            self.last_resolution
+                .push("→ 千日手（引き分け）".to_string());
             self.phase = Phase::GameOver(GameOverKind::Draw(DrawReason::Sennichite));
             return;
         }
@@ -491,17 +520,20 @@ impl App {
         let next_pos = self.kifu.current();
         match check_status(&next_pos) {
             GameStatus::SenteLoses => {
-                self.last_resolution.push("→ 後手の勝ち（先手着手不能）".to_string());
+                self.last_resolution
+                    .push("→ 後手の勝ち（先手着手不能）".to_string());
                 self.phase = Phase::GameOver(GameOverKind::GoteWins(WinReason::Checkmate));
                 return;
             }
             GameStatus::GoteLoses => {
-                self.last_resolution.push("→ 先手の勝ち（後手着手不能）".to_string());
+                self.last_resolution
+                    .push("→ 先手の勝ち（後手着手不能）".to_string());
                 self.phase = Phase::GameOver(GameOverKind::SenteWins(WinReason::Checkmate));
                 return;
             }
             GameStatus::Draw => {
-                self.last_resolution.push("→ 引き分け（両者着手不能）".to_string());
+                self.last_resolution
+                    .push("→ 引き分け（両者着手不能）".to_string());
                 self.phase = Phase::GameOver(GameOverKind::Draw(DrawReason::BothCheckmate));
                 return;
             }
@@ -674,11 +706,11 @@ fn build_resolution_text(
 ) -> Vec<String> {
     let mut lines = Vec::new();
     let s_text = ja_notation(&sente, Side::Sente, &legal_actions(pos, Side::Sente), pos);
-    let g_text = ja_notation(&gote,  Side::Gote,  &legal_actions(pos, Side::Gote),  pos);
+    let g_text = ja_notation(&gote, Side::Gote, &legal_actions(pos, Side::Gote), pos);
     lines.push(format!("先手: {}  後手: {}", s_text, g_text));
 
     let sente_from = sente.from_sq();
-    let gote_from  = gote.from_sq();
+    let gote_from = gote.from_sq();
 
     let sente_used_king = sente_from
         .and_then(|sq| pos.board.get(sq))
@@ -692,14 +724,10 @@ fn build_resolution_text(
     //   留まっている駒を取っただけなら通常取得。
     //   スワップ救済: 後手の行先 == 玉の元居たマス
     //   同一マス救済: 後手の行先 == 玉の移動先（打ち込み含む）
-    let sente_musou = sente_used_king && (
-        sente_from.is_some_and(|f| gote.to_sq() == f)
-        || gote.to_sq() == sente.to_sq()
-    );
-    let gote_musou = gote_used_king && (
-        gote_from.is_some_and(|f| sente.to_sq() == f)
-        || sente.to_sq() == gote.to_sq()
-    );
+    let sente_musou = sente_used_king
+        && (sente_from.is_some_and(|f| gote.to_sq() == f) || gote.to_sq() == sente.to_sq());
+    let gote_musou = gote_used_king
+        && (gote_from.is_some_and(|f| sente.to_sq() == f) || sente.to_sq() == gote.to_sq());
 
     match event {
         ResolutionEvent::Normal {
@@ -744,10 +772,11 @@ fn build_resolution_text(
         ResolutionEvent::GoteDied => lines.push("後手玉が取られた！".to_string()),
         ResolutionEvent::BothDied => {
             // 両玉スワップ（v0.5 §4.7）か通常の同時取得かを区別して表示
-            let is_king_swap = sente_used_king && gote_used_king
-                && sente_from.zip(gote_from).is_some_and(|(fs, fg)| {
-                    sente.to_sq() == fg && gote.to_sq() == fs
-                });
+            let is_king_swap = sente_used_king
+                && gote_used_king
+                && sente_from
+                    .zip(gote_from)
+                    .is_some_and(|(fs, fg)| sente.to_sq() == fg && gote.to_sq() == fs);
             if is_king_swap {
                 lines.push("★両玉スワップ: 双方の戦国無双が相殺して引き分け！".to_string());
             } else {

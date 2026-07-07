@@ -130,29 +130,57 @@ pub fn evaluate(kifu: &Kifu) -> Terminal {
         let res = crate::resolve::resolve(&pre, last.sente, last.gote);
         match check_king_death(&res.event) {
             Some(GameEnd::SenteLoses) => {
-                return Terminal::Loss { loser: Side::Sente, kind: LossKind::KingDeath }
+                return Terminal::Loss {
+                    loser: Side::Sente,
+                    kind: LossKind::KingDeath,
+                }
             }
             Some(GameEnd::GoteLoses) => {
-                return Terminal::Loss { loser: Side::Gote, kind: LossKind::KingDeath }
+                return Terminal::Loss {
+                    loser: Side::Gote,
+                    kind: LossKind::KingDeath,
+                }
             }
-            Some(GameEnd::Draw) => return Terminal::Draw { kind: DrawKind::BothKingsDied },
+            Some(GameEnd::Draw) => {
+                return Terminal::Draw {
+                    kind: DrawKind::BothKingsDied,
+                }
+            }
             None => {}
         }
     }
     // 2. 現局面での着手不能（5.1 / 両者不能 5.4）。
     match check_status(&kifu.current()) {
-        GameStatus::SenteLoses => return Terminal::Loss { loser: Side::Sente, kind: LossKind::Mate },
-        GameStatus::GoteLoses => return Terminal::Loss { loser: Side::Gote, kind: LossKind::Mate },
-        GameStatus::Draw => return Terminal::Draw { kind: DrawKind::MutualMate },
+        GameStatus::SenteLoses => {
+            return Terminal::Loss {
+                loser: Side::Sente,
+                kind: LossKind::Mate,
+            }
+        }
+        GameStatus::GoteLoses => {
+            return Terminal::Loss {
+                loser: Side::Gote,
+                kind: LossKind::Mate,
+            }
+        }
+        GameStatus::Draw => {
+            return Terminal::Draw {
+                kind: DrawKind::MutualMate,
+            }
+        }
         GameStatus::Ongoing => {}
     }
     // 3. 千日手（5.6）。
     if check_sennichite(kifu) {
-        return Terminal::Draw { kind: DrawKind::Sennichite };
+        return Terminal::Draw {
+            kind: DrawKind::Sennichite,
+        };
     }
     // 4. 最長手数（5.7）。
     if check_max_turns(kifu) {
-        return Terminal::Draw { kind: DrawKind::MaxTurns };
+        return Terminal::Draw {
+            kind: DrawKind::MaxTurns,
+        };
     }
     Terminal::Ongoing
 }
@@ -188,7 +216,11 @@ mod tests {
             (Square::new(9, 9), Piece::new(PieceKind::King, Side::Gote)),
         ]);
         let actions = legal_actions(&pos, Side::Sente);
-        assert!(actions.is_empty(), "詰み局面で合法手が残っている: {:?}", actions);
+        assert!(
+            actions.is_empty(),
+            "詰み局面で合法手が残っている: {:?}",
+            actions
+        );
         assert_eq!(check_status(&pos), GameStatus::SenteLoses);
     }
 
@@ -270,12 +302,23 @@ mod tests {
         ]);
         let mut kifu = Kifu::new(initial);
         kifu.push(Ply {
-            sente: Action::Move { from: gold_sq, to: Square::new(4, 9), promote: false },
-            gote: Action::Move { from: rook_sq, to: king_sq, promote: false },
+            sente: Action::Move {
+                from: gold_sq,
+                to: Square::new(4, 9),
+                promote: false,
+            },
+            gote: Action::Move {
+                from: rook_sq,
+                to: king_sq,
+                promote: false,
+            },
         });
         assert_eq!(
             evaluate(&kifu),
-            Terminal::Loss { loser: Side::Sente, kind: LossKind::KingDeath }
+            Terminal::Loss {
+                loser: Side::Sente,
+                kind: LossKind::KingDeath
+            }
         );
     }
 
@@ -290,7 +333,10 @@ mod tests {
         let kifu = Kifu::new(pos);
         assert_eq!(
             evaluate(&kifu),
-            Terminal::Loss { loser: Side::Sente, kind: LossKind::Mate }
+            Terminal::Loss {
+                loser: Side::Sente,
+                kind: LossKind::Mate
+            }
         );
     }
 
@@ -307,7 +353,12 @@ mod tests {
             (Square::new(8, 8), Piece::new(PieceKind::Gold, Side::Sente)),
         ]);
         let kifu = Kifu::new(pos);
-        assert_eq!(evaluate(&kifu), Terminal::Draw { kind: DrawKind::MutualMate });
+        assert_eq!(
+            evaluate(&kifu),
+            Terminal::Draw {
+                kind: DrawKind::MutualMate
+            }
+        );
     }
 
     #[test]
@@ -325,25 +376,48 @@ mod tests {
         for i in 0..6 {
             let ply = if i % 2 == 0 {
                 Ply {
-                    sente: Action::Move { from: a_sente, to: b_sente, promote: false },
-                    gote: Action::Move { from: a_gote, to: b_gote, promote: false },
+                    sente: Action::Move {
+                        from: a_sente,
+                        to: b_sente,
+                        promote: false,
+                    },
+                    gote: Action::Move {
+                        from: a_gote,
+                        to: b_gote,
+                        promote: false,
+                    },
                 }
             } else {
                 Ply {
-                    sente: Action::Move { from: b_sente, to: a_sente, promote: false },
-                    gote: Action::Move { from: b_gote, to: a_gote, promote: false },
+                    sente: Action::Move {
+                        from: b_sente,
+                        to: a_sente,
+                        promote: false,
+                    },
+                    gote: Action::Move {
+                        from: b_gote,
+                        to: a_gote,
+                        promote: false,
+                    },
                 }
             };
             kifu.push(ply);
         }
-        assert_eq!(evaluate(&kifu), Terminal::Draw { kind: DrawKind::Sennichite });
+        assert_eq!(
+            evaluate(&kifu),
+            Terminal::Draw {
+                kind: DrawKind::Sennichite
+            }
+        );
     }
 
     #[test]
     fn evaluate_max_turns() {
         assert_eq!(
             evaluate(&no_repeat_kifu(MAX_TURNS)),
-            Terminal::Draw { kind: DrawKind::MaxTurns }
+            Terminal::Draw {
+                kind: DrawKind::MaxTurns
+            }
         );
     }
 }
