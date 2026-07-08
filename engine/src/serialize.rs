@@ -52,16 +52,31 @@ fn board_to_sfen(pos: &Position) -> String {
 }
 
 fn piece_to_sfen(p: Piece) -> String {
-    let promoted = p.kind.is_promoted();
-    let base_char = p.kind.usi_char();
     let c = match p.side {
-        Side::Sente => base_char.to_ascii_uppercase(),
-        Side::Gote => base_char.to_ascii_lowercase(),
+        Side::Sente => piece_kind_char(p.kind),
+        Side::Gote => piece_kind_char(p.kind).to_ascii_lowercase(),
     };
-    if promoted {
+    if p.kind.is_promoted() {
         format!("+{}", c)
     } else {
         c.to_string()
+    }
+}
+
+/// 駒種を大文字の SFEN 基本文字へ変換する（先後・成りを問わない）。
+/// `PieceKind::usi_char` の別名だが、`position_view` 等の描画向け出力が
+/// 依拠する規約として明示するために公開する（`piece_to_sfen` と共通の単一の正本）。
+pub fn piece_kind_char(kind: PieceKind) -> char {
+    kind.usi_char()
+}
+
+/// 駒種を「大文字文字＋成りなら `+` 前置」の描画向け表記へ変換する。
+/// side は含まない（呼び出し側が別フィールドへ分離する規約——`position_view` 用）。
+pub fn piece_view_kind(kind: PieceKind) -> String {
+    if kind.is_promoted() {
+        format!("+{}", piece_kind_char(kind))
+    } else {
+        piece_kind_char(kind).to_string()
     }
 }
 
@@ -351,6 +366,22 @@ mod tests {
             Some(Piece::new(PieceKind::Bishop, Side::Gote)),
             "後手角 at 2二"
         );
+    }
+
+    #[test]
+    fn piece_kind_char_is_always_uppercase_base() {
+        assert_eq!(piece_kind_char(PieceKind::Pawn), 'P');
+        assert_eq!(piece_kind_char(PieceKind::ProPawn), 'P');
+        assert_eq!(piece_kind_char(PieceKind::Horse), 'B');
+        assert_eq!(piece_kind_char(PieceKind::Dragon), 'R');
+    }
+
+    #[test]
+    fn piece_view_kind_prefixes_promoted() {
+        assert_eq!(piece_view_kind(PieceKind::Pawn), "P");
+        assert_eq!(piece_view_kind(PieceKind::ProPawn), "+P");
+        assert_eq!(piece_view_kind(PieceKind::Bishop), "B");
+        assert_eq!(piece_view_kind(PieceKind::Horse), "+B");
     }
 
     #[test]

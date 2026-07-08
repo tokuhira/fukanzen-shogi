@@ -194,6 +194,68 @@ pub fn build_archive(request_json: &str) -> String {
     engine::archive::kifu_to_archive(&kifu, &meta)
 }
 
+/// SFEN を解釈し、描画に必要な構造化盤面を JSON で返す。
+/// `engine::serialize::sfen_to_position` を再利用する（SFEN 解釈の単一の正本。
+/// web/board.js の自前 `parseSfen` の重複を解消する——board.js 分割 第〇段）。
+///
+/// 返値（成功）:
+/// `{"board":[{"file":2,"rank":8,"kind":"R","side":"s"}, ...],
+///   "hand_s":{"P":2,"G":1},"hand_g":{"P":1}}`
+/// （`board` は駒のあるマスのみ。file は 9〜1・rank は 1〜9、SFEN の座標に一致）
+///
+/// 返値（失敗）: `{"error":"bad_sfen"}`
+#[wasm_bindgen]
+pub fn position_view(sfen: &str) -> String {
+    let pos = match engine::serialize::sfen_to_position(sfen) {
+        Some(p) => p,
+        None => return r#"{"error":"bad_sfen"}"#.to_string(),
+    };
+
+    let board: Vec<serde_json::Value> = pos
+        .board
+        .iter()
+        .map(|(sq, piece)| {
+            let side = match piece.side {
+                engine::types::Side::Sente => "s",
+                engine::types::Side::Gote => "g",
+            };
+            serde_json::json!({
+                "file": sq.file(),
+                "rank": sq.rank(),
+                "kind": engine::serialize::piece_view_kind(piece.kind),
+                "side": side,
+            })
+        })
+        .collect();
+
+    let hand_view = |hand: &engine::board::Hand| -> serde_json::Value {
+        let mut m = serde_json::Map::new();
+        for kind in [
+            engine::types::PieceKind::Pawn,
+            engine::types::PieceKind::Lance,
+            engine::types::PieceKind::Knight,
+            engine::types::PieceKind::Silver,
+            engine::types::PieceKind::Gold,
+            engine::types::PieceKind::Bishop,
+            engine::types::PieceKind::Rook,
+        ] {
+            let cnt = hand.count(kind);
+            if cnt > 0 {
+                let key = engine::serialize::piece_kind_char(kind).to_string();
+                m.insert(key, serde_json::Value::from(cnt));
+            }
+        }
+        serde_json::Value::Object(m)
+    };
+
+    let out = serde_json::json!({
+        "board": board,
+        "hand_s": hand_view(&pos.hand_sente),
+        "hand_g": hand_view(&pos.hand_gote),
+    });
+    out.to_string()
+}
+
 /// ルール v0.6 の最長手数（組手）。`engine::terminate::MAX_TURNS` が単一の値であり、
 /// アーカイブ読込の安全網（`parse_archive`）もここから参照する（ハードコードの
 /// 重複を持たない）。web 側もこの getter から値を取得し、JS 側に定数を複製しない。
@@ -639,5 +701,60 @@ mod tests {
     fn evaluate_terminal_bad_input() {
         let v: serde_json::Value = serde_json::from_str(&evaluate_terminal("not json")).unwrap();
         assert_eq!(v["status"], "error");
+    }
+
+    #[test]
+    fn position_view_initial_rook_and_bishop() {
+        let sfen = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1";
+        let v: serde_json::Value = serde_json::from_str(&position_view(sfen)).unwrap();
+        let board = v["board"].as_array().unwrap();
+
+        let find = |file: u64, rank: u64| -> Option<&serde_json::Value> {
+            board
+                .iter()
+                .find(|sq| sq["file"] == file && sq["rank"] == rank)
+        };
+
+        // ルール仕様の「飛2八・角8八」に一致（先手飛 file2/rank8, 先手角 file8/rank8）
+        let rook = find(2, 8).expect("先手飛が見つからない");
+        assert_eq!(rook["kind"], "R");
+        assert_eq!(rook["side"], "s");
+
+        let bishop = find(8, 8).expect("先手角が見つからない");
+        assert_eq!(bishop["kind"], "B");
+        assert_eq!(bishop["side"], "s");
+
+        // 後手歩が rank3 に9枚
+        let gote_pawns: Vec<_> = board
+            .iter()
+            .filter(|sq| sq["rank"] == 3 && sq["kind"] == "P" && sq["side"] == "g")
+            .collect();
+        assert_eq!(gote_pawns.len(), 9);
+
+        assert_eq!(v["hand_s"], serde_json::json!({}));
+        assert_eq!(v["hand_g"], serde_json::json!({}));
+    }
+
+    #[test]
+    fn position_view_promoted_and_hand() {
+        let sfen = "9/9/9/9/4+p4/9/9/9/4K4 b 2P1B1p 1";
+        let v: serde_json::Value = serde_json::from_str(&position_view(sfen)).unwrap();
+        let board = v["board"].as_array().unwrap();
+
+        let promoted = board
+            .iter()
+            .find(|sq| sq["file"] == 5 && sq["rank"] == 5)
+            .expect("成駒が見つからない");
+        assert_eq!(promoted["kind"], "+P");
+        assert_eq!(promoted["side"], "g");
+
+        assert_eq!(v["hand_s"], serde_json::json!({"P": 2, "B": 1}));
+        assert_eq!(v["hand_g"], serde_json::json!({"P": 1}));
+    }
+
+    #[test]
+    fn position_view_bad_sfen() {
+        let v: serde_json::Value = serde_json::from_str(&position_view("not a sfen")).unwrap();
+        assert_eq!(v["error"], "bad_sfen");
     }
 }

@@ -64,6 +64,20 @@ export function max_turns(): number;
 export function parse_archive(text: string): string;
 
 /**
+ * SFEN を解釈し、描画に必要な構造化盤面を JSON で返す。
+ * `engine::serialize::sfen_to_position` を再利用する（SFEN 解釈の単一の正本。
+ * web/board.js の自前 `parseSfen` の重複を解消する——board.js 分割 第〇段）。
+ *
+ * 返値（成功）:
+ * `{"board":[{"file":2,"rank":8,"kind":"R","side":"s"}, ...],
+ *   "hand_s":{"P":2,"G":1},"hand_g":{"P":1}}`
+ * （`board` は駒のあるマスのみ。file は 9〜1・rank は 1〜9、SFEN の座標に一致）
+ *
+ * 返値（失敗）: `{"error":"bad_sfen"}`
+ */
+export function position_view(sfen: string): string;
+
+/**
  * 両着手を解決して次局面と発生事象を返す。
  *
  * - sfen: 現局面の SFEN 文字列
@@ -85,6 +99,7 @@ export interface InitOutput {
     readonly legal_actions: (a: number, b: number, c: number, d: number) => [number, number];
     readonly max_turns: () => number;
     readonly parse_archive: (a: number, b: number) => [number, number];
+    readonly position_view: (a: number, b: number) => [number, number];
     readonly resolve_ply: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;

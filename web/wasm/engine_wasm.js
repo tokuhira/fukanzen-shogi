@@ -145,6 +145,35 @@ export function parse_archive(text) {
 }
 
 /**
+ * SFEN を解釈し、描画に必要な構造化盤面を JSON で返す。
+ * `engine::serialize::sfen_to_position` を再利用する（SFEN 解釈の単一の正本。
+ * web/board.js の自前 `parseSfen` の重複を解消する——board.js 分割 第〇段）。
+ *
+ * 返値（成功）:
+ * `{"board":[{"file":2,"rank":8,"kind":"R","side":"s"}, ...],
+ *   "hand_s":{"P":2,"G":1},"hand_g":{"P":1}}`
+ * （`board` は駒のあるマスのみ。file は 9〜1・rank は 1〜9、SFEN の座標に一致）
+ *
+ * 返値（失敗）: `{"error":"bad_sfen"}`
+ * @param {string} sfen
+ * @returns {string}
+ */
+export function position_view(sfen) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(sfen, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.position_view(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
  * 両着手を解決して次局面と発生事象を返す。
  *
  * - sfen: 現局面の SFEN 文字列

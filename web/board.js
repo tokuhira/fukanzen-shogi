@@ -5,7 +5,10 @@ import init, {
   parse_archive as wasmParseArchive,
   evaluate_terminal as wasmEvaluateTerminal,
   max_turns as wasmMaxTurns,
+  position_view as wasmPositionView,
 } from './wasm/engine_wasm.js';
+
+import { positionViewToState } from './position-view.js';
 
 import initNotation, {
   ja_notation as wasmJaNotation,
@@ -110,52 +113,14 @@ function usiToText(usi, sfen, side) {
 }
 
 // ── SFEN parser ───────────────────────────────────────────────────────────────
+//
+// 盤面解釈そのもの（SFEN が意味する盤面・持ち駒）は engine-wasm の position_view
+// （engine::serialize::sfen_to_position が単一の正本）へ委譲する。JSON view を
+// 従来の消費者形（Map と持ち駒オブジェクト）へ組み替える純粋アダプタは
+// position-view.js（board.js 分割 第〇段）。
 
 function parseSfen(sfen) {
-  const parts = sfen.split(' ');
-  const boardStr = parts[0];
-  const handStr  = parts[2] || '-';
-
-  const board = new Map();
-  boardStr.split('/').forEach((row, rankIdx) => {
-    const rank = rankIdx + 1;
-    let file = 9;
-    let i = 0;
-    while (i < row.length) {
-      const ch = row[i];
-      if (ch === '+') {
-        const nxt = row[++i];
-        const side = (nxt === nxt.toUpperCase()) ? 's' : 'g';
-        board.set(`${file},${rank}`, { kind: '+' + nxt.toUpperCase(), side });
-        file--;
-      } else if (ch >= '1' && ch <= '9') {
-        file -= +ch;
-      } else {
-        const side = (ch === ch.toUpperCase()) ? 's' : 'g';
-        board.set(`${file},${rank}`, { kind: ch.toUpperCase(), side });
-        file--;
-      }
-      i++;
-    }
-  });
-
-  const handS = {}, handG = {};
-  if (handStr !== '-') {
-    let i = 0;
-    while (i < handStr.length) {
-      let numStr = '';
-      while (i < handStr.length && handStr[i] >= '0' && handStr[i] <= '9') numStr += handStr[i++];
-      const ch = handStr[i++];
-      if (!ch) break;
-      const count = numStr ? +numStr : 1;
-      const side  = (ch === ch.toUpperCase()) ? 's' : 'g';
-      const kind  = ch.toUpperCase();
-      if (side === 's') handS[kind] = (handS[kind] || 0) + count;
-      else              handG[kind] = (handG[kind] || 0) + count;
-    }
-  }
-
-  return { board, handS, handG };
+  return positionViewToState(JSON.parse(wasmPositionView(sfen)));
 }
 
 // ── Kifu state ────────────────────────────────────────────────────────────────
