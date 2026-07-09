@@ -55,6 +55,7 @@ Sonnet への実行指示書。着地済みのものは**完了記録**として
 | [Wasm足場と棋譜の糊 — board.js分割 第一段b](不完全将棋_実装指示書_Wasm足場と棋譜の糊_board分割第一段b.md) | nodeでWasmを読むテスト足場を初めて据え、usiToTextをWasm注入の純粋モジュールへ | v0.11.2 |
 | [棋譜コアの遷移を純粋化 — board.js分割 第二段a](不完全将棋_実装指示書_棋譜コアの遷移を純粋化_board分割第二段a.md) | loadPlies/branchAndAppend/watchAppendTurnの遷移計算をgame-record.jsへ不変な純粋関数として抽出 | v0.11.2 |
 | [着手組み立ての計算を純粋化 — board.js分割 第二段b](不完全将棋_実装指示書_着手組み立ての計算を純粋化_board分割第二段b.md) | 合法手フィルタ・targetMap・成り不成判定をmove-input.jsへ抽出、状態機械は据え置き | v0.11.2 |
+| [overlay計算を純粋化して盤へ寄せる — board.js分割 第二段c](不完全将棋_実装指示書_overlay計算を純粋化して盤へ寄せる_board分割第二段c.md) | 選択・開示のoverlay計算を状態注入の純粋関数としてboard-view.jsへ寄せる | v0.11.2 |
 
 ---
 

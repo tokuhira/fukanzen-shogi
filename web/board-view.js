@@ -2,6 +2,7 @@ import {
   CELL, BX, BY, BW, BH, SVG_W, SVG_H, PFS, LFS,
   KANJI, HAND_ORDER, RANK_JA, countStr,
 } from './geometry.js';
+import { parseUsi } from './usi.js';
 
 export function renderSvg(pos, overlay) {
   const { board, handS, handG } = pos;
@@ -115,4 +116,43 @@ function renderHandArea(buf, hand, label, x, y, hl = null, side = 's') {
       ox += txt.length * PFS + 4;
     }
   }
+}
+
+// 選択状態から入力 overlay を作る（純粋）。renderSvg が受ける overlay の形を返す。
+//   sel = { selectedFrom: {board:[f,r]} | {hand:kind} | null,
+//           inputStep: 'sente'|'gote'|null,
+//           legalTargets: Map<"f,r", …> | null }
+export function inputOverlay(sel) {
+  const overlay = { board: [], sHand: null, gHand: null, legalDots: null, selectedSquare: null };
+
+  if (sel.selectedFrom?.board) {
+    overlay.selectedSquare = sel.selectedFrom.board;
+  } else if (sel.selectedFrom?.hand) {
+    if (sel.inputStep === 'gote') {
+      overlay.gHand = new Set([sel.selectedFrom.hand]);
+    } else {
+      overlay.sHand = new Set([sel.selectedFrom.hand]);
+    }
+  }
+
+  if (sel.legalTargets) {
+    overlay.legalDots = new Set(sel.legalTargets.keys());
+  }
+
+  return overlay;
+}
+
+// 開示する組手（ply = {sUsi, gUsi}）から reveal overlay を作る（純粋）。
+// ply が無ければ null（呼び出し側で kifu.plies[cursor] を渡す）。
+export function revealOverlay(ply) {
+  if (!ply) return null;
+  const s = parseUsi(ply.sUsi);
+  const g = parseUsi(ply.gUsi);
+  return {
+    board:          [s.isDrop ? null : s.from, s.to, g.isDrop ? null : g.from, g.to].filter(Boolean),
+    sHand:          s.isDrop ? new Set([s.kind]) : null,
+    gHand:          g.isDrop ? new Set([g.kind]) : null,
+    legalDots:      null,
+    selectedSquare: null,
+  };
 }

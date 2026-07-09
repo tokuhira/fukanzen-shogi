@@ -31,7 +31,7 @@ import { formatResult, terminalMessageJa } from './result-view.js';
 import {
   CELL, BX, BY, BW, BH, SVG_W, SVG_H, PFS, KANJI, HAND_ORDER, countStr,
 } from './geometry.js';
-import { renderSvg } from './board-view.js';
+import { renderSvg, inputOverlay, revealOverlay } from './board-view.js';
 import { usiToText as usiToTextPure } from './notation-view.js';
 import { emptyRecord, appendTurn, truncateTo, buildFromPlies } from './game-record.js';
 import { movesFromSquare, dropsOfKind, buildTargetMap, resolveTarget } from './move-input.js';
@@ -720,42 +720,6 @@ function handleSvgClick(event) {
 
 // ── Overlay computation ────────────────────────────────────────────────────────
 
-function computeRevealOverlay() {
-  const ply = kifu.plies[cursor];
-  if (!ply) return null;
-  const s = parseUsi(ply.sUsi);
-  const g = parseUsi(ply.gUsi);
-  return {
-    board:         [s.isDrop ? null : s.from, s.to, g.isDrop ? null : g.from, g.to].filter(Boolean),
-    sHand:         s.isDrop ? new Set([s.kind]) : null,
-    gHand:         g.isDrop ? new Set([g.kind]) : null,
-    legalDots:     null,
-    selectedSquare: null,
-  };
-}
-
-function computeInputOverlay() {
-  const overlay = { board: [], sHand: null, gHand: null, legalDots: null, selectedSquare: null };
-
-  if (selectedFrom?.board) {
-    overlay.selectedSquare = selectedFrom.board;
-  } else if (selectedFrom?.hand) {
-    if (inputStep === 'gote') {
-      overlay.gHand = overlay.gHand || new Set();
-      overlay.gHand.add(selectedFrom.hand);
-    } else {
-      overlay.sHand = overlay.sHand || new Set();
-      overlay.sHand.add(selectedFrom.hand);
-    }
-  }
-
-  if (legalTargets) {
-    overlay.legalDots = new Set(legalTargets.keys());
-  }
-
-  return overlay;
-}
-
 // ── Navigation ────────────────────────────────────────────────────────────────
 
 function goNext() {
@@ -810,14 +774,16 @@ function render() {
   let overlay, moveText = '', phaseText = '', eventText = '';
 
   if (phase === 'reveal') {
-    overlay   = computeRevealOverlay();
+    overlay   = revealOverlay(kifu.plies[cursor]);
     const ply = kifu.plies[cursor];
     moveText  = `${ply.sText}　${ply.gText}`;
     phaseText = '同時開示';
     const evKey = events[cursor];
     eventText = (evKey && evKey !== 'normal') ? `（${EVENT_LABEL[evKey] || evKey}）` : '';
   } else {
-    overlay = hasInput ? computeInputOverlay() : null;
+    overlay = hasInput
+      ? inputOverlay({ selectedFrom, inputStep, legalTargets })
+      : null;
 
     if (watchMode) {
       phaseText = _watchPhaseText(gameOver);
