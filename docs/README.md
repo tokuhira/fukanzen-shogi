@@ -52,6 +52,7 @@ Sonnet への実行指示書。着地済みのものは**完了記録**として
 | [足場の整備 — CI・serverテスト・docs索引](不完全将棋_実装指示書_足場の整備_CI_serverテスト_docs索引.md) | CI門番・server単体テスト・本索引・取り残しの一掃 | v0.11.1 |
 | [盤面解釈を核へ返す — board.js分割 第〇段](不完全将棋_実装指示書_盤面解釈を核へ返す_board分割第零段.md) | 自前parseSfenをengine-wasmのposition_view getterへ置換・初のwebテストとCIジョブ | v0.11.2 |
 | [純粋の収穫 — board.js分割 第一段a](不完全将棋_実装指示書_純粋の収穫_board分割第一段a.md) | 純粋関数・定数（USI解釈・結果の日本語化・盤の座標系・SVG描画）をESモジュール4本へ切り出し | v0.11.2 |
+| [Wasm足場と棋譜の糊 — board.js分割 第一段b](不完全将棋_実装指示書_Wasm足場と棋譜の糊_board分割第一段b.md) | nodeでWasmを読むテスト足場を初めて据え、usiToTextをWasm注入の純粋モジュールへ | v0.11.2 |
 
 ---
 

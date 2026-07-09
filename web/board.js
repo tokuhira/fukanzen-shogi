@@ -32,6 +32,7 @@ import {
   CELL, BX, BY, BW, BH, SVG_W, SVG_H, PFS, KANJI, HAND_ORDER, countStr,
 } from './geometry.js';
 import { renderSvg } from './board-view.js';
+import { usiToText as usiToTextPure } from './notation-view.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -49,10 +50,9 @@ const EVENT_LABEL = {
   both_died:  '両玉相討ち',
 };
 
+// 実 Wasm 関数を綴じ込んだ board.js ローカルの呼び出し口（既存の呼び出し形を保つ）。
 function usiToText(usi, sfen, side) {
-  const prefix = side === 'sente' ? '☗' : '☖';
-  const legalJson = wasmLegalActions(sfen, side);
-  return `${prefix}${wasmJaNotation(usi, side, legalJson, sfen)}`;
+  return usiToTextPure(usi, sfen, side, wasmLegalActions, wasmJaNotation);
 }
 
 // ── SFEN parser ───────────────────────────────────────────────────────────────
