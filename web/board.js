@@ -35,6 +35,7 @@ import { renderSvg, inputOverlay, revealOverlay } from './board-view.js';
 import { usiToText as usiToTextPure } from './notation-view.js';
 import { emptyRecord, appendTurn, truncateTo, buildFromPlies } from './game-record.js';
 import { movesFromSquare, dropsOfKind, buildTargetMap, resolveTarget } from './move-input.js';
+import { navReduce } from './nav.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -718,6 +719,14 @@ function handleSvgClick(event) {
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 
+// navReduce（純粋）が受ける、state から必要部分だけを切り出したスナップショット。
+function navView() {
+  return {
+    phase: state.phase, cursor: state.cursor, pliesLen: state.plies.length,
+    onlineMode: state.onlineMode, onlineGameOver: state.onlineGameOver,
+  };
+}
+
 function goNext() {
   if (state.promotionPending) return;
   if (state.onlineMode && !state.onlineGameOver) return; // 対局中はナビ不可
@@ -727,17 +736,13 @@ function goNext() {
     render(); return;
   }
 
-  if (state.phase === 'position' && state.cursor < state.plies.length) {
-    update({ phase: 'reveal' });
-  } else if (state.phase === 'reveal') {
-    update({ cursor: state.cursor + 1, phase: 'position' });
-  } else {
-    render();
-  }
+  const patch = navReduce(navView(), 'next');
+  if (patch) update(patch); else render();
 }
 
 function goPrev() {
-  if (state.onlineMode && !state.onlineGameOver) return; // 対局中はナビ不可
+  // 副作用分岐（純粋化しない）: 入力途中のキャンセルを優先
+  if (state.onlineMode && !state.onlineGameOver) return; // ナビ不可（navReduce と同判定だが早期 return）
   if (state.promotionPending) {
     hidePromotionUI();
     update({ promotionPending: null, selectedFrom: null, legalTargets: null });
@@ -751,13 +756,8 @@ function goPrev() {
     return;
   }
 
-  if (state.phase === 'reveal') {
-    update({ phase: 'position' });
-  } else if (state.phase === 'position' && state.cursor > 0) {
-    update({ cursor: state.cursor - 1, phase: 'reveal' });
-  } else {
-    render();
-  }
+  const patch = navReduce(navView(), 'prev');
+  if (patch) update(patch); else render();
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
