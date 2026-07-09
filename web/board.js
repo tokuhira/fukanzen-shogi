@@ -74,58 +74,53 @@ function parseSfen(sfen) {
 // ── Kifu state ────────────────────────────────────────────────────────────────
 
 // plies[i] = { sUsi, gUsi, sText, gText }
-const kifu = { plies: [] };
-let cursor = 0;
-let sfens  = [INITIAL_SFEN];  // sfens[i] = position entering turn i
-let events = [];               // events[i] = event string from resolving plies[i]
-let phase  = 'position';       // 'position' | 'reveal'
+const kifu = { plies: [] };  // 据え置き（第三段b で state へ吸収）
 
-// ── Input state ───────────────────────────────────────────────────────────────
+const state = {
+  // 棋譜コア
+  cursor: 0,
+  sfens: [INITIAL_SFEN],   // sfens[i] = position entering turn i
+  events: [],              // events[i] = event string from resolving plies[i]
+  phase: 'position',       // 'position' | 'reveal'
 
-let inputStep        = null;  // null | 'sente' | 'gote'
-let pendingSente     = null;  // null | { usi, text }
-let pendingGote      = null;  // null | { usi, text }
-let selectedFrom     = null;  // null | { board:[f,r] } | { hand:kind }
-let legalTargets     = null;  // null | Map<"f,r", { options:[{usi,promote}] }>
-let promotionPending = null;  // null | { options, toSquare }
+  // 入力
+  inputStep: null,         // null | 'sente' | 'gote'
+  pendingSente: null,      // null | { usi, text }
+  pendingGote: null,
+  selectedFrom: null,      // null | { board:[f,r] } | { hand:kind }
+  legalTargets: null,      // null | Map<"f,r", { options:[{usi,promote}] }>
+  promotionPending: null,  // null | { options, toSquare }
 
-// Per-sfen legal move cache
-let legalCache = { sfen: null, sente: null, gote: null };
+  // キャッシュ
+  legalCache: { sfen: null, sente: null, gote: null },
+  gameOverCache: { cursor: -1, msg: null },
 
-// Per-cursor game-over cache
-let gameOverCache = { cursor: -1, msg: null };
+  // メタ / 結果
+  versionTuple: null,      // { rule, protocol, app } — init() 完了後にキャッシュ
+  resultOverride: null,    // { kind, outcome } | null — 投了など盤面から導出できない結果
+  loadedMeta: null,        // 読み込んだアーカイブの ArchiveMeta（鑑賞表示・版不一致判定用）
+  maxTurns: null,          // ルール v0.6 の最長手数（組手）。init() 完了後に engine-wasm から取得
 
-// ── Archive state ─────────────────────────────────────────────────────────────
+  // オンライン
+  onlineMode: false,
+  onlineSide: null,        // 'sente' | 'gote'
+  onlineCommitted: false,
+  onlineGameOver: false,
+  onlineEndMsg: '',
+  onlineWaiting: false,
+  onlineWaitingMsg: '',
 
-let versionTuple    = null;  // { rule, protocol, app } — init() 完了後にキャッシュ
-let resultOverride  = null;  // { kind, outcome } | null — 投了など盤面から導出できない結果
-let loadedMeta       = null;  // 読み込んだアーカイブの ArchiveMeta（鑑賞表示・版不一致判定用）
-let maxTurns         = null;  // ルール v0.6 の最長手数（組手）。init() 完了後に engine-wasm から取得
+  // 観戦
+  watchMode: false,
+  watchStatusText: '',
+  spectateToken: null,     // 対局時に受け取った観戦リンク用トークン（プレイヤー側）
 
-// ── Online mode state ─────────────────────────────────────────────────────────
-
-let onlineMode            = false;
-let onlineSide            = null;    // 'sente' | 'gote'
-let onlineCommitted       = false;   // 自分の commit 送信済み（解決待ち中）
-let onlineGameOver        = false;   // 終局確定（review 中も true を維持）
-let onlineEndMsg          = '';      // 終局理由の表示文字列（投了時など）
-let onlineWaiting         = false;   // 切断待機中（相手切断 or 自分切断後の再接続待ち）
-let onlineWaitingMsg      = '';      // 待機時の表示メッセージ
-
-// 対局時に受け取った観戦リンク用トークン（プレイヤー側。共有リンク表示に使う）
-let spectateToken = null;
-
-// ── 記録係の招待と二証人（記録係二段目） ─────────────────────────────────────
-
-let recordInviteAsked = false;  // このゲームで招待の可否を既に尋ねたか（二重prompt防止）
-let recordStatusText  = '';     // 記録係の状態表示用テキスト（最小 surface。§5）
-let archivedLink       = null;  // { id, url } 直近の archived 通知（GET /archive/:id へのリンク）
-let _pendingRecordDisconnect = false;  // 証言送信後、綴じ結果を受け取るまで切断を待っているか
-
-// ── Watch mode state（淀川第三歩） ───────────────────────────────────────────────
-
-let watchMode       = false;  // 読み取り専用の観戦者として接続中か
-let watchStatusText = '';     // 観戦接続の状態表示（接続中／切断など）
+  // 記録係（記録係二段目）
+  recordInviteAsked: false,        // このゲームで招待の可否を既に尋ねたか（二重prompt防止）
+  recordStatusText: '',            // 記録係の状態表示用テキスト（最小 surface。§5）
+  archivedLink: null,              // { id, url } 直近の archived 通知（GET /archive/:id へのリンク）
+  _pendingRecordDisconnect: false, // 証言送信後、綴じ結果を受け取るまで切断を待っているか
+};
 
 // ── Kifu management ───────────────────────────────────────────────────────────
 //
@@ -134,37 +129,37 @@ let watchStatusText = '';     // 観戦接続の状態表示（接続中／切�
 // currentRecord が状態と純粋層の橋渡しをする（board.js 分割 第二段a）。
 
 function setRecord(record) {
-  sfens      = record.sfens;
-  events     = record.events;
+  state.sfens      = record.sfens;
+  state.events     = record.events;
   kifu.plies = record.plies;
 }
 function currentRecord() {
-  return { sfens, events, plies: kifu.plies };
+  return { sfens: state.sfens, events: state.events, plies: kifu.plies };
 }
 
 function loadPlies(plies, initialSfen = INITIAL_SFEN) {
   setRecord(buildFromPlies(initialSfen, plies, resolvePly, usiToText));
-  cursor = 0;
-  phase  = 'position';
+  state.cursor = 0;
+  state.phase  = 'position';
   resetInput();
-  gameOverCache  = { cursor: -1, msg: null };
-  resultOverride = null;
+  state.gameOverCache  = { cursor: -1, msg: null };
+  state.resultOverride = null;
 }
 
 function resetToNew() {
   setRecord(emptyRecord(INITIAL_SFEN));
-  cursor = 0;
-  phase  = 'position';
+  state.cursor = 0;
+  state.phase  = 'position';
   resetInput();
-  gameOverCache  = { cursor: -1, msg: null };
-  resultOverride = null;
-  loadedMeta     = null;
+  state.gameOverCache  = { cursor: -1, msg: null };
+  state.resultOverride = null;
+  state.loadedMeta     = null;
 }
 
 function branchAndAppend(sUsi, gUsi, sText, gText) {
-  setRecord(appendTurn(truncateTo(currentRecord(), cursor), sUsi, gUsi, resolvePly, usiToText, sText, gText));
-  gameOverCache = { cursor: -1, msg: null };
-  phase = 'reveal';  // cursor stays — reveal shows the move just played
+  setRecord(appendTurn(truncateTo(currentRecord(), state.cursor), sUsi, gUsi, resolvePly, usiToText, sText, gText));
+  state.gameOverCache = { cursor: -1, msg: null };
+  state.phase = 'reveal';  // cursor stays — reveal shows the move just played
   resetInput();
 }
 
@@ -177,17 +172,17 @@ function watchAppendTurn(sUsi, gUsi) {
     console.error('watch: resolve_ply failed:', e.message);
     return;
   }
-  gameOverCache = { cursor: -1, msg: null };
+  state.gameOverCache = { cursor: -1, msg: null };
 }
 
 // ── Game-over detection ───────────────────────────────────────────────────────
 
 function getGameOverMsg() {
-  if (phase !== 'position') return null;
-  if (cursor !== gameOverCache.cursor) {
-    gameOverCache = { cursor, msg: computeGameOver() };
+  if (state.phase !== 'position') return null;
+  if (state.cursor !== state.gameOverCache.cursor) {
+    state.gameOverCache = { cursor: state.cursor, msg: computeGameOver() };
   }
-  return gameOverCache.msg;
+  return state.gameOverCache.msg;
 }
 
 // kifu.plies の先頭から uptoPlies 組手までの局面を、engine::terminate::evaluate
@@ -195,23 +190,23 @@ function getGameOverMsg() {
 // に集約し、web 側では順序を再実装しない（アーカイブ語彙 kind/outcome を返す）。
 function evaluateTerminalAt(uptoPlies) {
   const request = {
-    initial_sfen: sfens[0],
+    initial_sfen: state.sfens[0],
     plies: kifu.plies.slice(0, uptoPlies).map(p => ({ s: p.sUsi, g: p.gUsi })),
   };
   return JSON.parse(wasmEvaluateTerminal(JSON.stringify(request)));
 }
 
 function computeGameOver() {
-  const term = evaluateTerminalAt(cursor);
+  const term = evaluateTerminalAt(state.cursor);
   if (term.status !== 'terminal') return null;
-  return terminalMessageJa(term.kind, term.outcome, maxTurns);
+  return terminalMessageJa(term.kind, term.outcome, state.maxTurns);
 }
 
 // ── Archive ────────────────────────────────────────────────────────────────────
 
 // 対局全体（現在の表示カーソルではなく kifu.plies の末尾）の結果をアーカイブ語彙で返す
 function currentResult() {
-  if (resultOverride) return resultOverride;
+  if (state.resultOverride) return state.resultOverride;
   const term = evaluateTerminalAt(kifu.plies.length);
   if (term.status === 'terminal') return { kind: term.kind, outcome: term.outcome };
   return { kind: 'unfinished', outcome: 'none' };
@@ -219,13 +214,13 @@ function currentResult() {
 
 // 現在の対局を版タプル付きアーカイブ書式のテキストへ変換する。失敗時は null。
 function buildArchiveText() {
-  if (!versionTuple) return null;
+  if (!state.versionTuple) return null;
   const request = {
     initial_sfen: INITIAL_SFEN,
     plies: kifu.plies.map(p => ({ s: p.sUsi, g: p.gUsi })),
-    rule: versionTuple.rule,
-    protocol: versionTuple.protocol,
-    app: versionTuple.app,
+    rule: state.versionTuple.rule,
+    protocol: state.versionTuple.protocol,
+    app: state.versionTuple.app,
     sente: null,
     gote: null,
     result: currentResult(),
@@ -281,7 +276,7 @@ function parseArchiveText(text) {
 // 呼び出し時点の値を参照する関数にする（モジュール読込時点の定数にしない）。
 function archiveLoadErrorJa(error) {
   if (error === 'too_many_plies') {
-    return `棋譜の着手数が多すぎます（上限 ${maxTurns} 組手）。読み込みを中止しました。`;
+    return `棋譜の着手数が多すぎます（上限 ${state.maxTurns} 組手）。読み込みを中止しました。`;
   }
   return '棋譜を読み込めませんでした';
 }
@@ -295,7 +290,7 @@ function loadArchive(text) {
   }
 
   // ローカル鑑賞として読む（オンライン状態は畳む）
-  if (onlineMode || onlineGameOver) { _resetOnlineState(); disconnectOnline(); }
+  if (state.onlineMode || state.onlineGameOver) { _resetOnlineState(); disconnectOnline(); }
 
   const plies = parsed.plies.map(p => ({ sUsi: p.s, gUsi: p.g }));
   try {
@@ -305,25 +300,25 @@ function loadArchive(text) {
     return;
   }
 
-  loadedMeta = parsed.meta;
+  state.loadedMeta = parsed.meta;
   render();
 }
 
 // 読み込んだアーカイブの版タプル・結果を鑑賞表示する。版不一致なら注意を返す。
 function archiveInfoText() {
-  if (!loadedMeta) return { text: '', mismatch: false };
+  if (!state.loadedMeta) return { text: '', mismatch: false };
 
-  const versionLine = loadedMeta.app
-    ? `ルール ${loadedMeta.rule} / プロトコル ${loadedMeta.protocol} / v${loadedMeta.app}`
-    : `ルール ${loadedMeta.rule} / プロトコル ${loadedMeta.protocol}`;
-  const resultLine = formatResult(loadedMeta.result);
+  const versionLine = state.loadedMeta.app
+    ? `ルール ${state.loadedMeta.rule} / プロトコル ${state.loadedMeta.protocol} / v${state.loadedMeta.app}`
+    : `ルール ${state.loadedMeta.rule} / プロトコル ${state.loadedMeta.protocol}`;
+  const resultLine = formatResult(state.loadedMeta.result);
 
-  const mismatch = !!(versionTuple && loadedMeta.rule !== versionTuple.rule);
+  const mismatch = !!(state.versionTuple && state.loadedMeta.rule !== state.versionTuple.rule);
   if (!mismatch) {
     return { text: `${versionLine} — ${resultLine}`, mismatch: false };
   }
   const warning =
-    `この棋譜はルール ${loadedMeta.rule} で指されました。現在の再生エンジンはルール ${versionTuple.rule} です。` +
+    `この棋譜はルール ${state.loadedMeta.rule} で指されました。現在の再生エンジンはルール ${state.versionTuple.rule} です。` +
     `再生結果が当時と異なる可能性があります。`;
   return { text: `${versionLine} — ${resultLine} ／ ${warning}`, mismatch: true };
 }
@@ -341,17 +336,17 @@ function _metaToLoadedMeta(version, result) {
 
 // 観戦トークンで部屋へ読み取り専用接続し、第二歩の再生機構へ流し込む。
 function enterWatchMode(token) {
-  if (onlineMode) { _resetOnlineState(); disconnectOnline(); }
-  watchMode       = true;
-  watchStatusText = '';
-  recordStatusText = '';
-  archivedLink      = null;
+  if (state.onlineMode) { _resetOnlineState(); disconnectOnline(); }
+  state.watchMode       = true;
+  state.watchStatusText = '';
+  state.recordStatusText = '';
+  state.archivedLink      = null;
   resetToNew();
   render();
 
   connectSpectate(token, {
-    onStatus: (state) => {
-      watchStatusText = state;
+    onStatus: (statusText) => {
+      state.watchStatusText = statusText;
       render();
     },
     onInit: ({ version, initial_sfen, turns, result }) => {
@@ -361,17 +356,17 @@ function enterWatchMode(token) {
       } catch (e) {
         console.error('watch: catchup replay failed:', e.message);
       }
-      cursor     = kifu.plies.length;  // 現局面（最新）まで追いつく
-      loadedMeta = _metaToLoadedMeta(version, result);
+      state.cursor     = kifu.plies.length;  // 現局面（最新）まで追いつく
+      state.loadedMeta = _metaToLoadedMeta(version, result);
       render();
     },
     onMeta: ({ version, initial_sfen }) => {
       // 同じ部屋で新しい対局（再戦）が始まった。記録を初期化して迎える。
       resetToNew();
-      sfens      = [initial_sfen || INITIAL_SFEN];
-      loadedMeta = _metaToLoadedMeta(version, null);
-      recordStatusText = '';
-      archivedLink      = null;
+      state.sfens      = [initial_sfen || INITIAL_SFEN];
+      state.loadedMeta = _metaToLoadedMeta(version, null);
+      state.recordStatusText = '';
+      state.archivedLink      = null;
       render();
     },
     onTurn: (sUsi, gUsi) => {
@@ -379,22 +374,22 @@ function enterWatchMode(token) {
       render();
     },
     onResult: (kind, outcome) => {
-      if (loadedMeta) loadedMeta.result = { kind, outcome };
+      if (state.loadedMeta) state.loadedMeta.result = { kind, outcome };
       render();
     },
     onRecordConfirmed: () => {
       // 記録係二段目 §10: 記録係がこの対局に招かれたことを観戦者にも透明に示す。
-      recordStatusText = '記録係: 有効（この対局は書庫へ綴じられます）';
+      state.recordStatusText = '記録係: 有効（この対局は書庫へ綴じられます）';
       render();
     },
     onRecordDisagreement: (idA, idB, id) => {
-      recordStatusText = '記録が食い違いました（裁定はされません）';
-      archivedLink = id ? { id, url: archiveUrl(id) } : null;
+      state.recordStatusText = '記録が食い違いました（裁定はされません）';
+      state.archivedLink = id ? { id, url: archiveUrl(id) } : null;
       render();
     },
     onArchived: (id) => {
-      recordStatusText = '記録されました';
-      archivedLink = { id, url: archiveUrl(id) };
+      state.recordStatusText = '記録されました';
+      state.archivedLink = { id, url: archiveUrl(id) };
       render();
     },
   });
@@ -402,62 +397,62 @@ function enterWatchMode(token) {
 
 function leaveWatchMode() {
   disconnectSpectate();
-  watchMode       = false;
-  recordStatusText = '';
-  archivedLink      = null;
-  watchStatusText = '';
+  state.watchMode       = false;
+  state.recordStatusText = '';
+  state.archivedLink      = null;
+  state.watchStatusText = '';
   resetToNew();
 }
 
 // ── Input management ──────────────────────────────────────────────────────────
 
 function resetInput() {
-  inputStep        = null;
-  pendingSente     = null;
-  pendingGote      = null;
-  selectedFrom     = null;
-  legalTargets     = null;
-  promotionPending = null;
+  state.inputStep        = null;
+  state.pendingSente     = null;
+  state.pendingGote      = null;
+  state.selectedFrom     = null;
+  state.legalTargets     = null;
+  state.promotionPending = null;
   hidePromotionUI();
 }
 
 function getLegalMovesForSide(side) {
-  const sfen = sfens[cursor];
-  if (legalCache.sfen !== sfen) {
-    legalCache = { sfen, sente: null, gote: null };
+  const sfen = state.sfens[state.cursor];
+  if (state.legalCache.sfen !== sfen) {
+    state.legalCache = { sfen, sente: null, gote: null };
   }
-  if (!legalCache[side]) {
-    legalCache[side] = JSON.parse(wasmLegalActions(sfen, side)).map(parseUsi);
+  if (!state.legalCache[side]) {
+    state.legalCache[side] = JSON.parse(wasmLegalActions(sfen, side)).map(parseUsi);
   }
-  return legalCache[side];
+  return state.legalCache[side];
 }
 
 function activateMoves(moves, from) {
-  if (!moves.length) { selectedFrom = null; legalTargets = null; return; }
-  selectedFrom = from;
-  legalTargets = buildTargetMap(moves);
+  if (!moves.length) { state.selectedFrom = null; state.legalTargets = null; return; }
+  state.selectedFrom = from;
+  state.legalTargets = buildTargetMap(moves);
 }
 
 function selectBoardPiece(file, rank) {
-  if (!inputStep) inputStep = 'sente';
-  const side  = inputStep === 'gote' ? 'gote' : 'sente';
+  if (!state.inputStep) state.inputStep = 'sente';
+  const side  = state.inputStep === 'gote' ? 'gote' : 'sente';
   const moves = movesFromSquare(getLegalMovesForSide(side), file, rank);
   activateMoves(moves, { board: [file, rank] });
 }
 
 function selectHandPiece(kind) {
-  if (!inputStep) inputStep = 'sente';
-  const side  = inputStep === 'gote' ? 'gote' : 'sente';
+  if (!state.inputStep) state.inputStep = 'sente';
+  const side  = state.inputStep === 'gote' ? 'gote' : 'sente';
   const moves = dropsOfKind(getLegalMovesForSide(side), kind);
   activateMoves(moves, { hand: kind });
 }
 
 function selectTarget(file, rank) {
-  const action = resolveTarget(legalTargets, file, rank);
+  const action = resolveTarget(state.legalTargets, file, rank);
   if (action.kind === 'deselect') {
-    selectedFrom = null; legalTargets = null;
+    state.selectedFrom = null; state.legalTargets = null;
   } else if (action.kind === 'promptPromotion') {
-    promotionPending = { options: action.options, toSquare: action.toSquare };
+    state.promotionPending = { options: action.options, toSquare: action.toSquare };
     showPromotionUI();
   } else { // 'confirm'
     confirmMove(action.usi);
@@ -466,66 +461,66 @@ function selectTarget(file, rank) {
 }
 
 function confirmMove(usi) {
-  const side = inputStep === 'gote' ? 'gote' : 'sente';
-  const text = usiToText(usi, sfens[cursor], side);
+  const side = state.inputStep === 'gote' ? 'gote' : 'sente';
+  const text = usiToText(usi, state.sfens[state.cursor], side);
 
-  if (onlineMode) {
+  if (state.onlineMode) {
     // オンラインモード: 自分の陣営だけ確定して commit を送信する
-    if (side === 'sente') pendingSente = { usi, text };
-    else                  pendingGote  = { usi, text };
-    inputStep        = null;
-    selectedFrom     = null;
-    legalTargets     = null;
-    promotionPending = null;
+    if (side === 'sente') state.pendingSente = { usi, text };
+    else                  state.pendingGote  = { usi, text };
+    state.inputStep        = null;
+    state.selectedFrom     = null;
+    state.legalTargets     = null;
+    state.promotionPending = null;
     hidePromotionUI();
-    onlineCommitted  = true;
-    commitMoveOnline(sfens[cursor], usi);
+    state.onlineCommitted  = true;
+    commitMoveOnline(state.sfens[state.cursor], usi);
     return;
   }
 
   // ホットシートモード（従来）
   if (side === 'sente') {
-    pendingSente = { usi, text };
-    inputStep    = 'gote';
+    state.pendingSente = { usi, text };
+    state.inputStep    = 'gote';
   } else {
-    pendingGote = { usi, text };
+    state.pendingGote = { usi, text };
   }
-  selectedFrom = null; legalTargets = null;
-  promotionPending = null; hidePromotionUI();
+  state.selectedFrom = null; state.legalTargets = null;
+  state.promotionPending = null; hidePromotionUI();
 }
 
 function _resetOnlineState() {
-  onlineMode       = false;
-  onlineSide       = null;
-  onlineGameOver   = false;
-  onlineEndMsg     = '';
-  onlineCommitted  = false;
-  onlineWaiting    = false;
-  onlineWaitingMsg = '';
-  resultOverride   = null;
-  recordInviteAsked = false;
-  recordStatusText  = '';
-  archivedLink      = null;
-  _pendingRecordDisconnect = false;
+  state.onlineMode       = false;
+  state.onlineSide       = null;
+  state.onlineGameOver   = false;
+  state.onlineEndMsg     = '';
+  state.onlineCommitted  = false;
+  state.onlineWaiting    = false;
+  state.onlineWaitingMsg = '';
+  state.resultOverride   = null;
+  state.recordInviteAsked = false;
+  state.recordStatusText  = '';
+  state.archivedLink      = null;
+  state._pendingRecordDisconnect = false;
 }
 
 function _onlinePhaseText(gameOver) {
-  if (onlineGameOver) {
-    if (gameOver || cursor === kifu.plies.length) return onlineEndMsg || gameOver || '終局';
-    if (cursor === 0) return '初期局面';
-    return `第${cursor}組手後`;
+  if (state.onlineGameOver) {
+    if (gameOver || state.cursor === kifu.plies.length) return state.onlineEndMsg || gameOver || '終局';
+    if (state.cursor === 0) return '初期局面';
+    return `第${state.cursor}組手後`;
   }
-  if (onlineWaiting)   return onlineWaitingMsg;
-  if (onlineCommitted) return '着手確定 — 相手の着手を待っています';
-  if (onlineSide === 'gote') return selectedFrom ? '後手の手を選択中' : '後手の手を選んでください';
-  return selectedFrom ? '先手の手を選択中' : '先手の手を選んでください';
+  if (state.onlineWaiting)   return state.onlineWaitingMsg;
+  if (state.onlineCommitted) return '着手確定 — 相手の着手を待っています';
+  if (state.onlineSide === 'gote') return state.selectedFrom ? '後手の手を選択中' : '後手の手を選んでください';
+  return state.selectedFrom ? '先手の手を選択中' : '先手の手を選んでください';
 }
 
 function endOnlineGame(msg) {
-  onlineGameOver  = true;
-  onlineEndMsg    = msg;
-  onlineCommitted = false;
-  onlineWaiting   = false;
+  state.onlineGameOver  = true;
+  state.onlineEndMsg    = msg;
+  state.onlineCommitted = false;
+  state.onlineWaiting   = false;
   // 観戦者へライブの終局表示を知らせる（disconnectOnline で ws を閉じる前に
   // 送る必要がある。text は同梱しない——綴じは record_testimony 経路へ移った。
   // 記録係二段目 §10）。
@@ -538,9 +533,9 @@ function endOnlineGame(msg) {
     // 証言を送った直後に自分から切断してしまうため。結果が届く（onArchived/
     // onRecordDisagreement）まで、または保険のタイムアウトまで待ってから切断する。
     sendRecordTestimony(result.kind, result.outcome, buildArchiveText());
-    _pendingRecordDisconnect = true;
+    state._pendingRecordDisconnect = true;
     setTimeout(() => {
-      if (_pendingRecordDisconnect) { _pendingRecordDisconnect = false; disconnectOnline(); }
+      if (state._pendingRecordDisconnect) { state._pendingRecordDisconnect = false; disconnectOnline(); }
     }, 5000);
   } else {
     // 終局後は WS を閉じる（intentional なので onlineMode は破棄しない）
@@ -550,7 +545,7 @@ function endOnlineGame(msg) {
 }
 
 function handleTurnComplete(senteUsi, goteUsi) {
-  onlineCommitted = false;
+  state.onlineCommitted = false;
 
   // 投了の検出（ルール 5.3 / 5.4）
   const sResign = senteUsi === 'resign';
@@ -561,19 +556,19 @@ function handleTurnComplete(senteUsi, goteUsi) {
       msg = '引き分け（両者投了）';
       outcome = 'draw';
     } else if (sResign) {
-      msg = onlineSide === 'sente' ? '投了しました（後手の勝ち）' : '相手が投了しました（先手の勝ち）';
+      msg = state.onlineSide === 'sente' ? '投了しました（後手の勝ち）' : '相手が投了しました（先手の勝ち）';
       outcome = 'gote_wins';
     } else {
-      msg = onlineSide === 'gote'  ? '投了しました（先手の勝ち）' : '相手が投了しました（後手の勝ち）';
+      msg = state.onlineSide === 'gote'  ? '投了しました（先手の勝ち）' : '相手が投了しました（後手の勝ち）';
       outcome = 'sente_wins';
     }
-    resultOverride = { kind: 'resign', outcome };
+    state.resultOverride = { kind: 'resign', outcome };
     endOnlineGame(msg);
     return;
   }
 
-  const sText = usiToText(senteUsi, sfens[cursor], 'sente');
-  const gText = usiToText(goteUsi,  sfens[cursor], 'gote');
+  const sText = usiToText(senteUsi, state.sfens[state.cursor], 'sente');
+  const gText = usiToText(goteUsi,  state.sfens[state.cursor], 'gote');
   branchAndAppend(senteUsi, goteUsi, sText, gText);
   // phase='reveal' のまま待機 → 盤面クリックで次局面へ（handleSvgClick で処理）
   render();
@@ -622,22 +617,22 @@ function getHandPieceAt(hand, y0, sx, sy) {
 }
 
 function _advanceFromReveal(sx, sy) {
-  cursor++;
-  phase = 'position';
+  state.cursor++;
+  state.phase = 'position';
   const msg = getGameOverMsg();
   if (msg) { endOnlineGame(msg); return; }
 
-  if (onlineSide === 'gote') inputStep = 'gote';
+  if (state.onlineSide === 'gote') state.inputStep = 'gote';
 
   // クリック座標が自分の合法手の駒に当たっていれば選択状態へ直接遷移
-  const activeSide = onlineSide === 'gote' ? 'g' : 's';
-  const pos = parseSfen(sfens[cursor]);
+  const activeSide = state.onlineSide === 'gote' ? 'g' : 's';
+  const pos = parseSfen(state.sfens[state.cursor]);
   const sq  = getBoardSquare(sx, sy);
   if (sq) {
     const [f, r] = sq;
     const piece = pos.board.get(`${f},${r}`);
     if (piece && piece.side === activeSide) selectBoardPiece(f, r);
-  } else if (onlineSide === 'gote') {
+  } else if (state.onlineSide === 'gote') {
     const k = getHandPieceAt(pos.handG, 8, sx, sy);
     if (k) selectHandPiece(k);
   } else {
@@ -648,35 +643,35 @@ function _advanceFromReveal(sx, sy) {
 }
 
 function handleSvgClick(event) {
-  if (watchMode) return;  // 観戦は読み取り専用（盤クリックで着手できない）
+  if (state.watchMode) return;  // 観戦は読み取り専用（盤クリックで着手できない）
 
   // 同時開示フェーズ: 盤面・駒台クリックで次局面へ遷移
-  if (phase === 'reveal' && onlineMode && !onlineGameOver) {
+  if (state.phase === 'reveal' && state.onlineMode && !state.onlineGameOver) {
     const { x: sx, y: sy } = svgCoords(event);
     _advanceFromReveal(sx, sy);
     return;
   }
 
-  if (phase !== 'position') return;
-  if (promotionPending)     return;
-  if (onlineMode && onlineCommitted) return;
+  if (state.phase !== 'position') return;
+  if (state.promotionPending)     return;
+  if (state.onlineMode && state.onlineCommitted) return;
 
   const { x: sx, y: sy } = svgCoords(event);
   const gameOver = getGameOverMsg();
-  const pos      = parseSfen(sfens[cursor]);
-  const activeSide = inputStep === 'gote' ? 'g' : 's';
+  const pos      = parseSfen(state.sfens[state.cursor]);
+  const activeSide = state.inputStep === 'gote' ? 'g' : 's';
 
   // If target selection is active, check for legal target click first
-  if (legalTargets) {
+  if (state.legalTargets) {
     const sq = getBoardSquare(sx, sy);
     if (sq) {
       const key = `${sq[0]},${sq[1]}`;
-      if (legalTargets.has(key)) { selectTarget(sq[0], sq[1]); render(); return; }
+      if (state.legalTargets.has(key)) { selectTarget(sq[0], sq[1]); render(); return; }
     }
   }
 
   // Clicks disabled when game is over and no input is active
-  if (gameOver && !inputStep) return;
+  if (gameOver && !state.inputStep) return;
 
   // Board square click
   const sq = getBoardSquare(sx, sy);
@@ -685,33 +680,33 @@ function handleSvgClick(event) {
     const piece  = pos.board.get(`${f},${r}`);
     if (piece && piece.side === activeSide) {
       // Toggle selection on same piece; switch to different own piece
-      if (selectedFrom?.board?.[0] === f && selectedFrom?.board?.[1] === r) {
-        selectedFrom = null; legalTargets = null;
+      if (state.selectedFrom?.board?.[0] === f && state.selectedFrom?.board?.[1] === r) {
+        state.selectedFrom = null; state.legalTargets = null;
       } else {
         selectBoardPiece(f, r);
       }
       render(); return;
     }
     // Clicked empty or opponent square → deselect without changing inputStep
-    if (selectedFrom) { selectedFrom = null; legalTargets = null; render(); }
+    if (state.selectedFrom) { state.selectedFrom = null; state.legalTargets = null; render(); }
     return;
   }
 
   // Gote hand (y=8) — only during gote's turn
-  if (inputStep === 'gote') {
+  if (state.inputStep === 'gote') {
     const k = getHandPieceAt(pos.handG, 8, sx, sy);
     if (k) {
-      if (selectedFrom?.hand === k) { selectedFrom = null; legalTargets = null; }
+      if (state.selectedFrom?.hand === k) { state.selectedFrom = null; state.legalTargets = null; }
       else selectHandPiece(k);
       render(); return;
     }
   }
 
   // Sente hand (y=BY+BH+12) — during sente's turn or before input starts
-  if (inputStep !== 'gote') {
+  if (state.inputStep !== 'gote') {
     const k = getHandPieceAt(pos.handS, BY + BH + 12, sx, sy);
     if (k) {
-      if (selectedFrom?.hand === k) { selectedFrom = null; legalTargets = null; }
+      if (state.selectedFrom?.hand === k) { state.selectedFrom = null; state.legalTargets = null; }
       else selectHandPiece(k);
       render(); return;
     }
@@ -723,42 +718,42 @@ function handleSvgClick(event) {
 // ── Navigation ────────────────────────────────────────────────────────────────
 
 function goNext() {
-  if (promotionPending) return;
-  if (onlineMode && !onlineGameOver) return; // 対局中はナビ不可
+  if (state.promotionPending) return;
+  if (state.onlineMode && !state.onlineGameOver) return; // 対局中はナビ不可
 
-  if (pendingSente && pendingGote) {
-    branchAndAppend(pendingSente.usi, pendingGote.usi, pendingSente.text, pendingGote.text);
+  if (state.pendingSente && state.pendingGote) {
+    branchAndAppend(state.pendingSente.usi, state.pendingGote.usi, state.pendingSente.text, state.pendingGote.text);
     render(); return;
   }
 
-  if (phase === 'position' && cursor < kifu.plies.length) {
-    phase = 'reveal';
-  } else if (phase === 'reveal') {
-    cursor++;
-    phase = 'position';
+  if (state.phase === 'position' && state.cursor < kifu.plies.length) {
+    state.phase = 'reveal';
+  } else if (state.phase === 'reveal') {
+    state.cursor++;
+    state.phase = 'position';
   }
   render();
 }
 
 function goPrev() {
-  if (onlineMode && !onlineGameOver) return; // 対局中はナビ不可
-  if (promotionPending) {
-    promotionPending = null; hidePromotionUI();
-    selectedFrom = null; legalTargets = null;
+  if (state.onlineMode && !state.onlineGameOver) return; // 対局中はナビ不可
+  if (state.promotionPending) {
+    state.promotionPending = null; hidePromotionUI();
+    state.selectedFrom = null; state.legalTargets = null;
     render(); return;
   }
 
-  if (inputStep !== null || selectedFrom !== null) {
+  if (state.inputStep !== null || state.selectedFrom !== null) {
     // One press cancels all input state; second press starts navigating back
     resetInput();
     render(); return;
   }
 
-  if (phase === 'reveal') {
-    phase = 'position';
-  } else if (phase === 'position' && cursor > 0) {
-    cursor--;
-    phase = 'reveal';
+  if (state.phase === 'reveal') {
+    state.phase = 'position';
+  } else if (state.phase === 'position' && state.cursor > 0) {
+    state.cursor--;
+    state.phase = 'reveal';
   }
   render();
 }
@@ -766,55 +761,55 @@ function goPrev() {
 // ── Render ────────────────────────────────────────────────────────────────────
 
 function render() {
-  const pos       = parseSfen(sfens[cursor]);
-  const bothReady = !!(pendingSente && pendingGote);
-  const hasInput  = !!(inputStep || selectedFrom || pendingSente || pendingGote);
+  const pos       = parseSfen(state.sfens[state.cursor]);
+  const bothReady = !!(state.pendingSente && state.pendingGote);
+  const hasInput  = !!(state.inputStep || state.selectedFrom || state.pendingSente || state.pendingGote);
   const gameOver  = getGameOverMsg();
 
   let overlay, moveText = '', phaseText = '', eventText = '';
 
-  if (phase === 'reveal') {
-    overlay   = revealOverlay(kifu.plies[cursor]);
-    const ply = kifu.plies[cursor];
+  if (state.phase === 'reveal') {
+    overlay   = revealOverlay(kifu.plies[state.cursor]);
+    const ply = kifu.plies[state.cursor];
     moveText  = `${ply.sText}　${ply.gText}`;
     phaseText = '同時開示';
-    const evKey = events[cursor];
+    const evKey = state.events[state.cursor];
     eventText = (evKey && evKey !== 'normal') ? `（${EVENT_LABEL[evKey] || evKey}）` : '';
   } else {
     overlay = hasInput
-      ? inputOverlay({ selectedFrom, inputStep, legalTargets })
+      ? inputOverlay({ selectedFrom: state.selectedFrom, inputStep: state.inputStep, legalTargets: state.legalTargets })
       : null;
 
-    if (watchMode) {
+    if (state.watchMode) {
       phaseText = _watchPhaseText(gameOver);
-    } else if (onlineMode) {
+    } else if (state.onlineMode) {
       phaseText = _onlinePhaseText(gameOver);
-      if (!onlineGameOver && onlineCommitted) {
-        moveText = onlineSide === 'sente' ? (pendingSente?.text || '') : (pendingGote?.text || '');
+      if (!state.onlineGameOver && state.onlineCommitted) {
+        moveText = state.onlineSide === 'sente' ? (state.pendingSente?.text || '') : (state.pendingGote?.text || '');
       }
     } else if (bothReady) {
-      moveText  = `${pendingSente.text}　${pendingGote.text}`;
+      moveText  = `${state.pendingSente.text}　${state.pendingGote.text}`;
       phaseText = '解決してください';
-    } else if (pendingSente) {
-      moveText  = pendingSente.text;
+    } else if (state.pendingSente) {
+      moveText  = state.pendingSente.text;
       phaseText = '後手の手を選択中';
-    } else if (inputStep === 'gote') {
+    } else if (state.inputStep === 'gote') {
       phaseText = '後手の手を選択中';
-    } else if (inputStep === 'sente' || selectedFrom) {
+    } else if (state.inputStep === 'sente' || state.selectedFrom) {
       phaseText = '先手の手を選択中';
     } else if (gameOver) {
       phaseText = gameOver;
-    } else if (cursor === 0) {
+    } else if (state.cursor === 0) {
       phaseText = '初期局面';
     } else {
-      phaseText = `第${cursor}組手後`;
+      phaseText = `第${state.cursor}組手後`;
     }
   }
 
   const svg = document.getElementById('board');
   svg.setAttribute('viewBox', `0 0 ${SVG_W} ${SVG_H}`);
   svg.innerHTML = renderSvg(pos, overlay);
-  svg.style.cursor = (phase === 'position' && !gameOver && !watchMode && !(onlineMode && onlineCommitted))
+  svg.style.cursor = (state.phase === 'position' && !gameOver && !state.watchMode && !(state.onlineMode && state.onlineCommitted))
     ? 'pointer' : 'default';
 
   document.getElementById('phase-label').textContent  = phaseText;
@@ -827,29 +822,29 @@ function render() {
   archiveInfoEl.classList.toggle('mismatch', archiveInfo.mismatch);
 
   const total = kifu.plies.length * 2 + 1;
-  const step  = cursor * 2 + (phase === 'reveal' ? 1 : 0) + 1;
+  const step  = state.cursor * 2 + (state.phase === 'reveal' ? 1 : 0) + 1;
   document.getElementById('step-label').textContent = `${step} / ${total}`;
 
   const btnNext = document.getElementById('btn-next');
   const btnPrev = document.getElementById('btn-prev');
 
-  if (watchMode) {
+  if (state.watchMode) {
     // 観戦中は常に棋譜ナビゲーション可能（コミット待ちの概念が無い）。
     btnNext.textContent = '次 →';
     btnNext.disabled = !(
-      phase === 'reveal' ||
-      (phase === 'position' && cursor < kifu.plies.length)
+      state.phase === 'reveal' ||
+      (state.phase === 'position' && state.cursor < kifu.plies.length)
     );
-    btnPrev.disabled = cursor === 0 && phase === 'position';
-  } else if (onlineMode) {
+    btnPrev.disabled = state.cursor === 0 && state.phase === 'position';
+  } else if (state.onlineMode) {
     btnNext.textContent = '次 →';
-    if (onlineGameOver) {
+    if (state.onlineGameOver) {
       // 終局後は棋譜ナビゲーションを解放（phase に関係なく維持）
       btnNext.disabled = !(
-        phase === 'reveal' ||
-        (phase === 'position' && cursor < kifu.plies.length)
+        state.phase === 'reveal' ||
+        (state.phase === 'position' && state.cursor < kifu.plies.length)
       );
-      btnPrev.disabled = cursor === 0 && phase === 'position';
+      btnPrev.disabled = state.cursor === 0 && state.phase === 'position';
     } else {
       btnNext.disabled = true;
       btnPrev.disabled = true;
@@ -858,39 +853,39 @@ function render() {
     btnNext.textContent = bothReady ? '解決 →' : '次 →';
     btnNext.disabled    = !(
       bothReady ||
-      phase === 'reveal' ||
-      (phase === 'position' && !hasInput && cursor < kifu.plies.length)
+      state.phase === 'reveal' ||
+      (state.phase === 'position' && !hasInput && state.cursor < kifu.plies.length)
     );
     btnPrev.disabled    = (
-      cursor === 0 && phase === 'position' && !hasInput && !promotionPending
+      state.cursor === 0 && state.phase === 'position' && !hasInput && !state.promotionPending
     );
   }
 
   const btnResign = document.getElementById('btn-resign');
   if (btnResign) {
-    btnResign.style.display = (onlineMode && !onlineGameOver) ? 'inline-block' : 'none';
-    btnResign.disabled      = onlineCommitted || onlineWaiting;
+    btnResign.style.display = (state.onlineMode && !state.onlineGameOver) ? 'inline-block' : 'none';
+    btnResign.disabled      = state.onlineCommitted || state.onlineWaiting;
   }
 
   const btnSave = document.getElementById('btn-save');
   if (btnSave) {
-    const isOver = onlineMode ? onlineGameOver : !!gameOver;
+    const isOver = state.onlineMode ? state.onlineGameOver : !!gameOver;
     btnSave.classList.toggle('highlight', isOver);
   }
 
   // 観戦中は対局を始める系のボタンを封じ、代わりに「観戦をやめる」を出す。
   for (const id of ['btn-online', 'btn-load']) {
     const btn = document.getElementById(id);
-    if (btn) btn.disabled = watchMode;
+    if (btn) btn.disabled = state.watchMode;
   }
   const btnLeaveWatch = document.getElementById('btn-leave-watch');
-  if (btnLeaveWatch) btnLeaveWatch.hidden = !watchMode;
+  if (btnLeaveWatch) btnLeaveWatch.hidden = !state.watchMode;
 
   const linkText = document.getElementById('watch-link-text');
   const linkBtn  = document.getElementById('btn-copy-watch-link');
   if (linkText && linkBtn) {
-    if (onlineMode && spectateToken) {
-      const link = `${location.origin}${location.pathname}?watch=${encodeURIComponent(spectateToken)}`;
+    if (state.onlineMode && state.spectateToken) {
+      const link = `${location.origin}${location.pathname}?watch=${encodeURIComponent(state.spectateToken)}`;
       linkText.textContent = `観戦リンク: ${link}`;
       linkBtn.hidden = false;
       linkBtn.dataset.link = link;
@@ -904,10 +899,10 @@ function render() {
   const recordText = document.getElementById('record-info-text');
   const recordBtn   = document.getElementById('btn-copy-record-link');
   if (recordText && recordBtn) {
-    recordText.textContent = recordStatusText;
-    if (archivedLink) {
+    recordText.textContent = state.recordStatusText;
+    if (state.archivedLink) {
       recordBtn.hidden = false;
-      recordBtn.dataset.link = archivedLink.url;
+      recordBtn.dataset.link = state.archivedLink.url;
     } else {
       recordBtn.hidden = true;
     }
@@ -915,22 +910,22 @@ function render() {
 }
 
 function _watchPhaseText(gameOver) {
-  if (watchStatusText === 'connecting') return '観戦: 接続中…';
-  if (watchStatusText === 'error')      return '観戦: 接続エラーが発生しました';
-  if (watchStatusText === 'closed')     return '観戦: 接続が切れました';
+  if (state.watchStatusText === 'connecting') return '観戦: 接続中…';
+  if (state.watchStatusText === 'error')      return '観戦: 接続エラーが発生しました';
+  if (state.watchStatusText === 'closed')     return '観戦: 接続が切れました';
 
   // 投了など盤面から導けない終局は result で判断する（player_disconnected は
   // 対局終了時の意図した WS 切断でも届くため、既に終局済みなら「再接続待ち」
   // という誤解を招く表示にしない）。
-  const concluded = !!(loadedMeta?.result && loadedMeta.result.kind !== 'unfinished');
-  if (watchStatusText === 'player_disconnected' && !concluded) {
+  const concluded = !!(state.loadedMeta?.result && state.loadedMeta.result.kind !== 'unfinished');
+  if (state.watchStatusText === 'player_disconnected' && !concluded) {
     return '観戦: プレイヤーが切断中です（再接続を待っています）';
   }
-  if (concluded && cursor === kifu.plies.length) return formatResult(loadedMeta.result);
+  if (concluded && state.cursor === kifu.plies.length) return formatResult(state.loadedMeta.result);
   if (gameOver) return gameOver;
   if (kifu.plies.length === 0) return '観戦中（開始を待っています）';
-  if (cursor === kifu.plies.length) return '観戦中（最新）';
-  return `観戦中（第${cursor}組手）`;
+  if (state.cursor === kifu.plies.length) return '観戦中（最新）';
+  return `観戦中（第${state.cursor}組手）`;
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -969,13 +964,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   document.getElementById('btn-promote').addEventListener('click', () => {
-    if (!promotionPending) return;
-    const usi = promotionPending.options.find(o => o.promote)?.usi;
+    if (!state.promotionPending) return;
+    const usi = state.promotionPending.options.find(o => o.promote)?.usi;
     if (usi) { confirmMove(usi); render(); }
   });
   document.getElementById('btn-no-promote').addEventListener('click', () => {
-    if (!promotionPending) return;
-    const usi = promotionPending.options.find(o => !o.promote)?.usi;
+    if (!state.promotionPending) return;
+    const usi = state.promotionPending.options.find(o => !o.promote)?.usi;
     if (usi) { confirmMove(usi); render(); }
   });
 
@@ -1003,9 +998,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const btnClose  = document.getElementById('btn-online-close');
 
     closeModal = () => {
-      if (!onlineGameOver) {
+      if (!state.onlineGameOver) {
         disconnectOnline();
-        if (onlineMode) { _resetOnlineState(); resetToNew(); }
+        if (state.onlineMode) { _resetOnlineState(); resetToNew(); }
       }
       modal.classList.remove('visible');
       statusEl.textContent = '—';
@@ -1015,17 +1010,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
 
     document.getElementById('btn-resign').addEventListener('click', () => {
-      if (!onlineMode || onlineGameOver || onlineCommitted) return;
+      if (!state.onlineMode || state.onlineGameOver || state.onlineCommitted) return;
       if (!confirm('投了しますか？')) return;
       // 投了は commit-reveal プロトコル経由。即終局にしない（両者投了の引き分けを拾うため）
-      commitMoveOnline(sfens[cursor], 'resign');
-      onlineCommitted = true;
+      commitMoveOnline(state.sfens[state.cursor], 'resign');
+      state.onlineCommitted = true;
       render();
     });
 
     document.getElementById('btn-online').addEventListener('click', () => {
       // 前回の対局が終局済みなら畳んでから新しい接続へ（「新局」ボタンが担っていた役割）
-      if (onlineGameOver) { _resetOnlineState(); resetToNew(); }
+      if (state.onlineGameOver) { _resetOnlineState(); resetToNew(); }
       modal.classList.add('visible');
       document.getElementById('input-room').focus();
     });
@@ -1051,28 +1046,28 @@ document.addEventListener('DOMContentLoaded', async () => {
       statusEl.textContent = '接続中…';
 
       const callbacks = {
-        onStatus: (state, msg) => {
+        onStatus: (connStatus, msg) => {
           statusEl.textContent = msg;
 
-          if (state === 'ready') {
-            if (!onlineMode) {
+          if (connStatus === 'ready') {
+            if (!state.onlineMode) {
               // 初回接続: オンラインモード開始
-              onlineMode       = true;
-              onlineSide       = getMySide();
-              onlineCommitted  = false;
-              onlineGameOver   = false;
-              onlineEndMsg     = '';
-              onlineWaiting    = false;
-              onlineWaitingMsg = '';
-              spectateToken    = null;
+              state.onlineMode       = true;
+              state.onlineSide       = getMySide();
+              state.onlineCommitted  = false;
+              state.onlineGameOver   = false;
+              state.onlineEndMsg     = '';
+              state.onlineWaiting    = false;
+              state.onlineWaitingMsg = '';
+              state.spectateToken    = null;
               resetToNew();
-              if (onlineSide === 'gote') inputStep = 'gote';
-              sendSpectateMeta(versionTuple, sfens[0]);
+              if (state.onlineSide === 'gote') state.inputStep = 'gote';
+              sendSpectateMeta(state.versionTuple, state.sfens[0]);
             } else {
               // 再接続完了: ゲーム状態はそのまま、waiting 解除
-              onlineWaiting    = false;
-              onlineWaitingMsg = '';
-              onlineCommitted  = false;
+              state.onlineWaiting    = false;
+              state.onlineWaitingMsg = '';
+              state.onlineCommitted  = false;
             }
             modal.classList.remove('visible');
             btnConn.disabled = false;
@@ -1083,8 +1078,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             // モーダルが閉じて盤面が見えた後に出す。招き忘れ対策——オプトイン
             // だが必ず尋ねる。相手も同時に自分の招待を出しうる（どちらから
             // 提案してもよい。§2）ので、二重の招待が交差しても害はない。
-            if (!recordInviteAsked) {
-              recordInviteAsked = true;
+            if (!state.recordInviteAsked) {
+              state.recordInviteAsked = true;
               setTimeout(() => {
                 if (confirm('記録係をこの対局に招いて綴じてもらいますか？（相手の同意が必要です）')) {
                   sendRecordInvite();
@@ -1092,33 +1087,33 @@ document.addEventListener('DOMContentLoaded', async () => {
               }, 0);
             }
 
-          } else if (state === 'peer_disconnected') {
+          } else if (connStatus === 'peer_disconnected') {
             // 相手が切断: ゲーム状態維持、待機表示
-            onlineWaiting    = true;
-            onlineWaitingMsg = msg;
-            onlineCommitted  = false;
+            state.onlineWaiting    = true;
+            state.onlineWaitingMsg = msg;
+            state.onlineCommitted  = false;
             render();
 
-          } else if (state === 'self_disconnected') {
+          } else if (connStatus === 'self_disconnected') {
             // 自分が切断: 再接続可能な状態で待機
-            onlineWaiting    = true;
-            onlineWaitingMsg = msg;
-            onlineCommitted  = false;
+            state.onlineWaiting    = true;
+            state.onlineWaitingMsg = msg;
+            state.onlineCommitted  = false;
             btnConn.disabled = false;
             btnConn.textContent = '再接続';
             render();
 
-          } else if (state === 'error') {
-            if (onlineMode && !onlineGameOver) {
-              onlineWaiting    = true;
-              onlineWaitingMsg = `エラー: ${msg}`;
+          } else if (connStatus === 'error') {
+            if (state.onlineMode && !state.onlineGameOver) {
+              state.onlineWaiting    = true;
+              state.onlineWaitingMsg = `エラー: ${msg}`;
             }
             btnConn.disabled = false;
             btnConn.textContent = '入室';
             render();
 
-          } else if (state === 'disconnected') {
-            if (!onlineGameOver) _resetOnlineState();
+          } else if (connStatus === 'disconnected') {
+            if (!state.onlineGameOver) _resetOnlineState();
             btnConn.disabled = false;
             btnConn.textContent = '入室';
             render();
@@ -1126,7 +1121,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         },
         onTurnComplete:  handleTurnComplete,
         onPeerAborted:   (reason) => endOnlineGame(`中断: ${reason}`),
-        onSpectateToken: (token) => { spectateToken = token; render(); },
+        onSpectateToken: (token) => { state.spectateToken = token; render(); },
         onRecordInvite: () => {
           // 相手からの記録係への招待提案（記録係二段目 §2・§5）。
           if (confirm('相手が記録係をこの対局に招いて綴じることを提案しました。同意しますか？')) {
@@ -1136,38 +1131,38 @@ document.addEventListener('DOMContentLoaded', async () => {
           }
         },
         onRecordConfirmed: () => {
-          recordStatusText = '記録係: 有効（この対局は書庫へ綴じられます）';
+          state.recordStatusText = '記録係: 有効（この対局は書庫へ綴じられます）';
           render();
         },
         onRecordDeclined: () => {
-          recordStatusText = '';
+          state.recordStatusText = '';
           alert('相手が記録を辞退しました。この対局は綴じられません。');
           render();
         },
         onRecordDisagreement: (idA, idB, id) => {
-          recordStatusText = '記録が食い違いました（裁定はされません）';
-          archivedLink = id ? { id, url: archiveUrl(id) } : null;
+          state.recordStatusText = '記録が食い違いました（裁定はされません）';
+          state.archivedLink = id ? { id, url: archiveUrl(id) } : null;
           alert('二人の証言が一致しませんでした。改竄検知として記録し、裁定はしません。');
-          if (_pendingRecordDisconnect) { _pendingRecordDisconnect = false; disconnectOnline(); }
+          if (state._pendingRecordDisconnect) { state._pendingRecordDisconnect = false; disconnectOnline(); }
           render();
         },
         onArchived: (id) => {
-          recordStatusText = '記録されました';
-          archivedLink = { id, url: archiveUrl(id) };
-          if (_pendingRecordDisconnect) { _pendingRecordDisconnect = false; disconnectOnline(); }
+          state.recordStatusText = '記録されました';
+          state.archivedLink = { id, url: archiveUrl(id) };
+          if (state._pendingRecordDisconnect) { state._pendingRecordDisconnect = false; disconnectOnline(); }
           render();
         },
-        getSfens:        () => sfens,
+        getSfens:        () => state.sfens,
         onResumeAt:      (resumeSfen) => {
-          const idx = sfens.indexOf(resumeSfen);
+          const idx = state.sfens.indexOf(resumeSfen);
           if (idx >= 0) {
-            cursor           = idx;
-            phase            = 'position';
-            onlineWaiting    = false;
-            onlineWaitingMsg = '';
-            onlineCommitted  = false;
+            state.cursor           = idx;
+            state.phase            = 'position';
+            state.onlineWaiting    = false;
+            state.onlineWaitingMsg = '';
+            state.onlineCommitted  = false;
             resetInput();  // selectedFrom・legalTargets 等をクリア（inputStep は null になる）
-            inputStep = onlineSide === 'gote' ? 'gote' : 'sente';
+            state.inputStep = state.onlineSide === 'gote' ? 'gote' : 'sente';
           }
           render();
         },
@@ -1229,8 +1224,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   try {
     await Promise.all([init(), initNotation(), initProtocol()]);
-    versionTuple = JSON.parse(wasmVersionTuple());
-    maxTurns = wasmMaxTurns();
+    state.versionTuple = JSON.parse(wasmVersionTuple());
+    state.maxTurns = wasmMaxTurns();
 
     const watchToken = new URLSearchParams(location.search).get('watch');
     if (watchToken) {
