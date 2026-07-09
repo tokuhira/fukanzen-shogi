@@ -34,6 +34,7 @@ import {
 import { renderSvg } from './board-view.js';
 import { usiToText as usiToTextPure } from './notation-view.js';
 import { emptyRecord, appendTurn, truncateTo, buildFromPlies } from './game-record.js';
+import { movesFromSquare, dropsOfKind, buildTargetMap, resolveTarget } from './move-input.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -431,16 +432,6 @@ function getLegalMovesForSide(side) {
   return legalCache[side];
 }
 
-function buildTargetMap(moves) {
-  const map = new Map();
-  for (const m of moves) {
-    const key = `${m.to[0]},${m.to[1]}`;
-    if (!map.has(key)) map.set(key, { options: [] });
-    map.get(key).options.push({ usi: m.usi, promote: m.promote });
-  }
-  return map;
-}
-
 function activateMoves(moves, from) {
   if (!moves.length) { selectedFrom = null; legalTargets = null; return; }
   selectedFrom = from;
@@ -450,34 +441,26 @@ function activateMoves(moves, from) {
 function selectBoardPiece(file, rank) {
   if (!inputStep) inputStep = 'sente';
   const side  = inputStep === 'gote' ? 'gote' : 'sente';
-  const moves = getLegalMovesForSide(side).filter(
-    m => !m.isDrop && m.from[0] === file && m.from[1] === rank
-  );
+  const moves = movesFromSquare(getLegalMovesForSide(side), file, rank);
   activateMoves(moves, { board: [file, rank] });
 }
 
 function selectHandPiece(kind) {
   if (!inputStep) inputStep = 'sente';
   const side  = inputStep === 'gote' ? 'gote' : 'sente';
-  const moves = getLegalMovesForSide(side).filter(
-    m => m.isDrop && m.kind === kind.toUpperCase()
-  );
+  const moves = dropsOfKind(getLegalMovesForSide(side), kind);
   activateMoves(moves, { hand: kind });
 }
 
 function selectTarget(file, rank) {
-  const key = `${file},${rank}`;
-  if (!legalTargets?.has(key)) {
-    selectedFrom = null; legalTargets = null; return;
-  }
-  const { options } = legalTargets.get(key);
-  const hasPromote   = options.some(o =>  o.promote);
-  const hasNoPromote = options.some(o => !o.promote);
-  if (hasPromote && hasNoPromote) {
-    promotionPending = { options, toSquare: [file, rank] };
+  const action = resolveTarget(legalTargets, file, rank);
+  if (action.kind === 'deselect') {
+    selectedFrom = null; legalTargets = null;
+  } else if (action.kind === 'promptPromotion') {
+    promotionPending = { options: action.options, toSquare: action.toSquare };
     showPromotionUI();
-  } else {
-    confirmMove(options[0].usi);
+  } else { // 'confirm'
+    confirmMove(action.usi);
     render();
   }
 }
