@@ -36,6 +36,7 @@ import { usiToText as usiToTextPure } from './notation-view.js';
 import { emptyRecord, appendTurn, truncateTo, buildFromPlies } from './game-record.js';
 import { movesFromSquare, dropsOfKind, buildTargetMap, resolveTarget } from './move-input.js';
 import { navReduce } from './nav.js';
+import { resetOnlineReduce, hotseatConfirmReduce } from './reducers.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -474,30 +475,15 @@ function confirmMove(usi) {
     return;
   }
 
-  // ホットシートモード（従来）
-  if (side === 'sente') {
-    state.pendingSente = { usi, text };
-    state.inputStep    = 'gote';
-  } else {
-    state.pendingGote = { usi, text };
-  }
+  // ホットシートモード（従来）: 純粋遷移へ委譲
   hidePromotionUI();
-  update({ selectedFrom: null, legalTargets: null, promotionPending: null });
+  update(hotseatConfirmReduce(side, { usi, text }));
 }
 
 function _resetOnlineState() {
-  state.onlineMode       = false;
-  state.onlineSide       = null;
-  state.onlineGameOver   = false;
-  state.onlineEndMsg     = '';
-  state.onlineCommitted  = false;
-  state.onlineWaiting    = false;
-  state.onlineWaitingMsg = '';
-  state.resultOverride   = null;
-  state.recordInviteAsked = false;
-  state.recordStatusText  = '';
-  state.archivedLink      = null;
-  state._pendingRecordDisconnect = false;
+  // 呼び出し元（disconnectOnline/resetToNew と組で呼ばれる）が後で描画するため、
+  // ここでは render しない（update ではなく Object.assign を直接使う）。
+  Object.assign(state, resetOnlineReduce());
 }
 
 function _onlinePhaseText(gameOver) {

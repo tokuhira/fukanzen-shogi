@@ -59,6 +59,7 @@ Sonnet への実行指示書。着地済みのものは**完了記録**として
 | [状態を単一のstate器へ集約 — board.js分割 第三段a](不完全将棋_実装指示書_状態を単一のstate器へ集約_board分割第三段a.md) | 散在する30の状態変数を単一のstateオブジェクトへ機械的に集約（読み取りの集約） | v0.11.2 |
 | [kifu吸収と状態更新経路 — board.js分割 第三段b-1](不完全将棋_実装指示書_kifu吸収と状態更新経路_board分割第三段b-1.md) | kifuをstate.pliesへ吸収し、状態更新の一本の経路update(patch)を導入（書き込み集約の下地） | v0.11.2 |
 | [局面ナビゲーションの遷移を純粋reduceへ — board.js分割 第三段b-2](不完全将棋_実装指示書_局面ナビゲーションの遷移を純粋reduceへ_board分割第三段b-2.md) | goPrev/goNextの純粋な状態遷移をnavReduce(view,action)へ抽出（書き込み集約の第一号） | v0.11.2 |
+| [オンラインリセットとホットシート確定を純粋reduceへ — board.js分割 第三段b-3](不完全将棋_実装指示書_オンラインリセットとホットシート確定を純粋reduceへ_board分割第三段b-3.md) | resetOnlineReduce・hotseatConfirmReduceをreducers.jsへ抽出、書き込み集約完了・分割アークの区切り | v0.11.2 |
 
 ---
 
