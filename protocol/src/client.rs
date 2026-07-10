@@ -89,6 +89,13 @@ impl ClientSession {
         self.peer_auth_hash
     }
 
+    /// 進行中ターンを破棄する（handshake_done・peer_auth_hash は保持）。
+    /// 切断時に「捨てて指し直し」の挙動を保つための最小手段。
+    pub fn abort_turn(&mut self) {
+        self.turn = None;
+        self.pending_peer_commit = None;
+    }
+
     /// 接続直後に相手へ送る hello（版＋auth_hash＋side）。
     pub fn hello_msg(&self) -> WireMessage {
         WireMessage::Hello {
@@ -495,5 +502,28 @@ mod tests {
         let mut sente = ClientSession::new(Side::Sente, b"shared_secret");
         let result = sente.commit(initial_hash(), mv("7g7f"), Nonce([1u8; 32]));
         assert_eq!(result, Err(SessionError::HandshakeNotDone));
+    }
+
+    /// abort_turn: 進行中ターンを破棄しても handshake_done・peer_auth_hash は保持される。
+    #[test]
+    fn abort_turn_discards_turn_but_keeps_identity() {
+        let (mut sente, mut gote) = pair();
+        handshake(&mut sente, &mut gote);
+        let peer_hash_before = sente.peer_auth_hash();
+
+        let bh = initial_hash();
+        let _commit_s = sente.commit(bh, mv("7g7f"), Nonce([1u8; 32])).unwrap();
+        assert!(!sente.both_committed());
+
+        sente.abort_turn();
+
+        assert!(sente.handshake_done());
+        assert_eq!(sente.peer_auth_hash(), peer_hash_before);
+        assert!(!sente.both_committed());
+        // ターンが破棄されたので reveal は NoActiveTurn。
+        assert_eq!(sente.reveal_msg(), Err(SessionError::NoActiveTurn));
+        // 破棄後は commit をやり直せる（新ターンとして）。
+        let redo = sente.commit(bh, mv("2g2f"), Nonce([3u8; 32]));
+        assert!(redo.is_ok());
     }
 }

@@ -5,7 +5,7 @@
 /// ```text
 /// ┌─────────────────────────────────────────────────────┐
 /// │ トランスポート共通（将来も変わらない部分）              │
-/// │   NetMessage  — メッセージ語彙（何を送るか）           │
+/// │   WireMessage — メッセージ語彙（protocol クレート正本） │
 /// │   NetEvent    — 受信イベント型                        │
 /// │   Connection  — 公開 API: .send() / .events          │
 /// ├─────────────────────────────────────────────────────┤
@@ -15,7 +15,11 @@
 /// └─────────────────────────────────────────────────────┘
 /// ```
 ///
-/// 別トランスポートへ移行する場合: `NetMessage` / `NetEvent` と
+/// 版交渉は `ClientSession` が hello（`WireMessage::Hello`）の中で行う
+/// （`protocol::negotiate_versions` を core が呼ぶ）。net.rs はワイヤの
+/// 送受信・framing のみを担い、プロトコル意味を持たない。
+///
+/// 別トランスポートへ移行する場合: `WireMessage` / `NetEvent` と
 /// `Connection` の公開シグネチャ（`.send()` / `.events`）は保持したまま、
 /// `listen` / `connect` の確立ロジックと、`reader_loop` / `send` の
 /// フレーミング部分（`// [TCP framing]` コメント箇所）を置き換える。
@@ -24,56 +28,14 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
-use serde::{Deserialize, Serialize};
+use protocol::WireMessage;
 
-use protocol::{BoardHash, Commitment, Nonce};
-
-// ─── トランスポート共通: メッセージ語彙・イベント型 ──────────────────────────
-
-/// ワイヤー上を流れるメッセージ
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum NetMessage {
-    /// 接続直後のハンドシェイク
-    GameStart {
-        /// 0=先手, 1=後手
-        side: u8,
-        /// SHA-256(secret) の hex 文字列
-        secret_hash: String,
-    },
-    /// commit フェーズ
-    Commit {
-        commitment: String, // hex
-    },
-    /// reveal フェーズ
-    Reveal {
-        action_usi: String,
-        nonce: String,      // hex
-        board_hash: String, // hex
-    },
-    /// ack フェーズ
-    Ack,
-    /// 再接続ハンドシェイク
-    Reconnect {
-        /// 秘密の本体（hex エンコード）— 相手が SHA-256 して照合する
-        secret: String,
-        /// 申告する現局面ハッシュ
-        resume_hash: String,
-    },
-    /// 接続直後のバージョン交渉（ハンドシェイク第一関門）
-    VersionHello {
-        rule_major: u32,
-        rule_minor: u32,
-        protocol: u32,
-    },
-    /// プロトコル違反・ハッシュ不一致によるアボート
-    Abort { reason: String },
-}
+// ─── トランスポート共通: イベント型 ───────────────────────────────────────────
 
 /// net スレッドからメインスレッドへのイベント
 #[derive(Debug)]
 pub enum NetEvent {
-    Message(NetMessage),
+    Message(WireMessage),
     Disconnected,
 }
 
@@ -86,23 +48,6 @@ pub enum NetEvent {
 pub struct Connection {
     stream: TcpStream,
     pub events: Receiver<NetEvent>,
-}
-
-// ─── トランスポート共通: バージョン交渉エラー ─────────────────────────────────
-
-/// 版交渉の失敗を表す型（殻側のラッパー）
-#[derive(Debug)]
-pub enum NegotiationError {
-    /// 版の不一致・不正応答・タイムアウト（protocol クレートの純粋判定結果）
-    Negotiation(protocol::NegotiationOutcome),
-    /// 送受信中の IO エラー
-    Io(std::io::Error),
-}
-
-impl From<std::io::Error> for NegotiationError {
-    fn from(e: std::io::Error) -> Self {
-        NegotiationError::Io(e)
-    }
 }
 
 // ─── TCP 固有: 接続確立 ───────────────────────────────────────────────────────
@@ -128,45 +73,8 @@ impl Connection {
         Ok(Self { stream, events: rx })
     }
 
-    /// 版交渉を実行する（ハンドシェイクの第一関門）。
-    ///
-    /// 自分の版を送り、相手の版を受け取って完全一致を確認する。
-    /// タイムアウトの計時はここ（殻）、判定は `protocol::negotiate_versions`（純粋）。
-    /// 成功すると `VersionCleared` を返し、呼び出し側は認証フェーズへ進める。
-    pub fn perform_version_negotiation(
-        &mut self,
-    ) -> Result<protocol::VersionCleared, NegotiationError> {
-        use protocol::{negotiate_versions, PeerVersionResponse, VersionTuple, MY_VERSION};
-        use std::time::Duration;
-
-        let mine = MY_VERSION;
-
-        // [transport-agnostic] 自分の版を送信
-        self.send(&NetMessage::VersionHello {
-            rule_major: mine.rule.0,
-            rule_minor: mine.rule.1,
-            protocol: mine.protocol,
-        })?;
-
-        // [transport-agnostic] 相手の版を受信（10 秒タイムアウト）
-        let peer = match self.events.recv_timeout(Duration::from_secs(10)) {
-            Ok(NetEvent::Message(NetMessage::VersionHello {
-                rule_major,
-                rule_minor,
-                protocol,
-            })) => PeerVersionResponse::Version(VersionTuple {
-                rule: (rule_major, rule_minor),
-                protocol,
-            }),
-            Ok(_) => PeerVersionResponse::Invalid, // 別メッセージ or 切断
-            Err(_) => PeerVersionResponse::Timeout, // タイムアウト or チャネル閉鎖
-        };
-
-        negotiate_versions(&mine, peer).map_err(NegotiationError::Negotiation)
-    }
-
     /// メッセージを1つ送信する（公開 API はトランスポート共通）
-    pub fn send(&mut self, msg: &NetMessage) -> std::io::Result<()> {
+    pub fn send(&mut self, msg: &WireMessage) -> std::io::Result<()> {
         let body = serde_json::to_vec(msg)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         // [TCP framing] 4 byte big-endian 長さプレフィックス
@@ -197,7 +105,7 @@ fn reader_loop(mut stream: TcpStream, tx: Sender<NetEvent>) {
             let _ = tx.send(NetEvent::Disconnected);
             return;
         }
-        match serde_json::from_slice::<NetMessage>(&body) {
+        match serde_json::from_slice::<WireMessage>(&body) {
             Ok(msg) => {
                 if tx.send(NetEvent::Message(msg)).is_err() {
                     return;
@@ -209,62 +117,4 @@ fn reader_loop(mut stream: TcpStream, tx: Sender<NetEvent>) {
             }
         }
     }
-}
-
-// ─── トランスポート共通: hex ユーティリティ（NetMessage の JSON フィールド用）──
-
-pub fn to_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{:02x}", b)).collect()
-}
-
-pub fn from_hex(s: &str) -> Option<Vec<u8>> {
-    if !s.len().is_multiple_of(2) {
-        return None;
-    }
-    (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
-        .collect()
-}
-
-pub fn commitment_to_hex(c: &Commitment) -> String {
-    to_hex(&c.0)
-}
-
-pub fn commitment_from_hex(s: &str) -> Option<Commitment> {
-    let v = from_hex(s)?;
-    if v.len() != 32 {
-        return None;
-    }
-    let mut arr = [0u8; 32];
-    arr.copy_from_slice(&v);
-    Some(Commitment(arr))
-}
-
-pub fn nonce_to_hex(n: &Nonce) -> String {
-    to_hex(&n.0)
-}
-
-pub fn nonce_from_hex(s: &str) -> Option<Nonce> {
-    let v = from_hex(s)?;
-    if v.len() != 32 {
-        return None;
-    }
-    let mut arr = [0u8; 32];
-    arr.copy_from_slice(&v);
-    Some(Nonce(arr))
-}
-
-pub fn board_hash_to_hex(h: &BoardHash) -> String {
-    to_hex(&h.0)
-}
-
-pub fn board_hash_from_hex(s: &str) -> Option<BoardHash> {
-    let v = from_hex(s)?;
-    if v.len() != 32 {
-        return None;
-    }
-    let mut arr = [0u8; 32];
-    arr.copy_from_slice(&v);
-    Some(BoardHash(arr))
 }
