@@ -13,7 +13,7 @@ pub enum WireMessage {
         rule_minor: u32,
         proto_ver: u32,
         auth_hash: String, // hex(SHA-256(secret))
-        side: String,       // "sente" | "gote"
+        side: String,      // "sente" | "gote"
     },
     /// commit フェーズ。
     Commit { commitment: String }, // hex, 32byte
@@ -158,7 +158,10 @@ mod tests {
         };
         assert_eq!(
             reconnect_ack.to_json(),
-            format!(r#"{{"type":"reconnect_ack","board_hash":"{}"}}"#, "33".repeat(32))
+            format!(
+                r#"{{"type":"reconnect_ack","board_hash":"{}"}}"#,
+                "33".repeat(32)
+            )
         );
     }
 
@@ -172,7 +175,10 @@ mod tests {
 
     #[test]
     fn invalid_json_rejected() {
-        assert_eq!(WireMessage::from_json("not json"), Err(WireError::InvalidJson));
+        assert_eq!(
+            WireMessage::from_json("not json"),
+            Err(WireError::InvalidJson)
+        );
     }
 
     #[test]

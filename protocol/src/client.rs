@@ -27,18 +27,33 @@ pub struct ClientSession {
 /// feed() が返す状態変化。殻はこれを見て UI 更新・次アクションを決める。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionEvent {
-    HandshakeDone { peer_side: Side },
-    PeerCommitted { both_committed: bool },
+    HandshakeDone {
+        peer_side: Side,
+    },
+    PeerCommitted {
+        both_committed: bool,
+    },
     PeerCommitBuffered,
-    PeerRevealed { both_revealed: bool },
+    PeerRevealed {
+        both_revealed: bool,
+    },
     PeerAcked,
-    TurnComplete { sente: Action, gote: Action },
+    TurnComplete {
+        sente: Action,
+        gote: Action,
+    },
     /// 相手の再接続要求（本人照合は通過済み）。殻が board_hash で再開点を確認し、
     /// 良ければ reconnect_ack_msg(resume) を送る。
-    PeerReconnectRequest { board_hash: BoardHash },
+    PeerReconnectRequest {
+        board_hash: BoardHash,
+    },
     /// 自分の再接続が承認された。resume_hash が再開点。
-    ReconnectAck { resume_hash: BoardHash },
-    PeerAborted { reason: String },
+    ReconnectAck {
+        resume_hash: BoardHash,
+    },
+    PeerAborted {
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,8 +64,8 @@ pub enum SessionError {
     NoActiveTurn,
     Protocol(ProtocolError),
     IdentityMismatch, // 再接続 auth_hash が初回 peer_auth_hash と不一致
-    BadHex,            // hex 欄が不正
-    InvalidUsi,         // action 欄が USI として不正
+    BadHex,           // hex 欄が不正
+    InvalidUsi,       // action 欄が USI として不正
 }
 
 impl ClientSession {
@@ -113,7 +128,9 @@ impl ClientSession {
             return Err(SessionError::HandshakeNotDone);
         }
         let mut t = TurnSession::new(self.side, board_hash);
-        let commitment = t.local_commit(action, nonce).map_err(SessionError::Protocol)?;
+        let commitment = t
+            .local_commit(action, nonce)
+            .map_err(SessionError::Protocol)?;
         if let Some(pc) = self.pending_peer_commit.take() {
             // 先着 peer commit。出典（commit_move）は `let _ =` で無視している。挙動保存のため無視する。
             let _ = t.receive_peer_commit(pc);
@@ -125,7 +142,10 @@ impl ClientSession {
     }
 
     pub fn both_committed(&self) -> bool {
-        self.turn.as_ref().map(|t| t.both_committed()).unwrap_or(false)
+        self.turn
+            .as_ref()
+            .map(|t| t.both_committed())
+            .unwrap_or(false)
     }
 
     /// 両者 commit 後に reveal を生成（出典: reveal_msg）。
@@ -192,7 +212,8 @@ impl ClientSession {
                 let a = Action::from_usi(&action).ok_or(SessionError::InvalidUsi)?;
                 let n = Nonce(parse_bytes32(&nonce)?);
                 let bh = BoardHash(parse_bytes32(&board_hash)?);
-                t.receive_peer_reveal(a, n, bh).map_err(SessionError::Protocol)?;
+                t.receive_peer_reveal(a, n, bh)
+                    .map_err(SessionError::Protocol)?;
                 Ok(SessionEvent::PeerRevealed {
                     both_revealed: t.both_revealed(),
                 })
@@ -277,8 +298,18 @@ mod tests {
         let hello_g = gote.hello_msg();
         let ev_g = gote.feed(hello_s).unwrap();
         let ev_s = sente.feed(hello_g).unwrap();
-        assert_eq!(ev_g, SessionEvent::HandshakeDone { peer_side: Side::Sente });
-        assert_eq!(ev_s, SessionEvent::HandshakeDone { peer_side: Side::Gote });
+        assert_eq!(
+            ev_g,
+            SessionEvent::HandshakeDone {
+                peer_side: Side::Sente
+            }
+        );
+        assert_eq!(
+            ev_s,
+            SessionEvent::HandshakeDone {
+                peer_side: Side::Gote
+            }
+        );
     }
 
     /// 完全な一局: hello 交換 → commit → reveal → ack → 双方 TurnComplete。
@@ -293,8 +324,18 @@ mod tests {
 
         let ev_g = gote.feed(commit_s).unwrap();
         let ev_s = sente.feed(commit_g).unwrap();
-        assert_eq!(ev_g, SessionEvent::PeerCommitted { both_committed: true });
-        assert_eq!(ev_s, SessionEvent::PeerCommitted { both_committed: true });
+        assert_eq!(
+            ev_g,
+            SessionEvent::PeerCommitted {
+                both_committed: true
+            }
+        );
+        assert_eq!(
+            ev_s,
+            SessionEvent::PeerCommitted {
+                both_committed: true
+            }
+        );
         assert!(sente.both_committed());
         assert!(gote.both_committed());
 
@@ -302,8 +343,18 @@ mod tests {
         let reveal_g = gote.reveal_msg().unwrap();
         let ev_g = gote.feed(reveal_s).unwrap();
         let ev_s = sente.feed(reveal_g).unwrap();
-        assert_eq!(ev_g, SessionEvent::PeerRevealed { both_revealed: true });
-        assert_eq!(ev_s, SessionEvent::PeerRevealed { both_revealed: true });
+        assert_eq!(
+            ev_g,
+            SessionEvent::PeerRevealed {
+                both_revealed: true
+            }
+        );
+        assert_eq!(
+            ev_s,
+            SessionEvent::PeerRevealed {
+                both_revealed: true
+            }
+        );
 
         let ack_s = sente.ack_msg().unwrap();
         let ack_g = gote.ack_msg().unwrap();
@@ -311,11 +362,17 @@ mod tests {
         let ev_s = sente.feed(ack_g).unwrap();
         assert_eq!(
             ev_g,
-            SessionEvent::TurnComplete { sente: mv("7g7f"), gote: mv("3c3d") }
+            SessionEvent::TurnComplete {
+                sente: mv("7g7f"),
+                gote: mv("3c3d")
+            }
         );
         assert_eq!(
             ev_s,
-            SessionEvent::TurnComplete { sente: mv("7g7f"), gote: mv("3c3d") }
+            SessionEvent::TurnComplete {
+                sente: mv("7g7f"),
+                gote: mv("3c3d")
+            }
         );
     }
 
@@ -376,7 +433,10 @@ mod tests {
         let ev_s = sente.feed(ack_g).unwrap();
         assert_eq!(
             ev_s,
-            SessionEvent::TurnComplete { sente: Action::Resign, gote: mv("3c3d") }
+            SessionEvent::TurnComplete {
+                sente: Action::Resign,
+                gote: mv("3c3d")
+            }
         );
     }
 
