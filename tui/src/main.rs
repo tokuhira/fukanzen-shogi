@@ -1,4 +1,4 @@
-/// 不完全将棋 TUI（第三段階: 通信秘匿対戦対応）
+/// 不完全将棋 TUI（第四段階: クラウド参加対応）
 ///
 /// 引数なし          → ポータルメニュー（モード選択）
 /// --version / -V    → バイナリ版を表示して終了
@@ -18,6 +18,7 @@ use std::io::{self, IsTerminal, Stdout};
 mod app;
 mod input;
 mod net;
+mod net_ws;
 mod online;
 mod portal;
 mod ui;
@@ -32,6 +33,10 @@ fn main() -> io::Result<()> {
         println!("fukanzen-shogi-tui {}", VERSION);
         return Ok(());
     }
+
+    // クラウド参加（WS+TLS）が使う rustls のプロセス既定 CryptoProvider を一度だけ
+    // インストールする。呼ばないと最初の wss:// 接続時にパニックする（rustls 0.22+）。
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     // インタラクティブ端末専用
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
@@ -90,16 +95,23 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> io::Result<()> {
                 let new_last = portal::LastConnection {
                     listen_port: match &config.mode {
                         ConnectMode::Listen(p) => p.to_string(),
-                        ConnectMode::Connect(_) => last_conn
+                        ConnectMode::Connect(_) | ConnectMode::Cloud { .. } => last_conn
                             .as_ref()
                             .map(|l| l.listen_port.clone())
                             .unwrap_or_default(),
                     },
                     connect_addr: match &config.mode {
                         ConnectMode::Connect(a) => a.clone(),
-                        ConnectMode::Listen(_) => last_conn
+                        ConnectMode::Listen(_) | ConnectMode::Cloud { .. } => last_conn
                             .as_ref()
                             .map(|l| l.connect_addr.clone())
+                            .unwrap_or_default(),
+                    },
+                    room_key: match &config.mode {
+                        ConnectMode::Cloud { room_key } => room_key.clone(),
+                        ConnectMode::Listen(_) | ConnectMode::Connect(_) => last_conn
+                            .as_ref()
+                            .map(|l| l.room_key.clone())
                             .unwrap_or_default(),
                     },
                     secret: String::from_utf8_lossy(&config.secret).to_string(),

@@ -1,7 +1,7 @@
 /// 通信秘匿対戦モード
 ///
 /// commit-reveal-ack プロトコルを `ClientSession`（protocol クレート）に委譲しつつ、
-/// TCP I/O を `Connection` に委譲する。
+/// I/O を `Transport`（TCP の LAN 殻／WS のクラウド殻）に委譲する。
 /// ゲームロジックは `App` を再利用する。
 use std::io;
 use std::time::Duration;
@@ -22,19 +22,22 @@ use protocol::{
 
 use crate::app::{App, OnlineProtocolPhase, OnlineStatus, Phase};
 use crate::input;
-use crate::net::{Connection, NetEvent};
+use crate::net::{Connection, DoSystemMsg, NetEvent};
+use crate::net_ws::{self, WsConnection};
 use crate::ui;
 
 // ─── 設定 ───────────────────────────────────────────────────────────────────
 
 /// 再接続バックグラウンドスレッドからの結果
 enum ReconnectEvent {
-    Success(Connection),
+    Success(Transport),
     Failed(String),
 }
 
 #[derive(Clone)]
 pub struct OnlineConfig {
+    /// LAN（Listen/Connect）専用の初期値。クラウドでは意味を持たず、
+    /// DO の `SideAssigned` が確定させる `side` に上書きされる。
     pub local_side: Side,
     pub mode: ConnectMode,
     pub secret: Vec<u8>,
@@ -44,6 +47,34 @@ pub struct OnlineConfig {
 pub enum ConnectMode {
     Listen(u16),
     Connect(String),
+    /// クラウド参加。部屋キーで DO（`net_ws::CLOUD_SERVER_URL`）の部屋へ入る。
+    /// side は選択できない——DO の `peer_joined`/`room_ready` が告げる。
+    Cloud {
+        room_key: String,
+    },
+}
+
+// ─── トランスポート抽象（TCP の LAN 殻・WS のクラウド殻を共通に扱う） ──────────
+
+enum Transport {
+    Tcp(Connection),
+    Ws(WsConnection),
+}
+
+impl Transport {
+    fn send(&mut self, msg: &WireMessage) -> io::Result<()> {
+        match self {
+            Transport::Tcp(c) => c.send(msg),
+            Transport::Ws(w) => w.send(msg),
+        }
+    }
+
+    fn events(&self) -> &std::sync::mpsc::Receiver<NetEvent> {
+        match self {
+            Transport::Tcp(c) => &c.events,
+            Transport::Ws(w) => &w.events,
+        }
+    }
 }
 
 // ─── プロトコルフェーズ ──────────────────────────────────────────────────────
@@ -65,30 +96,54 @@ pub fn run_online(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     config: OnlineConfig,
 ) -> io::Result<()> {
-    // ── 接続 ───────────────────────────────────────────────────────────────
+    // ── 接続（side の確定を含む） ────────────────────────────────────────────
     terminal.draw(|f| {
         let area = f.area();
         let para = ratatui::widgets::Paragraph::new(match &config.mode {
             ConnectMode::Listen(port) => format!("ポート {} で接続待ち中...", port),
             ConnectMode::Connect(addr) => format!("{} へ接続中...", addr),
+            ConnectMode::Cloud { room_key } => format!("部屋 {} へ接続中...", room_key),
         });
         f.render_widget(para, area);
     })?;
 
-    let mut conn = match &config.mode {
-        ConnectMode::Listen(port) => Connection::listen(*port)?,
-        ConnectMode::Connect(addr) => Connection::connect(addr)?,
+    let (mut transport, side): (Transport, Side) = match &config.mode {
+        ConnectMode::Listen(port) => (
+            Transport::Tcp(Connection::listen(*port)?),
+            config.local_side,
+        ),
+        ConnectMode::Connect(addr) => (
+            Transport::Tcp(Connection::connect(addr)?),
+            config.local_side,
+        ),
+        ConnectMode::Cloud { room_key } => {
+            let ws = match WsConnection::connect(net_ws::CLOUD_SERVER_URL, room_key) {
+                Ok(ws) => ws,
+                Err(e) => {
+                    show_error_and_wait_for_quit(terminal, &format!("クラウド接続失敗: {}", e))?;
+                    return Ok(());
+                }
+            };
+            let transport = Transport::Ws(ws);
+            match wait_for_side_assigned(&transport) {
+                Ok(side) => (transport, side),
+                Err(msg) => {
+                    show_error_and_wait_for_quit(terminal, &msg)?;
+                    return Ok(());
+                }
+            }
+        }
     };
 
     // ── ハンドシェイク（hello 集約。版交渉は feed(Hello) の中）───────────────
-    let mut session = ClientSession::new(config.local_side, &config.secret);
-    conn.send(&session.hello_msg())?;
-    let version_err: Option<String> = wait_and_feed_hello(&mut conn, &mut session).err();
+    let mut session = ClientSession::new(side, &config.secret);
+    transport.send(&session.hello_msg())?;
+    let version_err: Option<String> = wait_and_feed_hello(&mut transport, &mut session).err();
 
     // ── 対局準備 ────────────────────────────────────────────────────────────
     let mut app = App::new();
     // 後手側はカーソルを段 1 から開始
-    if config.local_side == Side::Gote {
+    if side == Side::Gote {
         app.phase = Phase::GoteInput;
         app.cursor_rank = 1;
         app.cursor_file = 5;
@@ -100,7 +155,7 @@ pub fn run_online(
     } else {
         app.message = format!(
             "{}接続完了 — 着手を入力してください",
-            if config.local_side == Side::Sente {
+            if side == Side::Sente {
                 "先手: "
             } else {
                 "後手: "
@@ -115,12 +170,7 @@ pub fn run_online(
     let mut move_rolled_back = false;
 
     // 初期状態を online_status に反映（版交渉失敗時は切断扱い）
-    sync_online_status(
-        &mut app,
-        &online_phase,
-        config.local_side,
-        version_err.is_none(),
-    );
+    sync_online_status(&mut app, &online_phase, side, version_err.is_none());
 
     loop {
         // ── 描画（online_status は sync_online_status で常に最新） ────────
@@ -131,36 +181,31 @@ pub fn run_online(
             if let Ok(event) = rx.try_recv() {
                 reconnect_rx = None;
                 match event {
-                    ReconnectEvent::Success(new_conn) => {
-                        conn = new_conn;
-                        // 自分の現局面ハッシュで reconnect を送る（auth_hash は session が入れる）。
-                        let bh = board_hash(&kifu.current());
-                        let _ = conn.send(&session.reconnect_msg(bh));
-                        online_phase = OnlinePhase::WaitingMyMove;
-                        app.sente_action = None;
-                        app.gote_action = None;
-                        match config.local_side {
-                            Side::Sente => {
-                                app.phase = Phase::SenteInput;
-                            }
-                            Side::Gote => {
-                                app.phase = Phase::GoteInput;
-                                app.cursor_rank = 1;
-                            }
-                        }
-                        app.message = if move_rolled_back {
-                            move_rolled_back = false;
-                            "着手をキャンセルしました — 再度入力してください".to_string()
+                    ReconnectEvent::Success(new_transport) => {
+                        let is_cloud = matches!(new_transport, Transport::Ws(_));
+                        transport = new_transport;
+                        if is_cloud {
+                            // クラウド: DO の you_reconnected を待ってから reconnect_msg を
+                            // 送る（§5.4）。ここではソケットの差し替えのみ。
+                            app.message =
+                                "再接続しました — 相手との再開を待っています...".to_string();
+                            sync_online_status(&mut app, &online_phase, side, true);
                         } else {
-                            "着手を入力してください".to_string()
-                        };
-                        sync_online_status(&mut app, &online_phase, config.local_side, true);
-                        notify_reconnect(&mut app, 4);
+                            // LAN: 第三段どおり即座に reconnect_msg を送り再開する。
+                            let bh = board_hash(&kifu.current());
+                            let _ = transport.send(&session.reconnect_msg(bh));
+                            resume_after_reconnect(
+                                &mut app,
+                                side,
+                                &mut online_phase,
+                                &mut move_rolled_back,
+                            );
+                        }
                     }
                     ReconnectEvent::Failed(reason) => {
                         online_phase = OnlinePhase::Aborted(format!("再接続失敗: {}", reason));
                         app.message = format!("再接続失敗: {} [q]終了", reason);
-                        sync_online_status(&mut app, &online_phase, config.local_side, false);
+                        sync_online_status(&mut app, &online_phase, side, false);
                     }
                 }
             }
@@ -208,12 +253,12 @@ pub fn run_online(
         }
 
         // ── ネットイベント処理 ────────────────────────────────────────────
-        while let Ok(ev) = conn.events.try_recv() {
+        while let Ok(ev) = transport.events().try_recv() {
             match ev {
                 NetEvent::Disconnected => {
                     if online_phase != OnlinePhase::Disconnected {
                         // 切断時点で着手が確定済みかを記録（再接続後のロールバック通知用）
-                        let my_action = match config.local_side {
+                        let my_action = match side {
                             Side::Sente => app.sente_action,
                             Side::Gote => app.gote_action,
                         };
@@ -223,23 +268,61 @@ pub fn run_online(
                         online_phase = OnlinePhase::Disconnected;
                         session.abort_turn();
                         app.message = "接続が切断されました — 再接続中...".to_string();
-                        sync_online_status(&mut app, &online_phase, config.local_side, false);
+                        sync_online_status(&mut app, &online_phase, side, false);
 
                         // バックグラウンドで再接続（TUI はブロックしない）。
-                        // ソケット再確立のみ担う——Reconnect 交換はメインループが
+                        // ソケット/WS 再確立のみ担う——Reconnect 交換はメインループが
                         // 永続 session で駆動する（R1）。
-                        let config2 = config.clone();
+                        let mode = config.mode.clone();
                         let (tx, rx) = std::sync::mpsc::channel::<ReconnectEvent>();
                         reconnect_rx = Some(rx);
                         std::thread::spawn(move || {
-                            let result = reconnect_socket_only(&config2);
+                            let result: Result<Transport, String> = match &mode {
+                                ConnectMode::Listen(_) | ConnectMode::Connect(_) => {
+                                    reconnect_socket_only(&mode)
+                                        .map(Transport::Tcp)
+                                        .map_err(|e| e.to_string())
+                                }
+                                ConnectMode::Cloud { room_key } => reconnect_ws_only(room_key)
+                                    .map(Transport::Ws)
+                                    .map_err(|e| e.to_string()),
+                            };
                             let ev = match result {
-                                Ok(conn) => ReconnectEvent::Success(conn),
-                                Err(e) => ReconnectEvent::Failed(e.to_string()),
+                                Ok(t) => ReconnectEvent::Success(t),
+                                Err(e) => ReconnectEvent::Failed(e),
                             };
                             let _ = tx.send(ev);
                         });
                     }
+                }
+                NetEvent::System(sys) => {
+                    match sys {
+                        DoSystemMsg::PeerDisconnected => {
+                            app.message = "相手が切断しました。再接続を待っています…".to_string();
+                        }
+                        DoSystemMsg::YouReconnected => {
+                            // 自分が再接続した（WS 再確立後、DO が告げる）。
+                            // 現局面で reconnect を送り、以降は feed 分岐で再開する。
+                            let bh = board_hash(&kifu.current());
+                            let _ = transport.send(&session.reconnect_msg(bh));
+                            resume_after_reconnect(
+                                &mut app,
+                                side,
+                                &mut online_phase,
+                                &mut move_rolled_back,
+                            );
+                        }
+                        DoSystemMsg::PeerReconnected => {
+                            app.message = "相手が再接続しました。".to_string();
+                        }
+                        DoSystemMsg::RoomFull => {
+                            online_phase = OnlinePhase::Aborted("この部屋は満室です".to_string());
+                        }
+                        DoSystemMsg::SideAssigned { .. } => {
+                            // ハンドシェイク後は無視（side は既に確定済み）
+                        }
+                    }
+                    sync_online_status(&mut app, &online_phase, side, true);
                 }
                 NetEvent::Message(wire) => {
                     match session.feed(wire) {
@@ -247,14 +330,14 @@ pub fn run_online(
                             if both_committed {
                                 match session.reveal_msg() {
                                     Ok(reveal) => {
-                                        conn.send(&reveal)?;
+                                        transport.send(&reveal)?;
                                         online_phase = OnlinePhase::WaitingPeerReveal;
                                         app.message =
                                             "Reveal 送信済み — 相手の Reveal 待ち...".to_string();
                                     }
                                     Err(e) => abort(
                                         &mut online_phase,
-                                        &mut conn,
+                                        &mut transport,
                                         format!("reveal 生成エラー: {:?}", e),
                                     ),
                                 }
@@ -272,14 +355,14 @@ pub fn run_online(
                             if both_revealed {
                                 match session.ack_msg() {
                                     Ok(ack) => {
-                                        conn.send(&ack)?;
+                                        transport.send(&ack)?;
                                         online_phase = OnlinePhase::WaitingPeerAck;
                                         app.message =
                                             "Ack 送信済み — 相手の Ack 待ち...".to_string();
                                     }
                                     Err(e) => abort(
                                         &mut online_phase,
-                                        &mut conn,
+                                        &mut transport,
                                         format!("ack エラー: {:?}", e),
                                     ),
                                 }
@@ -292,7 +375,7 @@ pub fn run_online(
                                 &mut app,
                                 &mut kifu,
                                 &mut online_phase,
-                                config.local_side,
+                                side,
                             );
                         }
                         Ok(SessionEvent::PeerAborted { reason }) => {
@@ -304,9 +387,13 @@ pub fn run_online(
                                 session.peer_auth_hash().unwrap_or(SecretHash([0u8; 32])),
                             );
                             if recovery.find_resume_point(bh).is_some() {
-                                let _ = conn.send(&session.reconnect_ack_msg(bh));
+                                let _ = transport.send(&session.reconnect_ack_msg(bh));
                             } else {
-                                abort(&mut online_phase, &mut conn, "hash_mismatch".to_string());
+                                abort(
+                                    &mut online_phase,
+                                    &mut transport,
+                                    "hash_mismatch".to_string(),
+                                );
                             }
                         }
                         Ok(SessionEvent::ReconnectAck { resume_hash }) => {
@@ -322,12 +409,16 @@ pub fn run_online(
                             }
                         }
                         Err(SessionError::IdentityMismatch) => {
-                            abort(&mut online_phase, &mut conn, "auth_mismatch".to_string());
+                            abort(
+                                &mut online_phase,
+                                &mut transport,
+                                "auth_mismatch".to_string(),
+                            );
                         }
                         Err(e) => {
                             abort(
                                 &mut online_phase,
-                                &mut conn,
+                                &mut transport,
                                 format!("プロトコルエラー: {:?}", e),
                             );
                         }
@@ -335,7 +426,7 @@ pub fn run_online(
                             // ループ中は無視/待機
                         }
                     }
-                    sync_online_status(&mut app, &online_phase, config.local_side, true);
+                    sync_online_status(&mut app, &online_phase, side, true);
                 }
             }
         }
@@ -368,7 +459,7 @@ pub fn run_online(
                         break;
                     } else if k.code == KeyCode::Char('r') || k.code == KeyCode::Char('R') {
                         // オンライン投了: 即終局ではなく commit-reveal プロトコル経由で投了
-                        match config.local_side {
+                        match side {
                             Side::Sente => app.sente_action = Some(Action::Resign),
                             Side::Gote => app.gote_action = Some(Action::Resign),
                         }
@@ -388,7 +479,7 @@ pub fn run_online(
         }
 
         // ── 着手が確定したか検出 ─────────────────────────────────────────
-        let my_action = match config.local_side {
+        let my_action = match side {
             Side::Sente => app.sente_action,
             Side::Gote => app.gote_action,
         };
@@ -397,8 +488,8 @@ pub fn run_online(
             // UI を "待機中" に固定
             app.phase = Phase::ResolveReady;
             let pos = kifu.current();
-            let la = legal_actions(&pos, config.local_side);
-            let notation = ja_notation(&action, config.local_side, &la, &pos);
+            let la = legal_actions(&pos, side);
+            let notation = ja_notation(&action, side, &la, &pos);
             app.message = format!("着手確定: {}", notation);
 
             // commit-reveal セッション開始
@@ -407,9 +498,9 @@ pub fn run_online(
             let nonce = random_nonce();
             match session.commit(pos_hash, action, nonce) {
                 Ok(commit_msg) => {
-                    conn.send(&commit_msg)?;
+                    transport.send(&commit_msg)?;
                     online_phase = OnlinePhase::WaitingPeerCommit;
-                    sync_online_status(&mut app, &online_phase, config.local_side, true);
+                    sync_online_status(&mut app, &online_phase, side, true);
 
                     // 先着していた peer commit があれば commit() の中で適用済み
                     // → 両者揃っていれば即 reveal
@@ -417,15 +508,15 @@ pub fn run_online(
                         let reveal = session
                             .reveal_msg()
                             .expect("both_committed 済みなら reveal 可");
-                        conn.send(&reveal)?;
+                        transport.send(&reveal)?;
                         online_phase = OnlinePhase::WaitingPeerReveal;
-                        sync_online_status(&mut app, &online_phase, config.local_side, true);
+                        sync_online_status(&mut app, &online_phase, side, true);
                     }
                 }
                 Err(e) => {
                     let reason = format!("commit エラー: {:?}", e);
                     online_phase = OnlinePhase::Aborted(reason.clone());
-                    let _ = conn.send(&WireMessage::Abort { reason });
+                    let _ = transport.send(&WireMessage::Abort { reason });
                 }
             }
         }
@@ -442,7 +533,7 @@ fn resolve_completed_turn(
     app: &mut App,
     kifu: &mut Kifu,
     online_phase: &mut OnlinePhase,
-    local_side: Side,
+    side: Side,
 ) {
     // 投了判定（ルール 5.3 / 5.4）: resolve を通さず直接終局へ
     let s_resign = sente_action.is_resign();
@@ -473,7 +564,7 @@ fn resolve_completed_turn(
     if !matches!(app.phase, Phase::GameOver(_)) {
         // 次ターンへ
         *online_phase = OnlinePhase::WaitingMyMove;
-        if local_side == Side::Gote {
+        if side == Side::Gote {
             // resolve_turn は常に SenteInput に戻すので上書き
             app.phase = Phase::GoteInput;
             app.cursor_rank = 1;
@@ -482,12 +573,42 @@ fn resolve_completed_turn(
     }
 }
 
+/// 再接続後の「捨てて指し直し」への復帰（出典: 第三段の `ReconnectEvent::Success`）。
+/// LAN は再接続直後に、クラウドは `YouReconnected` を受けてから呼ぶ。
+fn resume_after_reconnect(
+    app: &mut App,
+    side: Side,
+    online_phase: &mut OnlinePhase,
+    move_rolled_back: &mut bool,
+) {
+    *online_phase = OnlinePhase::WaitingMyMove;
+    app.sente_action = None;
+    app.gote_action = None;
+    match side {
+        Side::Sente => {
+            app.phase = Phase::SenteInput;
+        }
+        Side::Gote => {
+            app.phase = Phase::GoteInput;
+            app.cursor_rank = 1;
+        }
+    }
+    app.message = if *move_rolled_back {
+        *move_rolled_back = false;
+        "着手をキャンセルしました — 再度入力してください".to_string()
+    } else {
+        "着手を入力してください".to_string()
+    };
+    sync_online_status(app, online_phase, side, true);
+    notify_reconnect(app, 4);
+}
+
 // ─── アボートの小さなヘルパ ─────────────────────────────────────────────────
 
 /// 自分の判定でアボートし、相手にも通知する（Abort を送る）。
-fn abort(online_phase: &mut OnlinePhase, conn: &mut Connection, reason: String) {
+fn abort(online_phase: &mut OnlinePhase, transport: &mut Transport, reason: String) {
     *online_phase = OnlinePhase::Aborted(reason.clone());
-    let _ = conn.send(&WireMessage::Abort { reason });
+    let _ = transport.send(&WireMessage::Abort { reason });
 }
 
 /// 相手が既にアボート済み、または通知不要な場合の局所反映のみ。
@@ -498,7 +619,12 @@ fn abort_to(online_phase: &mut OnlinePhase, reason: String) {
 // ─── ハンドシェイク補助 ─────────────────────────────────────────────────────
 
 /// peer の Hello を待って feed する。成功で peer_side、失敗で整形済みエラー文字列。
-fn wait_and_feed_hello(conn: &mut Connection, session: &mut ClientSession) -> Result<Side, String> {
+/// クラウドでは対局チャネル以外の `System` イベントも届き得るため、Hello 以外の
+/// メッセージは黙って読み飛ばして待ち続ける。
+fn wait_and_feed_hello(
+    transport: &mut Transport,
+    session: &mut ClientSession,
+) -> Result<Side, String> {
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
         if std::time::Instant::now() > deadline {
@@ -506,7 +632,7 @@ fn wait_and_feed_hello(conn: &mut Connection, session: &mut ClientSession) -> Re
                 "版交渉: 相手が応答しませんでした（版交渉未対応の版かもしれません）".to_string(),
             );
         }
-        match conn.events.try_recv() {
+        match transport.events().try_recv() {
             Ok(NetEvent::Message(wire @ WireMessage::Hello { .. })) => {
                 return match session.feed(wire) {
                     Ok(SessionEvent::HandshakeDone { peer_side }) => Ok(peer_side),
@@ -516,16 +642,66 @@ fn wait_and_feed_hello(conn: &mut Connection, session: &mut ClientSession) -> Re
                 };
             }
             Ok(NetEvent::Message(_)) => return Err("ハンドシェイク: hello 以外を受信".to_string()),
+            Ok(NetEvent::System(_)) => {
+                // クラウドの部屋メッセージが紛れても無視して hello を待ち続ける。
+            }
             Ok(NetEvent::Disconnected) => return Err("ハンドシェイク中に切断".to_string()),
             Err(_) => std::thread::sleep(Duration::from_millis(50)),
         }
     }
 }
 
-// ─── 再接続（ソケット再確立のみ。Reconnect 交換はメインループが担う・R1）──────
+/// クラウド接続直後、DO が `SideAssigned` を告げるのを待つ。
+fn wait_for_side_assigned(transport: &Transport) -> Result<Side, String> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        if std::time::Instant::now() > deadline {
+            return Err("相手を待っています…がタイムアウトしました".to_string());
+        }
+        match transport.events().try_recv() {
+            Ok(NetEvent::System(DoSystemMsg::SideAssigned { side })) => return Ok(side),
+            Ok(NetEvent::System(DoSystemMsg::RoomFull)) => {
+                return Err("この部屋は満室です".to_string())
+            }
+            Ok(NetEvent::Disconnected) => return Err("接続が切断されました".to_string()),
+            Ok(_) => {
+                // 他の System/Message は無視して待ち続ける。
+            }
+            Err(_) => std::thread::sleep(Duration::from_millis(50)),
+        }
+    }
+}
 
-fn reconnect_socket_only(config: &OnlineConfig) -> io::Result<Connection> {
-    match &config.mode {
+/// 接続前・handshake 前の致命的な失敗を表示し、[q] でポータルへ戻る。
+fn show_error_and_wait_for_quit(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    message: &str,
+) -> io::Result<()> {
+    loop {
+        terminal.draw(|f| {
+            let area = f.area();
+            let para =
+                ratatui::widgets::Paragraph::new(format!("{} — [q] でポータルへ戻る", message));
+            f.render_widget(para, area);
+        })?;
+        if event::poll(Duration::from_millis(200))? {
+            if let Event::Key(k) = event::read()? {
+                use crossterm::event::{KeyCode, KeyEventKind};
+                if k.kind != KeyEventKind::Release
+                    && (k.code == KeyCode::Char('q') || k.code == KeyCode::Char('Q'))
+                {
+                    return Ok(());
+                }
+            }
+        }
+    }
+}
+
+// ─── 再接続（トランスポート再確立のみ。Reconnect 交換はメインループが担う・R1）─
+
+/// LAN（TCP）のソケット再確立のみ。呼び出し元は `ConnectMode::Listen`/`Connect` のみで呼ぶ。
+fn reconnect_socket_only(mode: &ConnectMode) -> io::Result<Connection> {
+    match mode {
         ConnectMode::Listen(port) => Connection::listen(*port),
         ConnectMode::Connect(addr) => {
             let deadline = std::time::Instant::now() + Duration::from_secs(60);
@@ -538,6 +714,22 @@ fn reconnect_socket_only(config: &OnlineConfig) -> io::Result<Connection> {
                     Err(e) => return Err(e),
                 }
             }
+        }
+        ConnectMode::Cloud { .. } => unreachable!("cloud は reconnect_ws_only を使う"),
+    }
+}
+
+/// クラウド（WS）の再確立のみ。DO は同じ部屋キーへの再入室を
+/// 既存の 2 人部屋への再接続として扱い、`you_reconnected`/`peer_reconnected` を送る。
+fn reconnect_ws_only(room_key: &str) -> Result<WsConnection, net_ws::WsError> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        match WsConnection::connect(net_ws::CLOUD_SERVER_URL, room_key) {
+            Ok(ws) => return Ok(ws),
+            Err(_) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(500));
+            }
+            Err(e) => return Err(e),
         }
     }
 }

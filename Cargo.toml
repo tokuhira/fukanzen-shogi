@@ -3,5 +3,5 @@ members = ["engine", "cli", "tui", "protocol", "engine-wasm", "protocol-wasm", "
 resolver = "2"
 
 [workspace.package]
-version = "0.11.3"
+version = "0.12.0"
 edition = "2021"

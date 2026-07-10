@@ -33,12 +33,19 @@ enum Screen {
         focused: usize, // 0 = addr/port フィールド, 1 = secret フィールド
         error: Option<String>,
     },
+    CloudForm {
+        room_key: String,
+        secret: String,
+        focused: usize, // 0 = 部屋キー フィールド, 1 = secret フィールド
+        error: Option<String>,
+    },
 }
 
 const MENU_LABELS: &[&str] = &[
     "ローカル検証卓",
     "通信対戦（先手・待ち受け）",
     "通信対戦（後手・接続）",
+    "通信対戦（クラウド・部屋キー）",
     "終了",
 ];
 
@@ -48,6 +55,7 @@ pub struct LastConnection {
     pub listen_port: String,  // Listen 側で使ったポート番号
     pub connect_addr: String, // Connect 側で使ったアドレス（host:port）
     pub secret: String,
+    pub room_key: String, // クラウドで使った部屋キー
 }
 
 /// モード選択に応じた入力フォームの初期値を決定する。
@@ -75,6 +83,20 @@ fn make_form(listen: bool, last: Option<&LastConnection>) -> Screen {
     Screen::OnlineForm {
         listen,
         addr_or_port,
+        secret,
+        focused: 0,
+        error: None,
+    }
+}
+
+/// クラウド対戦フォームの初期値を決定する（前回の部屋キー・secret を再利用）。
+fn make_cloud_form(last: Option<&LastConnection>) -> Screen {
+    let (room_key, secret) = match last {
+        None => (String::new(), String::new()),
+        Some(l) => (l.room_key.clone(), l.secret.clone()),
+    };
+    Screen::CloudForm {
+        room_key,
         secret,
         focused: 0,
         error: None,
@@ -116,6 +138,7 @@ pub fn run_portal(
                                         0 => portal_result = Some(PortalResult::Local),
                                         1 => next_screen = Some(make_form(true, last)),
                                         2 => next_screen = Some(make_form(false, last)),
+                                        3 => next_screen = Some(make_cloud_form(last)),
                                         _ => portal_result = Some(PortalResult::Quit),
                                     }
                                     break;
@@ -123,6 +146,14 @@ pub fn run_portal(
                             }
                         }
                         Screen::OnlineForm { focused, .. } => {
+                            let (f1, f2) = form_field_rects(last_area);
+                            if hit(f1) {
+                                *focused = 0;
+                            } else if hit(f2) {
+                                *focused = 1;
+                            }
+                        }
+                        Screen::CloudForm { focused, .. } => {
                             let (f1, f2) = form_field_rects(last_area);
                             if hit(f1) {
                                 *focused = 0;
@@ -171,6 +202,7 @@ pub fn run_portal(
                             0 => portal_result = Some(PortalResult::Local),
                             1 => next_screen = Some(make_form(true, last)),
                             2 => next_screen = Some(make_form(false, last)),
+                            3 => next_screen = Some(make_cloud_form(last)),
                             _ => portal_result = Some(PortalResult::Quit),
                         },
                         KeyCode::Char('q') | KeyCode::Char('Q') => {
@@ -228,6 +260,55 @@ pub fn run_portal(
                         }
                         _ => {}
                     },
+
+                    Screen::CloudForm {
+                        room_key,
+                        secret,
+                        focused,
+                        error,
+                    } => match key.code {
+                        KeyCode::Esc => {
+                            next_screen = Some(Screen::Menu { selected: 0 });
+                        }
+                        KeyCode::Tab | KeyCode::Down => {
+                            *focused = 1 - *focused;
+                        }
+                        KeyCode::Up => {
+                            *focused = 1 - *focused;
+                        }
+                        KeyCode::Backspace => {
+                            if *focused == 0 {
+                                room_key.pop();
+                            } else {
+                                secret.pop();
+                            }
+                            *error = None;
+                        }
+                        KeyCode::Enter => {
+                            if *focused == 0 {
+                                *focused = 1;
+                            } else {
+                                match try_submit_cloud(room_key, secret) {
+                                    Ok(config) => {
+                                        portal_result = Some(PortalResult::Online(config));
+                                    }
+                                    Err(msg) => {
+                                        *error = Some(msg);
+                                        *focused = 0;
+                                    }
+                                }
+                            }
+                        }
+                        KeyCode::Char(c) => {
+                            if *focused == 0 {
+                                room_key.push(c);
+                            } else {
+                                secret.push(c);
+                            }
+                            *error = None;
+                        }
+                        _ => {}
+                    },
                 }
 
                 if let Some(s) = next_screen {
@@ -265,11 +346,28 @@ fn try_submit(listen: bool, addr_or_port: &str, secret: &str) -> Result<OnlineCo
     })
 }
 
+/// クラウドフォームの入力を検証して `OnlineConfig` を組み立てる。
+/// side は portal でなく DO が告げるため、`local_side` はここでは仮値
+/// （`ConnectMode::Cloud` を online.rs が見て DO の割り当てで上書きする）。
+fn try_submit_cloud(room_key: &str, secret: &str) -> Result<OnlineConfig, String> {
+    let room_key = room_key.trim();
+    if room_key.is_empty() {
+        return Err("部屋キーを入力してください".to_string());
+    }
+    Ok(OnlineConfig {
+        local_side: Side::Sente, // 仮値。DO の SideAssigned が確定させる。
+        mode: ConnectMode::Cloud {
+            room_key: room_key.to_string(),
+        },
+        secret: secret.as_bytes().to_vec(),
+    })
+}
+
 // ─── レイアウト計算（描画とヒットテストで共用） ─────────────────────────────────
 
-/// メニュー項目 4 つの Rect を返す（render_menu と同じ計算）
-fn menu_item_rects(area: Rect) -> [Rect; 4] {
-    let box_area = centered_rect(46, 12, area);
+/// メニュー項目 5 つの Rect を返す（render_menu と同じ計算）
+fn menu_item_rects(area: Rect) -> [Rect; 5] {
+    let box_area = centered_rect(46, 13, area);
     let inner = Block::default().borders(Borders::ALL).inner(box_area);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -280,11 +378,12 @@ fn menu_item_rects(area: Rect) -> [Rect; 4] {
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
+            Constraint::Length(1),
             Constraint::Min(0),
             Constraint::Length(1),
         ])
         .split(inner);
-    [chunks[1], chunks[2], chunks[3], chunks[5]]
+    [chunks[1], chunks[2], chunks[3], chunks[4], chunks[6]]
 }
 
 /// フォームの入力フィールド 2 つの Rect を返す（render_form と同じ計算）
@@ -322,6 +421,14 @@ fn render(f: &mut Frame, screen: &Screen) {
         } => {
             render_form(f, *listen, addr_or_port, secret, *focused, error.as_deref());
         }
+        Screen::CloudForm {
+            room_key,
+            secret,
+            focused,
+            error,
+        } => {
+            render_cloud_form(f, room_key, secret, *focused, error.as_deref());
+        }
     }
 }
 
@@ -337,7 +444,7 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
 }
 
 fn render_menu(f: &mut Frame, selected: usize) {
-    let area = centered_rect(46, 12, f.area());
+    let area = centered_rect(46, 13, f.area());
 
     let title = format!(" 不完全将棋 v{} ", crate::VERSION);
     let block = Block::default()
@@ -349,10 +456,11 @@ fn render_menu(f: &mut Frame, selected: usize) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    // spacer / item0 / item1 / item2 / spacer / item3(終了) / spacer / help
+    // spacer / item0 / item1 / item2 / item3 / spacer / item4(終了) / spacer / help
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
+            Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
@@ -364,7 +472,7 @@ fn render_menu(f: &mut Frame, selected: usize) {
         ])
         .split(inner);
 
-    let item_rows = [chunks[1], chunks[2], chunks[3], chunks[5]];
+    let item_rows = [chunks[1], chunks[2], chunks[3], chunks[4], chunks[6]];
 
     for (i, (label, row)) in MENU_LABELS.iter().zip(item_rows.iter()).enumerate() {
         let (cursor, style) = if i == selected {
@@ -387,7 +495,7 @@ fn render_menu(f: &mut Frame, selected: usize) {
             Style::default().fg(Color::DarkGray),
         ))
         .alignment(Alignment::Center),
-        chunks[7],
+        chunks[8],
     );
 }
 
@@ -443,6 +551,81 @@ fn render_form(
         chunks[1],
     );
     let (f1_text, f1_style) = input_display(addr_or_port, focused == 0);
+    f.render_widget(Paragraph::new(Span::styled(f1_text, f1_style)), chunks[2]);
+
+    // フィールド2
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            "共有パスワード:",
+            Style::default().fg(Color::Gray),
+        )),
+        chunks[4],
+    );
+    let masked = "*".repeat(secret.len());
+    let (f2_text, f2_style) = input_display(&masked, focused == 1);
+    f.render_widget(Paragraph::new(Span::styled(f2_text, f2_style)), chunks[5]);
+
+    // エラーメッセージ
+    if let Some(msg) = error {
+        f.render_widget(
+            Paragraph::new(Span::styled(msg, Style::default().fg(Color::Red))),
+            chunks[6],
+        );
+    }
+
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            "[Tab/↑↓] 移動  [Enter] 次/開始  [Esc] 戻る",
+            Style::default().fg(Color::DarkGray),
+        ))
+        .alignment(Alignment::Center),
+        chunks[8],
+    );
+}
+
+fn render_cloud_form(
+    f: &mut Frame,
+    room_key: &str,
+    secret: &str,
+    focused: usize,
+    error: Option<&str>,
+) {
+    let area = centered_rect(52, 11, f.area());
+
+    let block = Block::default()
+        .title(" 通信対戦（クラウド・部屋キー） ")
+        .title_alignment(Alignment::Center)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow));
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    // spacer / label1 / input1 / spacer / label2 / input2 / error / spacer / help
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+    // フィールド1
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            "部屋キー（対戦相手と共有）:",
+            Style::default().fg(Color::Gray),
+        )),
+        chunks[1],
+    );
+    let (f1_text, f1_style) = input_display(room_key, focused == 0);
     f.render_widget(Paragraph::new(Span::styled(f1_text, f1_style)), chunks[2]);
 
     // フィールド2

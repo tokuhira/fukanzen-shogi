@@ -28,6 +28,7 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
+use engine::types::Side;
 use protocol::WireMessage;
 
 // ─── トランスポート共通: イベント型 ───────────────────────────────────────────
@@ -36,7 +37,24 @@ use protocol::WireMessage;
 #[derive(Debug)]
 pub enum NetEvent {
     Message(WireMessage),
+    /// DO の部屋・システムメッセージ（対局チャネル外）。WS 殻のみが出す
+    /// （TCP 殻は LAN に部屋の概念がないため生成しない）。
+    System(DoSystemMsg),
     Disconnected,
+}
+
+/// DO の部屋・システムメッセージ。WS 殻が分類して surface する。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DoSystemMsg {
+    /// `peer_joined`（先に入った側＝先手）/ `room_ready`（後に入った側＝後手）の `your_side`。
+    SideAssigned {
+        side: Side,
+    },
+    /// 満室（通常は WS ハンドシェイク自体が HTTP 403 で失敗するため、ここへは来ない想定の安全弁）。
+    RoomFull,
+    PeerDisconnected,
+    PeerReconnected,
+    YouReconnected,
 }
 
 // ─── トランスポート共通: 接続ハンドル（公開 API のみ共通; 実装は TCP 固有）──
