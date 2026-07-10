@@ -55,7 +55,9 @@ pub enum NegotiationOutcome {
 /// 二証人の証言（record_testimony/record_disagreement）を追加し、綴じの契機を
 /// spectate_result から record_testimony の二証人経路へ移したため上げた（版 = 4）。
 /// 対局チャネル（commit/reveal/ack/hello）自体はバイト不変。
-pub const PROTOCOL_VERSION: u32 = 4;
+/// 通信核の一本化アーク第一段（`WireMessage`/`ClientSession` を `protocol` 核へ）で
+/// hello を集約形へ・再接続を auth_hash 方式へ再定義したため上げた（版 = 5）。
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// 自分の版タプル（engine::RULE_VERSION + PROTOCOL_VERSION）
 pub const MY_VERSION: VersionTuple = VersionTuple {

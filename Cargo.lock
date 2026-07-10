@@ -998,6 +998,8 @@ name = "protocol"
 version = "0.11.2"
 dependencies = [
  "engine",
+ "serde",
+ "serde_json",
  "sha2",
 ]
 
