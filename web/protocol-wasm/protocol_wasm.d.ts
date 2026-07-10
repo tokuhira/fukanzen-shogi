@@ -4,9 +4,9 @@
 /**
  * ブラウザ手元で動く秘匿対戦プロトコルの状態機械。
  *
- * WebSocket の送受信は JS の殻が担う。このクラスは
- * 「届いたメッセージを feed() に渡すと状態が進み、次に送るべき
- * メッセージが返る」という純粋ロジックだけを保持する。
+ * WebSocket の送受信は JS の殻が担う。このクラスは `protocol::ClientSession`
+ * の薄い wasm_bindgen ラッパ——sfen/usi の解釈と nonce 生成を担い、
+ * JS 向けの JSON 文字列契約へ整形するだけ。
  */
 export class ProtocolSession {
     free(): void;
@@ -30,14 +30,16 @@ export class ProtocolSession {
      * - `{"ok":true,"event":"peer_committed","both_committed":true}`
      * - `{"ok":true,"event":"peer_revealed","both_revealed":true}`
      * - `{"ok":true,"event":"turn_complete","sente_usi":"7g7f","gote_usi":"3c3d"}`
-     * - `{"ok":true,"event":"peer_reconnect_request","auth_hash":"...","board_hash":"..."}`
+     * - `{"ok":true,"event":"peer_reconnect_request","board_hash":"..."}`
+     * - `{"ok":true,"event":"peer_reconnect_rejected","reason":"auth_mismatch"}`
      * - `{"ok":true,"event":"reconnect_ack","resume_hash":"..."}`
      * - `{"ok":false,"error":"..."}`
      */
     feed(msg: string): string;
     /**
      * 接続直後に相手へ送る hello メッセージ（JSON 文字列）を返す。
-     * バージョン情報・認証ハッシュ・陣営を含む。
+     * バージョン情報・認証ハッシュ・陣営を含む。裸の JSON（online.js は parse せず
+     * そのまま送る）。
      */
     hello_msg(): string;
     /**
@@ -48,7 +50,8 @@ export class ProtocolSession {
     constructor(side: string, secret: string);
     /**
      * 初回 hello で受け取った相手の auth_hash（hex）を返す。
-     * 再接続時の本人確認に使う。未取得の場合は空文字列。
+     * 2a（再接続の本人照合を核へ引き上げ）後は online.js から呼ばれないが、
+     * 契約保存のため薄い鏡として残す。
      */
     peer_auth_hash(): string;
     /**

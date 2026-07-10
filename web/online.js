@@ -375,13 +375,7 @@ function _handleMessage(data) {
     // ── 再接続プロトコル ──────────────────────────────────────────────────
 
     case 'peer_reconnect_request': {
-      // 残留プレイヤー側: 相手の reconnect を検証し ack を返す
-      const expectedAuthHash = session.peer_auth_hash();
-      if (!expectedAuthHash || result.auth_hash !== expectedAuthHash) {
-        _wsSend(JSON.stringify({ type: 'abort', reason: 'auth_mismatch' }));
-        _cbs?.onStatus('error', '再接続: 認証失敗');
-        return;
-      }
+      // 本人照合は核（ClientSession）が済ませている。ここは再開点の確認のみ。
       const resumeSfen = _findSfenByHash(result.board_hash);
       if (!resumeSfen) {
         _wsSend(JSON.stringify({ type: 'abort', reason: 'hash_mismatch' }));
@@ -391,6 +385,13 @@ function _handleMessage(data) {
       _wsSend(JSON.stringify({ type: 'reconnect_ack', board_hash: result.board_hash }));
       _cbs?.onStatus('ready', '対局中');
       _cbs?.onResumeAt?.(resumeSfen);
+      break;
+    }
+
+    case 'peer_reconnect_rejected': {
+      // 核が本人照合に失敗（auth_mismatch）。相手へ abort を送る礼儀を保つ。
+      _wsSend(JSON.stringify({ type: 'abort', reason: result.reason }));
+      _cbs?.onStatus('error', '再接続: 認証失敗');
       break;
     }
 
