@@ -6,14 +6,23 @@
 /// DO のシステムメッセージ（side 割り当て・切断・再接続・満室）を
 /// `NetEvent` へ分類して surface する。
 ///
-/// tungstenite の `WebSocket<Stream>` は読み書きを分割できないため、
-/// `Arc<Mutex<>>` で reader スレッドとメインの送信を安全に共有する。
-/// reader は下層 TCP に読み取りタイムアウトを設定し、ロックを長く持たない
-/// （タイムアウトで定期的に手放し、送信側に機会を与える）。
+/// tungstenite の `WebSocket<Stream>` は読み書きの状態（ping/pong の自動応答・
+/// メッセージ再構築バッファ）を一つの値が抱えるため安全に分割できない。
+/// そこで読み書きの両方を**単一の IO スレッドだけ**が所有し、送信は
+/// `mpsc::Sender` 経由でそのスレッドへ委譲する（メインスレッドは送信要求を
+/// キューへ積むだけで、ネットワーク I/O 自体には触れない）。
+///
+/// 以前は `Arc<Mutex<WebSocket>>` を reader スレッドとメインスレッドで
+/// 共有していたが、reader が読み取りタイムアウト（200ms）ごとに
+/// unlock→即 relock を繰り返すループのため、送信側がロックを取り損ね続けて
+/// 実質的なロック飢餓（最悪で数十秒の送信遅延）が起きた（実 DO・実機で観測）。
+/// IO スレッドを一つに絞ることで、送信はロック待ちを経由せず即座にキューへ
+/// 積め、実際の書き込みは次の読み取りタイムアウト周期（最大 `READ_TIMEOUT`）
+/// 以内に決定的に行われる——スピンロックではなく、単一スレッドの
+/// 定周期ポーリングなので CPU を無駄に消費しない。
 use std::io;
 use std::net::TcpStream;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -29,8 +38,8 @@ use crate::net::{DoSystemMsg, NetEvent};
 /// 本番 DO の WebSocket ベース URL。
 pub const CLOUD_SERVER_URL: &str = "wss://fukanzen-shogi-ws.tokuhira.workers.dev";
 
-/// 受信ループのブロッキング読み取りタイムアウト。この間隔でロックを手放し、
-/// 送信側（メインスレッド）が書き込めるようにする。
+/// IO ループのブロッキング読み取りタイムアウト。この周期で読み取りから戻り、
+/// 送信キューを確認する——送信要求からの最悪遅延の上限になる。
 const READ_TIMEOUT: Duration = Duration::from_millis(200);
 
 type Sock = WebSocket<MaybeTlsStream<TcpStream>>;
@@ -62,7 +71,7 @@ impl From<io::Error> for WsError {
 }
 
 pub struct WsConnection {
-    ws: Arc<Mutex<Sock>>,
+    to_send: Sender<String>,
     pub events: Receiver<NetEvent>,
 }
 
@@ -86,23 +95,24 @@ impl WsConnection {
             Err(e) => return Err(WsError::Handshake(format!("{:?}", e))),
         };
 
-        // 対局ループ用に読み取りタイムアウトを設定（ハンドシェイク後）。
+        // IO ループ用に読み取りタイムアウトを設定（ハンドシェイク後）。
         tcp_for_timeout.set_read_timeout(Some(READ_TIMEOUT))?;
 
-        let shared = Arc::new(Mutex::new(ws));
-        let (tx, rx) = mpsc::channel();
-        let reader_handle = Arc::clone(&shared);
-        thread::spawn(move || reader_loop(reader_handle, tx));
+        let (tx_out, rx_out) = mpsc::channel::<String>();
+        let (tx_in, rx_in) = mpsc::channel();
+        thread::spawn(move || io_loop(ws, rx_out, tx_in));
 
         Ok(Self {
-            ws: shared,
-            events: rx,
+            to_send: tx_out,
+            events: rx_in,
         })
     }
 
     /// 対局チャネルのメッセージを送る（公開 API は TCP 殻と共通）。
+    /// 実際の書き込みは IO スレッドが行う——ここではキューへ積むだけなので
+    /// ネットワーク I/O やロック待ちで一切ブロックしない。
     pub fn send(&mut self, msg: &WireMessage) -> io::Result<()> {
-        self.send_text(msg.to_json())
+        self.queue(msg.to_json())
     }
 
     /// DO 制御メッセージ（`request_reset` 等）を素の JSON テキストで送る（WS 固有）。
@@ -110,52 +120,55 @@ impl WsConnection {
     /// 再開できることを確認済み。online.rs のクラウド再接続は現在これを使わない。
     #[allow(dead_code)]
     pub fn send_raw(&mut self, json: &str) -> io::Result<()> {
-        self.send_text(json.to_string())
+        self.queue(json.to_string())
     }
 
-    fn send_text(&mut self, text: String) -> io::Result<()> {
-        let mut ws = self.ws.lock().unwrap();
-        ws.send(Message::Text(text.into()))
-            .map_err(|e| io::Error::other(e.to_string()))
+    fn queue(&mut self, text: String) -> io::Result<()> {
+        self.to_send
+            .send(text)
+            .map_err(|_| io::Error::other("WS IO スレッドが終了しています"))
     }
 }
 
-fn reader_loop(ws: Arc<Mutex<Sock>>, tx: Sender<NetEvent>) {
+/// 読み書きの両方を単一スレッドで担う。読み取り（最大 `READ_TIMEOUT` でブロック）
+/// → 送信キューの排出、を交互に繰り返す。`ws` はこのスレッドだけが所有するため
+/// ロックが要らない。
+fn io_loop(mut ws: Sock, rx_out: Receiver<String>, tx_in: Sender<NetEvent>) {
     loop {
-        let result = {
-            // ロックは read() 呼び出しの間だけ持つ。読み取りタイムアウト（200ms）で
-            // 定期的に手放すため、送信側が書き込みで飢餓状態になることはない。
-            let mut sock = ws.lock().unwrap();
-            sock.read()
-        };
-        match result {
+        match ws.read() {
             Ok(Message::Text(s)) => {
                 if let Some(ev) = classify(s.as_str()) {
-                    if tx.send(ev).is_err() {
+                    if tx_in.send(ev).is_err() {
                         return;
                     }
                 }
                 // 未知の DO メッセージ（spectate_*/record_* 等）は無視して継続する
                 // （online.js が game channel の前に捌くのと同じ精神）。
             }
-            Ok(Message::Ping(payload)) => {
-                let mut sock = ws.lock().unwrap();
-                let _ = sock.send(Message::Pong(payload));
-            }
             Ok(Message::Close(_)) => {
-                let _ = tx.send(NetEvent::Disconnected);
+                let _ = tx_in.send(NetEvent::Disconnected);
                 return;
             }
             Ok(_) => {
-                // Binary/Pong/Frame は対局チャネル・DO システムのいずれでもない。
+                // Ping/Pong/Binary/Frame。Ping への Pong 応答は tungstenite が
+                // 自動でキューし、次の read/write/flush で送られる
+                // （手動で応答しないよう tungstenite 自身が案内している）。
             }
             Err(WsProtoError::Io(e))
                 if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut =>
             {
-                // 読み取りタイムアウト。切断ではない——ロックを手放して再試行するだけ。
+                // 読み取りタイムアウト。切断ではない——送信キューを確認して継続する。
             }
             Err(_) => {
-                let _ = tx.send(NetEvent::Disconnected);
+                let _ = tx_in.send(NetEvent::Disconnected);
+                return;
+            }
+        }
+
+        // 送信キューを排出する（非ブロッキング）。書き込み失敗は切断として扱う。
+        while let Ok(text) = rx_out.try_recv() {
+            if ws.send(Message::Text(text.into())).is_err() {
+                let _ = tx_in.send(NetEvent::Disconnected);
                 return;
             }
         }
