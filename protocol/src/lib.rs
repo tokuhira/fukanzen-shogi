@@ -4,6 +4,7 @@ pub mod commit;
 pub mod hash;
 pub mod negotiate;
 pub mod recovery;
+pub mod result;
 pub mod session;
 pub mod wire;
 
@@ -16,5 +17,6 @@ pub use negotiate::{
     MY_VERSION, PROTOCOL_VERSION,
 };
 pub use recovery::RecoverySession;
+pub use result::game_result;
 pub use session::{ProtocolError, Reveal, TurnSession};
 pub use wire::{WireError, WireMessage};
