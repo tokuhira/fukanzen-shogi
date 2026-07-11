@@ -17,6 +17,7 @@ docs/
     implementation/                  ← C. 完了した実装指示書
       board-split/                   ←   board.js 分割 第〇〜三段b-3（10 本）
       protocol-unification/          ←   通信核の一本化 概観＋第一〜四段（5 本）
+      terminal-unification/           ←   終局判定の単一正本化 概観＋Step A〜D（5 本）
       （淀川・記録係・その他は implementation/ 直下または小分類）
     rule-history/                    ← B-1. ルール仕様 v0.1〜v0.5
     sengoku-musou/                   ← B-2. 実装変更指示 v0.3〜v0.5（戦国無双系）
@@ -44,6 +45,7 @@ docs/
 
 - [board.js 分割アーク 総括（第〇段〜第三段b-3）](archive/board-split_総括_第零段から第三段b-3.md) — 神ファイル 1531→1220 行、純粋モジュール 10 本、テスト 57 件までの道のり・確立した設計・次アーク。末尾に**解決済み台帳**（再燃防止の記録）。board.js 分割の完了記録の詳細はここが受け皿。
 - [通信核の一本化アーク 総括（第一段〜第四段）](archive/protocol-unification_総括_第一段から第四段.md) — TUI（LAN・TCP）と web（DO・WS）が別々に持っていたワイヤ語彙とセッション進行を `protocol` 核（`WireMessage`・`ClientSession`）へ一本化し、TUI がクラウドの部屋へ入って web と同じ盤に座れるまでの道のり。配布 v0.11.2→v0.12.0。既知の限界（TUI 先手のクラウド対局はまだ観戦・アーカイブされない）を末尾に明記。
+- [終局判定の単一正本化アーク 総括（Step A〜D）](archive/終局判定の単一正本化_総括_StepAからD.md) — TUI と web が別々に持っていた終局判定ロジック（盤面終局のマッピング・投了の勝敗判定）を `engine::terminate::terminal_to_result` と `protocol::game_result` へ一本化し、TUI に潜んでいた「最長手数500組手で終局しない」バグを構造的に塞いだ道のり。配布 v0.12.1→v0.12.2。既知の限界（TUI 先手のクラウド対局の観戦・記録係対応＝4b）は通信核の一本化アークから引き続き未着手のまま。
 
 ---
 
@@ -119,6 +121,16 @@ docs/
 | protocol-wasmを薄いラッパへ — 第二段 | `ProtocolSession` を `ClientSession` の薄いラッパへ・再接続を核照合へ | web `?v=`0.11.12 |
 | TUIをネイティブClientSessionへ — 第三段 | TUI の TCP 殻・online.rs を永続 `ClientSession` 駆動へ載せ替え | v0.11.3 |
 | TUIにWS殻を足すクラウド参加 — 第四段 | `net_ws.rs` 新設・DO の部屋へ入りクラウド参加。アークの結実 | v0.12.0 |
+
+**C-6. 終局判定の単一正本化アーク（`archive/implementation/terminal-unification/`）** — 総括は `archive/終局判定の単一正本化_総括_StepAからD`。全 5 本、配布版 v0.12.1→v0.12.2。
+
+| 実装指示書 | 内容 | 版（目安） |
+|---|---|---|
+| アーク概観と段組 | 層の置き方（投了は protocol・盤面は engine）・段組の設計方針 | — |
+| StepA — engineにterminal_to_result | engine-wasm のインラインマッピングを `engine::terminate::terminal_to_result` へ移設。要石 | — |
+| StepB — protocolにgame_result | 投了と盤面終局を合流させる単一窓口 `protocol::game_result` を新設 | — |
+| StepC — engine-wasmをterminal_to_resultへ | `evaluate_terminal` を `terminal_to_result` 呼び出しへ置換。挙動はバイト単位で不変 | web `?v=`0.12.1 |
+| StepD — TUIをgame_resultへ委譲 | `resolve_turn`・online 投了枝を `game_result` へ委譲。最長手数500組手のバグを解消。アークの本丸 | v0.12.2 |
 
 ---
 
