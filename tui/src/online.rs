@@ -535,18 +535,18 @@ fn resolve_completed_turn(
     online_phase: &mut OnlinePhase,
     side: Side,
 ) {
-    // 投了判定（ルール 5.3 / 5.4）: resolve を通さず直接終局へ
+    // 投了判定（ルール 5.3 / 5.4）: resolve を通さず、投了組手を積んで単一正本 game_result へ委ねる。
     let s_resign = sente_action.is_resign();
     let g_resign = gote_action.is_resign();
     if s_resign || g_resign {
-        use crate::app::{DrawReason, GameOverKind, WinReason};
-        let kind = match (s_resign, g_resign) {
-            (true, true) => GameOverKind::Draw(DrawReason::MutualResign),
-            (true, false) => GameOverKind::GoteWins(WinReason::Resign),
-            (false, true) => GameOverKind::SenteWins(WinReason::Resign),
-            _ => unreachable!(),
-        };
-        app.phase = Phase::GameOver(kind);
+        use engine::types::Ply;
+        kifu.push(Ply {
+            sente: sente_action,
+            gote: gote_action,
+        });
+        if let Some((kind, outcome)) = protocol::game_result(kifu) {
+            app.phase = Phase::GameOver(crate::app::game_over_from_result(kind, outcome));
+        }
         return;
     }
 

@@ -1,9 +1,9 @@
+use engine::archive::{Outcome, ResultKind};
 use engine::board::Position;
 use engine::kifu::Kifu;
 use engine::movegen::legal_actions;
 use engine::resolve::{resolve, ResolutionEvent};
 use engine::serialize::{kifu_from_string, kifu_to_string, position_to_sfen};
-use engine::terminate::{check_king_death, check_sennichite, check_status, GameEnd, GameStatus};
 use engine::types::{Action, PieceKind, Ply, Side, Square};
 use notation::ja_notation;
 use ratatui::layout::Rect;
@@ -78,6 +78,7 @@ pub enum DrawReason {
     BothKingDied,
     BothCheckmate,
     Sennichite,
+    MaxTurns,     // ルール v0.6 §5.7: 最長手数500組手
     MutualResign, // ルール 5.4: 両者同時投了 → 引き分け
 }
 
@@ -485,59 +486,13 @@ impl App {
         self.gote_action = None;
         self.show_all_moves = false;
 
-        // 玉の死判定
-        if let Some(end) = check_king_death(&res.event) {
-            let kind = match end {
-                GameEnd::SenteLoses => {
-                    self.last_resolution
-                        .push("→ 後手の勝ち（先手玉が取られた）".to_string());
-                    GameOverKind::GoteWins(WinReason::KingDied)
-                }
-                GameEnd::GoteLoses => {
-                    self.last_resolution
-                        .push("→ 先手の勝ち（後手玉が取られた）".to_string());
-                    GameOverKind::SenteWins(WinReason::KingDied)
-                }
-                GameEnd::Draw => {
-                    self.last_resolution
-                        .push("→ 引き分け（両玉が取られた）".to_string());
-                    GameOverKind::Draw(DrawReason::BothKingDied)
-                }
-            };
-            self.phase = Phase::GameOver(kind);
-            return;
-        }
-
-        // 千日手チェック
-        if check_sennichite(&self.kifu) {
+        // 終局判定は単一正本 game_result へ（玉の死・詰み・千日手・最長手数を一元判定）。
+        if let Some((kind, outcome)) = protocol::game_result(&self.kifu) {
+            let go = game_over_from_result(kind, outcome);
             self.last_resolution
-                .push("→ 千日手（引き分け）".to_string());
-            self.phase = Phase::GameOver(GameOverKind::Draw(DrawReason::Sennichite));
+                .push(format!("→ {}", game_over_text(&go)));
+            self.phase = Phase::GameOver(go);
             return;
-        }
-
-        // 着手不能チェック
-        let next_pos = self.kifu.current();
-        match check_status(&next_pos) {
-            GameStatus::SenteLoses => {
-                self.last_resolution
-                    .push("→ 後手の勝ち（先手着手不能）".to_string());
-                self.phase = Phase::GameOver(GameOverKind::GoteWins(WinReason::Checkmate));
-                return;
-            }
-            GameStatus::GoteLoses => {
-                self.last_resolution
-                    .push("→ 先手の勝ち（後手着手不能）".to_string());
-                self.phase = Phase::GameOver(GameOverKind::SenteWins(WinReason::Checkmate));
-                return;
-            }
-            GameStatus::Draw => {
-                self.last_resolution
-                    .push("→ 引き分け（両者着手不能）".to_string());
-                self.phase = Phase::GameOver(GameOverKind::Draw(DrawReason::BothCheckmate));
-                return;
-            }
-            GameStatus::Ongoing => {}
         }
 
         self.phase = Phase::SenteInput;
@@ -787,6 +742,29 @@ fn build_resolution_text(
     lines
 }
 
+// ─── game_result（単一正本）→ GameOverKind（TUI 表示語彙）───────────────────────
+
+/// `protocol::game_result` の出力（アーカイブ語彙）を TUI の表示語彙へ写す。
+/// `game_result` が実際に返す11通り（Mate×3・KingDeath×2・SwapDraw・Sennichite・
+/// MaxTurns・Resign×3）を尽くす。それ以外は `game_result` の契約違反。
+pub fn game_over_from_result(kind: ResultKind, outcome: Outcome) -> GameOverKind {
+    use GameOverKind::*;
+    match (kind, outcome) {
+        (ResultKind::Mate, Outcome::SenteWins) => SenteWins(WinReason::Checkmate),
+        (ResultKind::Mate, Outcome::GoteWins) => GoteWins(WinReason::Checkmate),
+        (ResultKind::Mate, Outcome::Draw) => Draw(DrawReason::BothCheckmate),
+        (ResultKind::KingDeath, Outcome::SenteWins) => SenteWins(WinReason::KingDied),
+        (ResultKind::KingDeath, Outcome::GoteWins) => GoteWins(WinReason::KingDied),
+        (ResultKind::SwapDraw, Outcome::Draw) => Draw(DrawReason::BothKingDied),
+        (ResultKind::Sennichite, Outcome::Draw) => Draw(DrawReason::Sennichite),
+        (ResultKind::MaxTurns, Outcome::Draw) => Draw(DrawReason::MaxTurns),
+        (ResultKind::Resign, Outcome::SenteWins) => SenteWins(WinReason::Resign),
+        (ResultKind::Resign, Outcome::GoteWins) => GoteWins(WinReason::Resign),
+        (ResultKind::Resign, Outcome::Draw) => Draw(DrawReason::MutualResign),
+        other => unreachable!("game_result が想定外の結果を返した: {:?}", other),
+    }
+}
+
 // ─── ゲームオーバー文言 ────────────────────────────────────────────────────────
 
 pub fn game_over_text(kind: &GameOverKind) -> &'static str {
@@ -800,6 +778,76 @@ pub fn game_over_text(kind: &GameOverKind) -> &'static str {
         GameOverKind::Draw(DrawReason::BothKingDied) => "引き分け（両玉が取られた）",
         GameOverKind::Draw(DrawReason::BothCheckmate) => "引き分け（両者着手不能）",
         GameOverKind::Draw(DrawReason::Sennichite) => "引き分け（千日手）",
+        GameOverKind::Draw(DrawReason::MaxTurns) => "引き分け（最長手数・500組手）",
         GameOverKind::Draw(DrawReason::MutualResign) => "引き分け（両者投了）",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// game_result が実際に返す11通り（Mate×3・KingDeath×2・SwapDraw・Sennichite・
+    /// MaxTurns・Resign×3）を尽くし、期待どおりの GameOverKind に写ることを固定する。
+    #[test]
+    fn game_over_from_result_covers_all_eleven() {
+        let cases = [
+            (
+                (ResultKind::Mate, Outcome::SenteWins),
+                GameOverKind::SenteWins(WinReason::Checkmate),
+            ),
+            (
+                (ResultKind::Mate, Outcome::GoteWins),
+                GameOverKind::GoteWins(WinReason::Checkmate),
+            ),
+            (
+                (ResultKind::Mate, Outcome::Draw),
+                GameOverKind::Draw(DrawReason::BothCheckmate),
+            ),
+            (
+                (ResultKind::KingDeath, Outcome::SenteWins),
+                GameOverKind::SenteWins(WinReason::KingDied),
+            ),
+            (
+                (ResultKind::KingDeath, Outcome::GoteWins),
+                GameOverKind::GoteWins(WinReason::KingDied),
+            ),
+            (
+                (ResultKind::SwapDraw, Outcome::Draw),
+                GameOverKind::Draw(DrawReason::BothKingDied),
+            ),
+            (
+                (ResultKind::Sennichite, Outcome::Draw),
+                GameOverKind::Draw(DrawReason::Sennichite),
+            ),
+            (
+                (ResultKind::MaxTurns, Outcome::Draw),
+                GameOverKind::Draw(DrawReason::MaxTurns),
+            ),
+            (
+                (ResultKind::Resign, Outcome::SenteWins),
+                GameOverKind::SenteWins(WinReason::Resign),
+            ),
+            (
+                (ResultKind::Resign, Outcome::GoteWins),
+                GameOverKind::GoteWins(WinReason::Resign),
+            ),
+            (
+                (ResultKind::Resign, Outcome::Draw),
+                GameOverKind::Draw(DrawReason::MutualResign),
+            ),
+        ];
+        for ((kind, outcome), expected) in cases {
+            assert_eq!(
+                game_over_from_result(kind.clone(), outcome.clone()),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn max_turns_has_display_text() {
+        let text = game_over_text(&GameOverKind::Draw(DrawReason::MaxTurns));
+        assert!(!text.is_empty());
     }
 }
