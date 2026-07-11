@@ -384,47 +384,14 @@ pub fn evaluate_terminal(request_json: &str) -> String {
         kifu.push(engine::types::Ply { sente, gote });
     }
 
-    use engine::archive::{Outcome, ResultKind};
-    use engine::terminate::{DrawKind, LossKind, Terminal};
-    use engine::types::Side;
-
-    let (kind, outcome) = match engine::terminate::evaluate(&kifu) {
-        Terminal::Ongoing => return r#"{"status":"ongoing"}"#.to_string(),
-        Terminal::Loss {
-            loser: Side::Sente,
-            kind: LossKind::Mate,
-        } => (ResultKind::Mate, Outcome::GoteWins),
-        Terminal::Loss {
-            loser: Side::Gote,
-            kind: LossKind::Mate,
-        } => (ResultKind::Mate, Outcome::SenteWins),
-        Terminal::Loss {
-            loser: Side::Sente,
-            kind: LossKind::KingDeath,
-        } => (ResultKind::KingDeath, Outcome::GoteWins),
-        Terminal::Loss {
-            loser: Side::Gote,
-            kind: LossKind::KingDeath,
-        } => (ResultKind::KingDeath, Outcome::SenteWins),
-        Terminal::Draw {
-            kind: DrawKind::MutualMate,
-        } => (ResultKind::Mate, Outcome::Draw),
-        Terminal::Draw {
-            kind: DrawKind::BothKingsDied,
-        } => (ResultKind::SwapDraw, Outcome::Draw),
-        Terminal::Draw {
-            kind: DrawKind::Sennichite,
-        } => (ResultKind::Sennichite, Outcome::Draw),
-        Terminal::Draw {
-            kind: DrawKind::MaxTurns,
-        } => (ResultKind::MaxTurns, Outcome::Draw),
-    };
-
-    format!(
-        r#"{{"status":"terminal","kind":"{}","outcome":"{}"}}"#,
-        kind.to_str(),
-        outcome.to_str()
-    )
+    match engine::terminate::terminal_to_result(&engine::terminate::evaluate(&kifu)) {
+        None => r#"{"status":"ongoing"}"#.to_string(),
+        Some((kind, outcome)) => format!(
+            r#"{{"status":"terminal","kind":"{}","outcome":"{}"}}"#,
+            kind.to_str(),
+            outcome.to_str()
+        ),
+    }
 }
 
 /// JSON 文字列リテラルとして安全な形にエスケープする。
