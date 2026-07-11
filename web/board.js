@@ -19,7 +19,7 @@ import initProtocol, {
 } from './protocol-wasm/protocol_wasm.js';
 
 import {
-  connectOnline, disconnectOnline, commitMoveOnline, getMySide,
+  connectOnline, disconnectOnline, commitMoveOnline, getMySide, abortOnline,
   reconnectOnline, hasReconnectableSession, debugState,
   sendSpectateMeta, sendSpectateResult, connectSpectate, disconnectSpectate,
   sendRecordInvite, sendRecordAccept, sendRecordDecline, sendRecordTestimony,
@@ -61,6 +61,33 @@ function usiToText(usi, sfen, side) {
 
 // 純粋な game-record へ実 Wasm を渡す注入口（resolve_ply は JSON パースして渡す）。
 const resolvePly = (sfen, sUsi, gUsi) => JSON.parse(resolve_ply(sfen, sUsi, gUsi));
+
+// 両陣営の着手が現局面で合法かを検証する（resolve_ply へ渡す前の安全弁）。
+// resolve_ply（engine::resolve()）は両着手が既に合法であることを前提とする契約
+// なので、相手の reveal（拘束性・盤面ハッシュしか検証されていない）をそのまま
+// 渡すと wasm パニックになりうる（不正な相手からの攻撃面。TUI 側 online.rs の
+// turn_actions_are_legal と対称）。
+function turnActionsAreLegal(sfen, sUsi, gUsi) {
+  const sLegal = JSON.parse(wasmLegalActions(sfen, 'sente'));
+  const gLegal = JSON.parse(wasmLegalActions(sfen, 'gote'));
+  return sLegal.includes(sUsi) && gLegal.includes(gUsi);
+}
+
+// 棋譜（アーカイブ）の全 ply が、その時点の局面で合法な着手かを検証する
+// （読込の安全弁）。resolve_ply は両着手が既に合法であることを前提とする契約
+// なので、検証前に loadPlies（内部で resolve_ply を呼ぶ）へ渡すと非合法な
+// 棋譜（改竄・共有元の悪意）でパニックしうる——ここで先に弾く。
+// このバレ棋譜書式は投了を表現しないので、投了を含む ply も不正として扱う
+// （TUI 側 app.rs::kifu_all_plies_legal と対称）。
+function pliesAreAllLegal(initialSfen, plies) {
+  let sfen = initialSfen;
+  for (const { sUsi, gUsi } of plies) {
+    if (sUsi === 'resign' || gUsi === 'resign') return false;
+    if (!turnActionsAreLegal(sfen, sUsi, gUsi)) return false;
+    sfen = resolvePly(sfen, sUsi, gUsi).sfen;
+  }
+  return true;
+}
 
 // ── SFEN parser ───────────────────────────────────────────────────────────────
 //
@@ -297,13 +324,19 @@ function loadArchive(text) {
     return;
   }
 
+  const plies = parsed.plies.map(p => ({ sUsi: p.s, gUsi: p.g }));
+  if (!pliesAreAllLegal(parsed.initial_sfen, plies)) {
+    alert('棋譜を読み込めませんでした（非合法な着手を含む棋譜です）');
+    return;
+  }
+
   // ローカル鑑賞として読む（オンライン状態は畳む）
   if (state.onlineMode || state.onlineGameOver) { _resetOnlineState(); disconnectOnline(); }
 
-  const plies = parsed.plies.map(p => ({ sUsi: p.s, gUsi: p.g }));
   try {
     loadPlies(plies, parsed.initial_sfen);
   } catch (e) {
+    // 上の pliesAreAllLegal で弾いているので通常は到達しない。多層防御として残す。
     alert('棋譜の再生に失敗しました: ' + e.message);
     return;
   }
@@ -543,6 +576,16 @@ function handleTurnComplete(senteUsi, goteUsi) {
     }
     state.resultOverride = { kind: 'resign', outcome };
     endOnlineGame(msg);
+    return;
+  }
+
+  // resolve_ply（engine::resolve()）へ渡す前の安全弁。相手の reveal はここまで
+  // 拘束性・盤面ハッシュしか検証されておらず合法性は未検証なので、ここで確認する
+  // ——さもないと空マスからの移動や成れない駒の成り宣言のような非合法な reveal で
+  // resolve_ply が wasm パニックを起こしうる（不正な相手からの攻撃面）。
+  if (!turnActionsAreLegal(state.sfens[state.cursor], senteUsi, goteUsi)) {
+    abortOnline('相手から非合法な着手を受信しました');
+    endOnlineGame('中断: 相手から非合法な着手を受信しました');
     return;
   }
 

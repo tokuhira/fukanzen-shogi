@@ -133,6 +133,17 @@ export function disconnectOnline() {
 }
 
 /**
+ * 自分の判定で相手へ abort を送る（通信の切断は呼び出し側が endOnlineGame 等で行う。
+ * peer_reconnect_rejected 等、既存の abort 送出と同じ分担）。
+ * board.js が turn_complete 受信後の合法性検証で非合法な着手を検知したときに呼ぶ
+ * （TUI 側 online.rs::abort() と対称——相手の reveal は拘束性・盤面ハッシュしか
+ * 検証されておらず合法性は未検証なので、resolve_ply へ渡す前にここで弾く）。
+ */
+export function abortOnline(reason) {
+  _wsSend(JSON.stringify({ type: 'abort', reason }));
+}
+
+/**
  * 自分の着手を commit して送信する。board.js が呼ぶ。
  * @param {string} sfen  現在局面の SFEN
  * @param {string} usi   着手の USI 表記（"resign" を含む）
