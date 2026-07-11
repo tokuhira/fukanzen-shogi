@@ -375,6 +375,7 @@ pub fn run_online(
                                 &mut app,
                                 &mut kifu,
                                 &mut online_phase,
+                                &mut transport,
                                 side,
                             );
                         }
@@ -533,6 +534,7 @@ fn resolve_completed_turn(
     app: &mut App,
     kifu: &mut Kifu,
     online_phase: &mut OnlinePhase,
+    transport: &mut Transport,
     side: Side,
 ) {
     // 投了判定（ルール 5.3 / 5.4）: resolve を通さず、投了組手を積んで単一正本 game_result へ委ねる。
@@ -547,6 +549,20 @@ fn resolve_completed_turn(
         if let Some((kind, outcome)) = protocol::game_result(kifu) {
             app.phase = Phase::GameOver(crate::app::game_over_from_result(kind, outcome));
         }
+        return;
+    }
+
+    // resolve() は両着手が現局面で既に合法であることを前提とする（engine 側の契約）。
+    // 相手の reveal はここまで拘束性・盤面ハッシュしか検証されておらず合法性は未検証
+    // なので、resolve へ渡す前にここで確認する——さもないと空マスからの移動や
+    // 成れない駒の成り宣言のような非合法な reveal で resolve() がパニックする
+    // （不正な相手・改竄されたクライアントからの攻撃面）。
+    if !turn_actions_are_legal(&app.current_pos(), sente_action, gote_action) {
+        abort(
+            online_phase,
+            transport,
+            "相手から非合法な着手を受信しました".to_string(),
+        );
         return;
     }
 
@@ -601,6 +617,14 @@ fn resume_after_reconnect(
     };
     sync_online_status(app, online_phase, side, true);
     notify_reconnect(app, 4);
+}
+
+/// 両陣営の着手が現局面で合法かを検証する（`resolve()` へ渡す前の安全弁）。
+/// `resolve()` は両着手が既に合法であることを前提とする契約なので、相手の reveal
+/// （拘束性・盤面ハッシュしか検証されていない）をそのまま渡すとパニックしうる。
+fn turn_actions_are_legal(pos: &Position, sente: Action, gote: Action) -> bool {
+    legal_actions(pos, Side::Sente).contains(&sente)
+        && legal_actions(pos, Side::Gote).contains(&gote)
 }
 
 // ─── アボートの小さなヘルパ ─────────────────────────────────────────────────
@@ -811,5 +835,48 @@ fn notify_reconnect(app: &mut App, duration_secs: u64) {
     if let Some(ref mut os) = app.online_status {
         os.reconnect_notice_until =
             Some(std::time::Instant::now() + Duration::from_secs(duration_secs));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 合法な双方の着手は通過する。
+    #[test]
+    fn legal_actions_pass() {
+        let pos = Position::initial();
+        let sente = Action::from_usi("7g7f").unwrap();
+        let gote = Action::from_usi("3c3d").unwrap();
+        assert!(turn_actions_are_legal(&pos, sente, gote));
+    }
+
+    /// 悪意ある相手が「駒のないマスからの移動」を reveal しても resolve() へは進まない。
+    #[test]
+    fn empty_from_square_rejected() {
+        let pos = Position::initial();
+        let malicious = Action::from_usi("5e5f").unwrap(); // 5e は初期局面で空
+        let honest = Action::from_usi("3c3d").unwrap();
+        assert!(!turn_actions_are_legal(&pos, honest, malicious));
+    }
+
+    /// 悪意ある相手が「玉に成る」ような非合法な reveal を送っても弾かれる。
+    #[test]
+    fn illegal_promote_rejected() {
+        let pos = Position::initial();
+        let malicious = Action::from_usi("5i5h+").unwrap(); // 玉は成れない
+        let honest = Action::from_usi("3c3d").unwrap();
+        assert!(!turn_actions_are_legal(&pos, malicious, honest));
+    }
+
+    /// 相手の駒を自分の着手であるかのように動かす reveal も弾かれる
+    /// （from に自分の駒がなければ legal_actions に含まれない）。
+    #[test]
+    fn cross_side_piece_rejected() {
+        let pos = Position::initial();
+        // 後手が "7g7f"（実際は先手の歩の位置）を自分の着手と偽る
+        let malicious_gote = Action::from_usi("7g7f").unwrap();
+        let honest_sente = Action::from_usi("2g2f").unwrap();
+        assert!(!turn_actions_are_legal(&pos, honest_sente, malicious_gote));
     }
 }

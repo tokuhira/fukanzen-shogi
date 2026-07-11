@@ -579,23 +579,48 @@ impl App {
         }
     }
 
+    /// 読込棋譜のサイズ上限（web のアーカイブ読込 `MAX_ARCHIVE_BYTES` と同じ 512KB）。
+    /// 出所不明の巨大な .kifu ファイルによるメモリ・CPU 消費を防ぐ安全弁。
+    const MAX_KIFU_BYTES: usize = 512 * 1024;
+
     pub fn load(&mut self, path: &str) {
         match std::fs::read_to_string(path) {
             Err(e) => self.message = format!("読み込みエラー: {}", e),
-            Ok(content) => match kifu_from_string(&content) {
-                None => self.message = "棋譜のパースに失敗しました".to_string(),
-                Some(loaded) => {
-                    self.kifu = loaded;
-                    self.phase = Phase::SenteInput;
-                    self.sente_action = None;
-                    self.gote_action = None;
-                    self.clear_selection();
-                    self.cursor_file = 5;
-                    self.cursor_rank = 9;
-                    self.last_resolution.clear();
-                    self.message = format!("{} を読み込みました", path);
+            Ok(content) => {
+                if content.len() > Self::MAX_KIFU_BYTES {
+                    self.message = format!(
+                        "読み込みエラー: ファイルが大きすぎます（上限 {} KB）",
+                        Self::MAX_KIFU_BYTES / 1024
+                    );
+                    return;
                 }
-            },
+                match kifu_from_string(&content) {
+                    None => self.message = "棋譜のパースに失敗しました".to_string(),
+                    Some(loaded) => {
+                        if loaded.plies.len() > engine::terminate::MAX_TURNS {
+                            self.message =
+                                "棋譜のパースに失敗しました（組手数が上限を超えています）"
+                                    .to_string();
+                            return;
+                        }
+                        if !kifu_all_plies_legal(&loaded) {
+                            self.message =
+                                "棋譜のパースに失敗しました（非合法な着手を含む棋譜です）"
+                                    .to_string();
+                            return;
+                        }
+                        self.kifu = loaded;
+                        self.phase = Phase::SenteInput;
+                        self.sente_action = None;
+                        self.gote_action = None;
+                        self.clear_selection();
+                        self.cursor_file = 5;
+                        self.cursor_rank = 9;
+                        self.last_resolution.clear();
+                        self.message = format!("{} を読み込みました", path);
+                    }
+                }
+            }
         }
     }
 
@@ -633,6 +658,29 @@ impl App {
 }
 
 // ─── ヘルパー関数 ──────────────────────────────────────────────────────────────
+
+/// kifu の全 ply が、その時点の局面で合法な着手かを検証する（棋譜読込の安全弁）。
+///
+/// `resolve()` は「両着手が既に合法」という前提を置くため（engine 側の契約）、
+/// 検証前に `resolve` へ渡すと非合法な棋譜（改竄・共有元の悪意）でパニックしうる
+/// ——ここで先に弾く。バレ棋譜書式（`sfen` + `N: s | g` 行）は投了を表現しない
+/// （オンライン局・即時投了のいずれも投了は `self.kifu` へ ply を積まない）ので、
+/// 投了を含む ply も不正として扱う。
+fn kifu_all_plies_legal(kifu: &Kifu) -> bool {
+    let mut pos = kifu.initial_position.clone();
+    for ply in &kifu.plies {
+        if ply.sente.is_resign() || ply.gote.is_resign() {
+            return false;
+        }
+        let sente_legal = legal_actions(&pos, Side::Sente);
+        let gote_legal = legal_actions(&pos, Side::Gote);
+        if !sente_legal.contains(&ply.sente) || !gote_legal.contains(&ply.gote) {
+            return false;
+        }
+        pos = resolve(&pos, ply.sente, ply.gote).next;
+    }
+    true
+}
 
 pub fn piece_kind_ja(kind: PieceKind) -> &'static str {
     match kind {
@@ -849,5 +897,67 @@ mod tests {
     fn max_turns_has_display_text() {
         let text = game_over_text(&GameOverKind::Draw(DrawReason::MaxTurns));
         assert!(!text.is_empty());
+    }
+
+    // ── kifu_all_plies_legal（棋譜読込の安全弁） ────────────────────────────
+
+    fn legal_ply() -> Ply {
+        Ply {
+            sente: Action::Move {
+                from: Square::new(7, 7),
+                to: Square::new(7, 6),
+                promote: false,
+            },
+            gote: Action::Move {
+                from: Square::new(3, 3),
+                to: Square::new(3, 4),
+                promote: false,
+            },
+        }
+    }
+
+    #[test]
+    fn kifu_with_legal_plies_accepted() {
+        let mut kifu = Kifu::new(Position::initial());
+        kifu.push(legal_ply());
+        assert!(kifu_all_plies_legal(&kifu));
+    }
+
+    #[test]
+    fn kifu_with_empty_from_square_rejected() {
+        let mut kifu = Kifu::new(Position::initial());
+        kifu.push(Ply {
+            sente: Action::Move {
+                from: Square::new(5, 5), // 初期局面で空
+                to: Square::new(5, 4),
+                promote: false,
+            },
+            gote: legal_ply().gote,
+        });
+        assert!(!kifu_all_plies_legal(&kifu));
+    }
+
+    #[test]
+    fn kifu_with_illegal_promote_rejected() {
+        let mut kifu = Kifu::new(Position::initial());
+        kifu.push(Ply {
+            sente: Action::Move {
+                from: Square::new(5, 9), // 先手玉
+                to: Square::new(5, 8),
+                promote: true, // 玉は成れない
+            },
+            gote: legal_ply().gote,
+        });
+        assert!(!kifu_all_plies_legal(&kifu));
+    }
+
+    #[test]
+    fn kifu_with_resign_ply_rejected() {
+        let mut kifu = Kifu::new(Position::initial());
+        kifu.push(Ply {
+            sente: Action::Resign,
+            gote: legal_ply().gote,
+        });
+        assert!(!kifu_all_plies_legal(&kifu));
     }
 }

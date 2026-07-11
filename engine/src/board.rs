@@ -71,7 +71,10 @@ impl Hand {
 
     pub fn remove(&mut self, kind: PieceKind) {
         let idx = hand_index_expect(kind);
-        debug_assert!(self.counts[idx] > 0, "tried to remove piece not in hand");
+        // release ビルドでも防御する（debug_assert! だと release では消え、u8 が
+        // 0 から減算されて 255 へ無音でラップする——呼び出し側の合法性検証が漏れた
+        // 場合の多層防御として、全ビルドで即座に検知する）。
+        assert!(self.counts[idx] > 0, "tried to remove piece not in hand");
         self.counts[idx] -= 1;
     }
 
