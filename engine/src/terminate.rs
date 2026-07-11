@@ -115,6 +115,48 @@ pub enum DrawKind {
     MaxTurns,
 }
 
+/// 盤面終局 `Terminal` を、アーカイブ結果語彙 `(ResultKind, Outcome)` へ写す。
+/// `Ongoing` は終局でないので `None`。
+///
+/// この関数は**盤面終局限定**である（投了を知らない）。投了を含む勝敗の合成は
+/// protocol 層の `game_result` が担う（投了はプロトコルの範疇＝アーク概観 §1）。
+pub fn terminal_to_result(
+    t: &Terminal,
+) -> Option<(crate::archive::ResultKind, crate::archive::Outcome)> {
+    use crate::archive::{Outcome, ResultKind};
+    Some(match t {
+        Terminal::Ongoing => return None,
+        Terminal::Loss {
+            loser: Side::Sente,
+            kind: LossKind::Mate,
+        } => (ResultKind::Mate, Outcome::GoteWins),
+        Terminal::Loss {
+            loser: Side::Gote,
+            kind: LossKind::Mate,
+        } => (ResultKind::Mate, Outcome::SenteWins),
+        Terminal::Loss {
+            loser: Side::Sente,
+            kind: LossKind::KingDeath,
+        } => (ResultKind::KingDeath, Outcome::GoteWins),
+        Terminal::Loss {
+            loser: Side::Gote,
+            kind: LossKind::KingDeath,
+        } => (ResultKind::KingDeath, Outcome::SenteWins),
+        Terminal::Draw {
+            kind: DrawKind::MutualMate,
+        } => (ResultKind::Mate, Outcome::Draw),
+        Terminal::Draw {
+            kind: DrawKind::BothKingsDied,
+        } => (ResultKind::SwapDraw, Outcome::Draw),
+        Terminal::Draw {
+            kind: DrawKind::Sennichite,
+        } => (ResultKind::Sennichite, Outcome::Draw),
+        Terminal::Draw {
+            kind: DrawKind::MaxTurns,
+        } => (ResultKind::MaxTurns, Outcome::Draw),
+    })
+}
+
 /// 棋譜（履歴）から盤上の終局を評価する（ルール v0.6 §5.8 の一元評価）。
 ///
 /// 直前の組手の解決イベントは kifu を再生して内部で取得する
@@ -123,6 +165,10 @@ pub enum DrawKind {
 /// 評価順序（ルール §5・§6.4）: 玉の死 → 確定的詰み/両者不能 → 千日手 →
 /// 最長手数 → 続行。決定的な結果（玉の死・確定的詰み）が引き分け
 /// （千日手・最長手数）に優先する。
+///
+/// **最後の組手が投了（`Action::Resign`）の kifu を渡してはならない**——
+/// step1 で `resolve()` を呼ぶため panic する。投了を含む終局は protocol の `game_result` を使い、
+/// そちらが投了を先に捌いてこの前提を守る（アーク概観 §2）。
 pub fn evaluate(kifu: &Kifu) -> Terminal {
     // 1. 直前の組手による玉の死（5.2）。plies が空なら初期局面なのでスキップ。
     if let Some(last) = kifu.plies.last() {
@@ -419,5 +465,78 @@ mod tests {
                 kind: DrawKind::MaxTurns
             }
         );
+    }
+
+    // ── terminal_to_result（終局判定の単一正本化 Step A） ──────────────────
+
+    use crate::archive::{Outcome, ResultKind};
+
+    #[test]
+    fn terminal_to_result_loss_mate() {
+        assert_eq!(
+            terminal_to_result(&Terminal::Loss {
+                loser: Side::Sente,
+                kind: LossKind::Mate
+            }),
+            Some((ResultKind::Mate, Outcome::GoteWins))
+        );
+        assert_eq!(
+            terminal_to_result(&Terminal::Loss {
+                loser: Side::Gote,
+                kind: LossKind::Mate
+            }),
+            Some((ResultKind::Mate, Outcome::SenteWins))
+        );
+    }
+
+    #[test]
+    fn terminal_to_result_loss_king_death() {
+        assert_eq!(
+            terminal_to_result(&Terminal::Loss {
+                loser: Side::Sente,
+                kind: LossKind::KingDeath
+            }),
+            Some((ResultKind::KingDeath, Outcome::GoteWins))
+        );
+        assert_eq!(
+            terminal_to_result(&Terminal::Loss {
+                loser: Side::Gote,
+                kind: LossKind::KingDeath
+            }),
+            Some((ResultKind::KingDeath, Outcome::SenteWins))
+        );
+    }
+
+    #[test]
+    fn terminal_to_result_draws() {
+        assert_eq!(
+            terminal_to_result(&Terminal::Draw {
+                kind: DrawKind::MutualMate
+            }),
+            Some((ResultKind::Mate, Outcome::Draw))
+        );
+        assert_eq!(
+            terminal_to_result(&Terminal::Draw {
+                kind: DrawKind::BothKingsDied
+            }),
+            Some((ResultKind::SwapDraw, Outcome::Draw))
+        );
+        assert_eq!(
+            terminal_to_result(&Terminal::Draw {
+                kind: DrawKind::Sennichite
+            }),
+            Some((ResultKind::Sennichite, Outcome::Draw))
+        );
+        assert_eq!(
+            terminal_to_result(&Terminal::Draw {
+                kind: DrawKind::MaxTurns
+            }),
+            Some((ResultKind::MaxTurns, Outcome::Draw))
+        );
+    }
+
+    #[test]
+    fn terminal_to_result_ongoing_is_none() {
+        assert_eq!(terminal_to_result(&Terminal::Ongoing), None);
     }
 }
