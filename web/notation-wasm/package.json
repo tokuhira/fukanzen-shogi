@@ -1,0 +1,15 @@
+{
+  "name": "notation-wasm",
+  "type": "module",
+  "version": "0.12.0",
+  "files": [
+    "notation_wasm_bg.wasm",
+    "notation_wasm.js",
+    "notation_wasm.d.ts"
+  ],
+  "main": "notation_wasm.js",
+  "types": "notation_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
