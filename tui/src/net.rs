@@ -85,6 +85,9 @@ impl Connection {
     }
 
     fn from_stream(stream: TcpStream) -> std::io::Result<Self> {
+        // commit-reveal-ack は小さなメッセージの往復（ping-pong）なので、Nagle
+        // アルゴリズム（既定で有効）による不要な遅延を避ける（net_ws.rs と対称）。
+        stream.set_nodelay(true)?;
         let reader = stream.try_clone()?;
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || reader_loop(reader, tx));

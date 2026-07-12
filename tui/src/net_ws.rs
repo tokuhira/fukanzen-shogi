@@ -82,6 +82,12 @@ impl WsConnection {
         let (host, port) = parse_host_port(&url).ok_or(WsError::BadUrl)?;
 
         let tcp = TcpStream::connect((host.as_str(), port))?;
+        // commit-reveal-ack は小さなメッセージの往復（ping-pong）なので、Nagle
+        // アルゴリズム（既定で有効）が自分の送信を相手の ACK 待ちで足止めしうる。
+        // 相手（delayed ACK タイマー）の挙動次第で数百ms〜数秒の余計な遅延になる
+        // ——実機で Windows 版のみコミット・リビールがそれぞれ 1-2 秒余計に
+        // かかる形で顕在化した。無効化して都度即座に送る。
+        tcp.set_nodelay(true)?;
         let tcp_for_timeout = tcp.try_clone()?;
 
         // ハンドシェイク自体はタイムアウトを設けず完了させる（往復一回で軽い）。
