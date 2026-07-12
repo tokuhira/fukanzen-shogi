@@ -121,10 +121,9 @@ impl WsConnection {
         self.queue(msg.to_json())
     }
 
-    /// DO 制御メッセージ（`request_reset` 等）を素の JSON テキストで送る（WS 固有）。
-    /// 実 DO 検証（TUI↔TUI・切断/再接続を含む）で request_reset を送らずに
-    /// 再開できることを確認済み。online.rs のクラウド再接続は現在これを使わない。
-    #[allow(dead_code)]
+    /// DO 制御メッセージ（`spectate_meta`/`spectate_turn`/`spectate_result` 等）を
+    /// 素の JSON テキストで送る（WS 固有・対局チャネル外）。TUI 先手のクラウド
+    /// 観戦配信（延長 4b）が使う。
     pub fn send_raw(&mut self, json: &str) -> io::Result<()> {
         self.queue(json.to_string())
     }

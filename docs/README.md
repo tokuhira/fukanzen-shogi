@@ -44,7 +44,7 @@ docs/
 ## 総括（アークの俯瞰・`archive/`）
 
 - [board.js 分割アーク 総括（第〇段〜第三段b-3）](archive/board-split_総括_第零段から第三段b-3.md) — 神ファイル 1531→1220 行、純粋モジュール 10 本、テスト 57 件までの道のり・確立した設計・次アーク。末尾に**解決済み台帳**（再燃防止の記録）。board.js 分割の完了記録の詳細はここが受け皿。
-- [通信核の一本化アーク 総括（第一段〜第四段）](archive/protocol-unification_総括_第一段から第四段.md) — TUI（LAN・TCP）と web（DO・WS）が別々に持っていたワイヤ語彙とセッション進行を `protocol` 核（`WireMessage`・`ClientSession`）へ一本化し、TUI がクラウドの部屋へ入って web と同じ盤に座れるまでの道のり。配布 v0.11.2→v0.12.0。既知の限界（TUI 先手のクラウド対局はまだ観戦・アーカイブされない）を末尾に明記。
+- [通信核の一本化アーク 総括（第一段〜第四段）](archive/protocol-unification_総括_第一段から第四段.md) — TUI（LAN・TCP）と web（DO・WS）が別々に持っていたワイヤ語彙とセッション進行を `protocol` 核（`WireMessage`・`ClientSession`）へ一本化し、TUI がクラウドの部屋へ入って web と同じ盤に座れるまでの道のり。配布 v0.11.2→v0.12.0。末尾の既知の限界（TUI 先手のクラウド対局が観戦されない）は延長 4b（v0.12.3）で解消済み。
 - [終局判定の単一正本化アーク 総括（Step A〜D）](archive/終局判定の単一正本化_総括_StepAからD.md) — TUI と web が別々に持っていた終局判定ロジック（盤面終局のマッピング・投了の勝敗判定）を `engine::terminate::terminal_to_result` と `protocol::game_result` へ一本化し、TUI に潜んでいた「最長手数500組手で終局しない」バグを構造的に塞いだ道のり。配布 v0.12.1→v0.12.2。既知の限界（TUI 先手のクラウド対局の観戦・記録係対応＝4b）は通信核の一本化アークから引き続き未着手のまま。
 
 ---
@@ -112,7 +112,7 @@ docs/
 | 局面ナビゲーションの遷移を純粋reduceへ — 第三段b-2 | goPrev/goNext を navReduce へ（書き込み集約の第一号） | 0.11.10 |
 | オンラインリセットとホットシート確定を純粋reduceへ — 第三段b-3 | reducers.js へ抽出・書き込み集約完了・アークの区切り | 0.11.11 |
 
-**C-5. 通信核の一本化アーク（`archive/implementation/protocol-unification/`）** — 総括は `archive/protocol-unification_総括_第一段から第四段`。全 5 本、配布版 v0.11.2→v0.12.0。
+**C-5. 通信核の一本化アーク（`archive/implementation/protocol-unification/`）** — 総括は `archive/protocol-unification_総括_第一段から第四段`。第一〜四段の 5 本＋延長 4b（`archive/implementation/` 直下）。配布版 v0.11.2→v0.12.0、延長は v0.12.3。
 
 | 実装指示書 | 内容 | 版（目安） |
 |---|---|---|
@@ -121,6 +121,7 @@ docs/
 | protocol-wasmを薄いラッパへ — 第二段 | `ProtocolSession` を `ClientSession` の薄いラッパへ・再接続を核照合へ | web `?v=`0.11.12 |
 | TUIをネイティブClientSessionへ — 第三段 | TUI の TCP 殻・online.rs を永続 `ClientSession` 駆動へ載せ替え | v0.11.3 |
 | TUIにWS殻を足すクラウド参加 — 第四段 | `net_ws.rs` 新設・DO の部屋へ入りクラウド参加。アークの結実 | v0.12.0 |
+| 延長4b改訂 — TUI先手の観戦配信（game_result直呼び版） | `spectate_meta`/`spectate_turn`/`spectate_result` を先手クラウド TUI から送出。第四段の既知の限界（TUI 先手対局が観戦されない）を解消。`spectate_result` は単一正本 `protocol::game_result` を直接呼ぶ（記録係アークは作らない） | v0.12.3 |
 
 **C-6. 終局判定の単一正本化アーク（`archive/implementation/terminal-unification/`）** — 総括は `archive/終局判定の単一正本化_総括_StepAからD`。全 5 本、配布版 v0.12.1→v0.12.2。
 

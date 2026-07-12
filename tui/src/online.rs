@@ -69,6 +69,15 @@ impl Transport {
         }
     }
 
+    /// 対局チャネル外の制御メッセージ（観戦配信 `spectate_*` 等）を送る。
+    /// LAN に観戦者はいないので Tcp は no-op。
+    fn send_control(&mut self, json: &str) -> io::Result<()> {
+        match self {
+            Transport::Tcp(_) => Ok(()),
+            Transport::Ws(w) => w.send_raw(json),
+        }
+    }
+
     fn events(&self) -> &std::sync::mpsc::Receiver<NetEvent> {
         match self {
             Transport::Tcp(c) => &c.events,
@@ -135,6 +144,10 @@ pub fn run_online(
         }
     };
 
+    // 観戦配信（延長 4b）: クラウド先手のときだけ spectate_meta/turn/result を送る。
+    // LAN に観戦者はいない・後手は web と同じく配信を担わない（淀川 §2 の最小方針）。
+    let broadcasting = matches!(config.mode, ConnectMode::Cloud { .. }) && side == Side::Sente;
+
     // ── ハンドシェイク（hello 集約。版交渉は feed(Hello) の中）───────────────
     let mut session = ClientSession::new(side, &config.secret);
     transport.send(&session.hello_msg())?;
@@ -164,6 +177,23 @@ pub fn run_online(
         OnlinePhase::WaitingMyMove
     };
     let mut kifu = Kifu::new(Position::initial());
+
+    // spectate_meta（握手完了直後・一度）。version の形は web の version_tuple() に揃える。
+    if broadcasting {
+        let ver = format!(
+            r#"{{"rule":"{}.{}","protocol":{},"app":"{}"}}"#,
+            protocol::MY_VERSION.rule.0,
+            protocol::MY_VERSION.rule.1,
+            protocol::MY_VERSION.protocol,
+            env!("CARGO_PKG_VERSION")
+        );
+        let initial_sfen = engine::serialize::position_to_sfen(&Position::initial());
+        let _ = transport.send_control(&format!(
+            r#"{{"type":"spectate_meta","version":{},"initial_sfen":"{}"}}"#,
+            ver, initial_sfen
+        ));
+    }
+
     // 再接続バックグラウンドスレッドからの通知チャネル
     let mut reconnect_rx: Option<std::sync::mpsc::Receiver<ReconnectEvent>> = None;
     // 切断時点で着手が確定済みだったか（再接続後のロールバック通知に使う）
@@ -369,6 +399,16 @@ pub fn run_online(
                             }
                         }
                         Ok(SessionEvent::TurnComplete { sente, gote }) => {
+                            // (a) この手を観戦者へ（両者公開後なので秘匿を破らない）。
+                            // 投了手も送る（web と同順）。
+                            if broadcasting {
+                                let _ = transport.send_control(&format!(
+                                    r#"{{"type":"spectate_turn","s":"{}","g":"{}"}}"#,
+                                    sente.to_usi(),
+                                    gote.to_usi()
+                                ));
+                            }
+                            // (b) 従来どおり解決（投了・盤面終局を game_result 経由で GameOver に）。
                             resolve_completed_turn(
                                 sente,
                                 gote,
@@ -378,6 +418,19 @@ pub fn run_online(
                                 &mut transport,
                                 side,
                             );
+                            // (c) 終局したら結果を観戦者へ。単一正本 game_result を直接呼ぶ
+                            // （手組みの結果表は作らない——max_turns・投了も正しく出る）。
+                            if broadcasting {
+                                if let Phase::GameOver(_) = app.phase {
+                                    if let Some((kind, outcome)) = protocol::game_result(&kifu) {
+                                        let _ = transport.send_control(&format!(
+                                            r#"{{"type":"spectate_result","kind":"{}","outcome":"{}"}}"#,
+                                            kind.to_str(),
+                                            outcome.to_str()
+                                        ));
+                                    }
+                                }
+                            }
                         }
                         Ok(SessionEvent::PeerAborted { reason }) => {
                             abort_to(&mut online_phase, format!("相手がアボート: {}", reason));
