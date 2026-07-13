@@ -27,7 +27,7 @@ import {
 } from './online.js';
 
 import { parseUsi } from './usi.js';
-import { formatResult, terminalMessageJa } from './result-view.js';
+import { terminalMessageJa } from './result-view.js';
 import {
   CELL, BX, BY, BW, BH, SVG_W, SVG_H, PFS, KANJI, HAND_ORDER, countStr,
 } from './geometry.js';
@@ -37,6 +37,7 @@ import { emptyRecord, appendTurn, truncateTo, buildFromPlies } from './game-reco
 import { movesFromSquare, dropsOfKind, buildTargetMap, resolveTarget } from './move-input.js';
 import { navReduce } from './nav.js';
 import { resetOnlineReduce, hotseatConfirmReduce } from './reducers.js';
+import { labelView } from './view-model.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -46,13 +47,6 @@ const INITIAL_SFEN = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL 
 // 500組手の正当なアーカイブは概算 13〜14KB（着手行 500×24B＋ヘッダ約1.2KB）。
 // 巨大な悪意あるファイルでブラウザを固まらせないための、十分な安全マージン。
 const MAX_ARCHIVE_BYTES = 512 * 1024;
-
-const EVENT_LABEL = {
-  clash:      '相討ち',
-  sente_died: '先手玉が取られた',
-  gote_died:  '後手玉が取られた',
-  both_died:  '両玉相討ち',
-};
 
 // 実 Wasm 関数を綴じ込んだ board.js ローカルの呼び出し口（既存の呼び出し形を保つ）。
 function usiToText(usi, sfen, side) {
@@ -344,25 +338,6 @@ function loadArchive(text) {
   update({ loadedMeta: parsed.meta });
 }
 
-// 読み込んだアーカイブの版タプル・結果を鑑賞表示する。版不一致なら注意を返す。
-function archiveInfoText() {
-  if (!state.loadedMeta) return { text: '', mismatch: false };
-
-  const versionLine = state.loadedMeta.app
-    ? `ルール ${state.loadedMeta.rule} / プロトコル ${state.loadedMeta.protocol} / v${state.loadedMeta.app}`
-    : `ルール ${state.loadedMeta.rule} / プロトコル ${state.loadedMeta.protocol}`;
-  const resultLine = formatResult(state.loadedMeta.result);
-
-  const mismatch = !!(state.versionTuple && state.loadedMeta.rule !== state.versionTuple.rule);
-  if (!mismatch) {
-    return { text: `${versionLine} — ${resultLine}`, mismatch: false };
-  }
-  const warning =
-    `この棋譜はルール ${state.loadedMeta.rule} で指されました。現在の再生エンジンはルール ${state.versionTuple.rule} です。` +
-    `再生結果が当時と異なる可能性があります。`;
-  return { text: `${versionLine} — ${resultLine} ／ ${warning}`, mismatch: true };
-}
-
 // ── Watch mode（淀川第三歩・観戦） ───────────────────────────────────────────────
 
 function _metaToLoadedMeta(version, result) {
@@ -517,18 +492,6 @@ function _resetOnlineState() {
   // 呼び出し元（disconnectOnline/resetToNew と組で呼ばれる）が後で描画するため、
   // ここでは render しない（update ではなく Object.assign を直接使う）。
   Object.assign(state, resetOnlineReduce());
-}
-
-function _onlinePhaseText(gameOver) {
-  if (state.onlineGameOver) {
-    if (gameOver || state.cursor === state.plies.length) return state.onlineEndMsg || gameOver || '終局';
-    if (state.cursor === 0) return '初期局面';
-    return `第${state.cursor}組手後`;
-  }
-  if (state.onlineWaiting)   return state.onlineWaitingMsg;
-  if (state.onlineCommitted) return '着手確定 — 相手の着手を待っています';
-  if (state.onlineSide === 'gote') return state.selectedFrom ? '後手の手を選択中' : '後手の手を選んでください';
-  return state.selectedFrom ? '先手の手を選択中' : '先手の手を選んでください';
 }
 
 function endOnlineGame(msg) {
@@ -797,45 +760,13 @@ function render() {
   const hasInput  = !!(state.inputStep || state.selectedFrom || state.pendingSente || state.pendingGote);
   const gameOver  = getGameOverMsg();
 
-  let overlay, moveText = '', phaseText = '', eventText = '';
+  const overlay = state.phase === 'reveal'
+    ? revealOverlay(state.plies[state.cursor])
+    : (hasInput
+        ? inputOverlay({ selectedFrom: state.selectedFrom, inputStep: state.inputStep, legalTargets: state.legalTargets })
+        : null);
 
-  if (state.phase === 'reveal') {
-    overlay   = revealOverlay(state.plies[state.cursor]);
-    const ply = state.plies[state.cursor];
-    moveText  = `${ply.sText}　${ply.gText}`;
-    phaseText = '同時開示';
-    const evKey = state.events[state.cursor];
-    eventText = (evKey && evKey !== 'normal') ? `（${EVENT_LABEL[evKey] || evKey}）` : '';
-  } else {
-    overlay = hasInput
-      ? inputOverlay({ selectedFrom: state.selectedFrom, inputStep: state.inputStep, legalTargets: state.legalTargets })
-      : null;
-
-    if (state.watchMode) {
-      phaseText = _watchPhaseText(gameOver);
-    } else if (state.onlineMode) {
-      phaseText = _onlinePhaseText(gameOver);
-      if (!state.onlineGameOver && state.onlineCommitted) {
-        moveText = state.onlineSide === 'sente' ? (state.pendingSente?.text || '') : (state.pendingGote?.text || '');
-      }
-    } else if (bothReady) {
-      moveText  = `${state.pendingSente.text}　${state.pendingGote.text}`;
-      phaseText = '解決してください';
-    } else if (state.pendingSente) {
-      moveText  = state.pendingSente.text;
-      phaseText = '後手の手を選択中';
-    } else if (state.inputStep === 'gote') {
-      phaseText = '後手の手を選択中';
-    } else if (state.inputStep === 'sente' || state.selectedFrom) {
-      phaseText = '先手の手を選択中';
-    } else if (gameOver) {
-      phaseText = gameOver;
-    } else if (state.cursor === 0) {
-      phaseText = '初期局面';
-    } else {
-      phaseText = `第${state.cursor}組手後`;
-    }
-  }
+  const { phaseText, moveText, eventText, archiveInfo, step, total } = labelView(state, gameOver);
 
   const svg = document.getElementById('board');
   svg.setAttribute('viewBox', `0 0 ${SVG_W} ${SVG_H}`);
@@ -847,13 +778,10 @@ function render() {
   document.getElementById('move-display').textContent = moveText;
   document.getElementById('event-label').textContent  = eventText || ' ';
 
-  const archiveInfo = archiveInfoText();
   const archiveInfoEl = document.getElementById('archive-info');
   archiveInfoEl.textContent = archiveInfo.text;
   archiveInfoEl.classList.toggle('mismatch', archiveInfo.mismatch);
 
-  const total = state.plies.length * 2 + 1;
-  const step  = state.cursor * 2 + (state.phase === 'reveal' ? 1 : 0) + 1;
   document.getElementById('step-label').textContent = `${step} / ${total}`;
 
   const btnNext = document.getElementById('btn-next');
@@ -938,25 +866,6 @@ function render() {
       recordBtn.hidden = true;
     }
   }
-}
-
-function _watchPhaseText(gameOver) {
-  if (state.watchStatusText === 'connecting') return '観戦: 接続中…';
-  if (state.watchStatusText === 'error')      return '観戦: 接続エラーが発生しました';
-  if (state.watchStatusText === 'closed')     return '観戦: 接続が切れました';
-
-  // 投了など盤面から導けない終局は result で判断する（player_disconnected は
-  // 対局終了時の意図した WS 切断でも届くため、既に終局済みなら「再接続待ち」
-  // という誤解を招く表示にしない）。
-  const concluded = !!(state.loadedMeta?.result && state.loadedMeta.result.kind !== 'unfinished');
-  if (state.watchStatusText === 'player_disconnected' && !concluded) {
-    return '観戦: プレイヤーが切断中です（再接続を待っています）';
-  }
-  if (concluded && state.cursor === state.plies.length) return formatResult(state.loadedMeta.result);
-  if (gameOver) return gameOver;
-  if (state.plies.length === 0) return '観戦中（開始を待っています）';
-  if (state.cursor === state.plies.length) return '観戦中（最新）';
-  return `観戦中（第${state.cursor}組手）`;
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
