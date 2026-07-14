@@ -14,10 +14,12 @@ docs/
   archive/                           ← 完了記録・歴史（掘り起こすときだけ）
     board-split_総括_第零段から第三段b-3.md   ← board.js 分割アークの総括＋解決済み台帳
     protocol-unification_総括_第一段から第四段.md ← 通信核の一本化アークの総括
+    board.js_view純粋化_総括_View1からView3.md ← board.js view 純粋化アークの総括
     implementation/                  ← C. 完了した実装指示書
       board-split/                   ←   board.js 分割 第〇〜三段b-3（10 本）
       protocol-unification/          ←   通信核の一本化 概観＋第一〜四段（5 本）
       terminal-unification/           ←   終局判定の単一正本化 概観＋Step A〜D（5 本）
+      board-js-view-purification/     ←   board.js view 純粋化 概観＋View1〜3（4 本）
       （淀川・記録係・その他は implementation/ 直下または小分類）
     rule-history/                    ← B-1. ルール仕様 v0.1〜v0.5
     sengoku-musou/                   ← B-2. 実装変更指示 v0.3〜v0.5（戦国無双系）
@@ -46,6 +48,7 @@ docs/
 - [board.js 分割アーク 総括（第〇段〜第三段b-3）](archive/board-split_総括_第零段から第三段b-3.md) — 神ファイル 1531→1220 行、純粋モジュール 10 本、テスト 57 件までの道のり・確立した設計・次アーク。末尾に**解決済み台帳**（再燃防止の記録）。board.js 分割の完了記録の詳細はここが受け皿。
 - [通信核の一本化アーク 総括（第一段〜第四段）](archive/protocol-unification_総括_第一段から第四段.md) — TUI（LAN・TCP）と web（DO・WS）が別々に持っていたワイヤ語彙とセッション進行を `protocol` 核（`WireMessage`・`ClientSession`）へ一本化し、TUI がクラウドの部屋へ入って web と同じ盤に座れるまでの道のり。配布 v0.11.2→v0.12.0。末尾の既知の限界（TUI 先手のクラウド対局が観戦されない）は延長 4b（v0.12.3）で解消済み。
 - [終局判定の単一正本化アーク 総括（Step A〜D）](archive/終局判定の単一正本化_総括_StepAからD.md) — TUI と web が別々に持っていた終局判定ロジック（盤面終局のマッピング・投了の勝敗判定）を `engine::terminate::terminal_to_result` と `protocol::game_result` へ一本化し、TUI に潜んでいた「最長手数500組手で終局しない」バグを構造的に塞いだ道のり。配布 v0.12.1→v0.12.2。既知の限界（TUI 先手のクラウド対局の観戦・記録係対応＝4b）は通信核の一本化アークから引き続き未着手のまま。
+- [board.js view 純粋化アーク 総括（View-1〜View-3）](archive/board.js_view純粋化_総括_View1からView3.md) — `render()` の「state → 表示値」の導出（ラベル・ボタン・overlay・cursor）を `web/view-model.js` の純粋関数群（`labelView`・`buttonView`・`overlay`・`cursorInteractive`・合成 `viewModel`）へ抜き出した道のり。board.js 1263→1130 行、web テスト 57→118 件。web `?v=` 0.12.3→0.12.5、配布据え置き。残る本丸「種類2＝I/O 分解」は別アーク。
 
 ---
 
@@ -132,6 +135,15 @@ docs/
 | StepB — protocolにgame_result | 投了と盤面終局を合流させる単一窓口 `protocol::game_result` を新設 | — |
 | StepC — engine-wasmをterminal_to_resultへ | `evaluate_terminal` を `terminal_to_result` 呼び出しへ置換。挙動はバイト単位で不変 | web `?v=`0.12.1 |
 | StepD — TUIをgame_resultへ委譲 | `resolve_turn`・online 投了枝を `game_result` へ委譲。最長手数500組手のバグを解消。アークの本丸 | v0.12.2 |
+
+**C-7. board.js view 純粋化アーク（`archive/implementation/board-js-view-purification/`）** — 総括は `archive/board.js_view純粋化_総括_View1からView3`。全 4 本、配布据え置き・web `?v=` 0.12.3→0.12.5。
+
+| 実装指示書 | 内容 | web `?v=` |
+|---|---|---|
+| アーク概観と段組 | `render()` の表示値導出を純粋関数へ抜く方針・目標構造・段組 | — |
+| View1 — ラベルのlabelView | `phaseText`/`moveText`/`eventText`/`archiveInfo`/`step`/`total` を `labelView` へ | 0.12.3 |
+| View2 — ボタンのbuttonView | `next`/`prev`/`resign`/`save`/開始系/観戦離脱を `buttonView` へ | 0.12.4 |
+| View3 — overlay/cursorとviewModel合成 | 残る overlay/cursor を純粋化し `viewModel` へ合成。アークの締め | 0.12.5 |
 
 ---
 
