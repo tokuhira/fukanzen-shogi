@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { labelView, watchPhaseText, onlinePhaseText, archiveInfoText } from "../view-model.js";
+import { labelView, watchPhaseText, onlinePhaseText, archiveInfoText, buttonView } from "../view-model.js";
 
-// labelView が参照しうる全フィールドを持つ最小の base state。
+// labelView/buttonView が参照しうる全フィールドを持つ最小の base state。
 const S = (o = {}) => ({
   phase: 'position',
   cursor: 0,
@@ -22,6 +22,7 @@ const S = (o = {}) => ({
   selectedFrom: null,
   loadedMeta: null,
   versionTuple: null,
+  promotionPending: false,
   ...o,
 });
 
@@ -248,5 +249,108 @@ describe("labelView — step / total", () => {
       plies: [1, 2, 3].map(() => ({ sText: 'a', gText: 'b' })),
     });
     expect(labelView(s, null).step).toBe(6);
+  });
+});
+
+describe("buttonView — 観戦モード", () => {
+  const plies3 = [1, 2, 3].map(() => ({ sText: 'a', gText: 'b' }));
+
+  it("reveal は次へ有効・前へは cursor 依存", () => {
+    const s = S({ watchMode: true, phase: 'reveal', cursor: 1, plies: plies3 });
+    const b = buttonView(s, null);
+    expect(b.next).toEqual({ text: '次 →', disabled: false });
+    expect(b.prev).toEqual({ disabled: false });
+  });
+
+  it("position・途中: 次へ有効", () => {
+    const s = S({ watchMode: true, phase: 'position', cursor: 1, plies: plies3 });
+    expect(buttonView(s, null).next.disabled).toBe(false);
+  });
+
+  it("position・末尾: 次へ無効", () => {
+    const s = S({ watchMode: true, phase: 'position', cursor: 3, plies: plies3 });
+    expect(buttonView(s, null).next.disabled).toBe(true);
+  });
+
+  it("position・先頭: 前へ無効", () => {
+    const s = S({ watchMode: true, phase: 'position', cursor: 0, plies: plies3 });
+    expect(buttonView(s, null).prev.disabled).toBe(true);
+  });
+
+  it("観戦中は resign 非表示・開始系ボタン無効・観戦離脱ボタン表示", () => {
+    const s = S({ watchMode: true });
+    const b = buttonView(s, null);
+    expect(b.resign.visible).toBe(false);
+    expect(b.startButtonsDisabled).toBe(true);
+    expect(b.leaveWatchHidden).toBe(false);
+  });
+});
+
+describe("buttonView — オンライン対局", () => {
+  it("対局中（非終局）: ナビ両方無効・投了ボタン表示", () => {
+    const s = S({ onlineMode: true, onlineGameOver: false });
+    const b = buttonView(s, null);
+    expect(b.next.disabled).toBe(true);
+    expect(b.prev.disabled).toBe(true);
+    expect(b.resign.visible).toBe(true);
+  });
+
+  it("終局後: 観戦と同じナビ解放・投了非表示・保存ボタンハイライト", () => {
+    const plies3 = [1, 2, 3].map(() => ({ sText: 'a', gText: 'b' }));
+    const s = S({ onlineMode: true, onlineGameOver: true, phase: 'position', cursor: 1, plies: plies3 });
+    const b = buttonView(s, null);
+    expect(b.next.disabled).toBe(false);
+    expect(b.resign.visible).toBe(false);
+    expect(b.save.highlight).toBe(true);
+  });
+
+  it("resign.disabled: onlineCommitted / onlineWaiting のいずれかで true", () => {
+    expect(buttonView(S({ onlineMode: true, onlineCommitted: true }), null).resign.disabled).toBe(true);
+    expect(buttonView(S({ onlineMode: true, onlineWaiting: true }), null).resign.disabled).toBe(true);
+    expect(buttonView(S({ onlineMode: true }), null).resign.disabled).toBe(false);
+  });
+
+  it("開始系ボタンはオンライン中でも watchMode でなければ有効のまま", () => {
+    expect(buttonView(S({ onlineMode: true }), null).startButtonsDisabled).toBe(false);
+  });
+});
+
+describe("buttonView — ローカル・ホットシート", () => {
+  it("bothReady: 次へラベルが「解決 →」", () => {
+    const s = S({ pendingSente: { text: 'a' }, pendingGote: { text: 'b' } });
+    expect(buttonView(s, null).next).toEqual({ text: '解決 →', disabled: false });
+  });
+
+  it("入力途中（hasInput）: 前へは有効のまま（押すと入力キャンセルに使われる。goPrev 参照）", () => {
+    const s = S({ selectedFrom: [5, 5] });
+    expect(buttonView(s, null).prev.disabled).toBe(false);
+  });
+
+  it("promotionPending: 前へは有効のまま（同上、キャンセル用途）", () => {
+    const s = S({ promotionPending: true });
+    expect(buttonView(s, null).prev.disabled).toBe(false);
+  });
+
+  it("先頭・入力なし・成り待ちなし: 前へ無効", () => {
+    const s = S({ phase: 'position', cursor: 0 });
+    expect(buttonView(s, null).prev.disabled).toBe(true);
+  });
+
+  it("入力なし・途中局面: 次へ有効（次 →）", () => {
+    const plies3 = [1, 2, 3].map(() => ({ sText: 'a', gText: 'b' }));
+    const s = S({ phase: 'position', cursor: 1, plies: plies3 });
+    const b = buttonView(s, null);
+    expect(b.next).toEqual({ text: '次 →', disabled: false });
+  });
+
+  it("gameOver 注入: 保存ボタンをハイライト", () => {
+    expect(buttonView(S({}), '先手の勝ち').save.highlight).toBe(true);
+    expect(buttonView(S({}), null).save.highlight).toBe(false);
+  });
+
+  it("先頭・入力なし: 前へ無効。末尾・入力なし: 次へ無効", () => {
+    expect(buttonView(S({ phase: 'position', cursor: 0 }), null).prev.disabled).toBe(true);
+    const s = S({ phase: 'position', cursor: 3, plies: [1, 2, 3].map(() => ({ sText: 'a', gText: 'b' })) });
+    expect(buttonView(s, null).next.disabled).toBe(true);
   });
 });

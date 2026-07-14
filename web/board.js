@@ -37,7 +37,7 @@ import { emptyRecord, appendTurn, truncateTo, buildFromPlies } from './game-reco
 import { movesFromSquare, dropsOfKind, buildTargetMap, resolveTarget } from './move-input.js';
 import { navReduce } from './nav.js';
 import { resetOnlineReduce, hotseatConfirmReduce } from './reducers.js';
-import { labelView } from './view-model.js';
+import { labelView, buttonView } from './view-model.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -756,7 +756,6 @@ function goPrev() {
 
 function render() {
   const pos       = parseSfen(state.sfens[state.cursor]);
-  const bothReady = !!(state.pendingSente && state.pendingGote);
   const hasInput  = !!(state.inputStep || state.selectedFrom || state.pendingSente || state.pendingGote);
   const gameOver  = getGameOverMsg();
 
@@ -784,61 +783,29 @@ function render() {
 
   document.getElementById('step-label').textContent = `${step} / ${total}`;
 
-  const btnNext = document.getElementById('btn-next');
-  const btnPrev = document.getElementById('btn-prev');
+  const b = buttonView(state, gameOver);
 
-  if (state.watchMode) {
-    // 観戦中は常に棋譜ナビゲーション可能（コミット待ちの概念が無い）。
-    btnNext.textContent = '次 →';
-    btnNext.disabled = !(
-      state.phase === 'reveal' ||
-      (state.phase === 'position' && state.cursor < state.plies.length)
-    );
-    btnPrev.disabled = state.cursor === 0 && state.phase === 'position';
-  } else if (state.onlineMode) {
-    btnNext.textContent = '次 →';
-    if (state.onlineGameOver) {
-      // 終局後は棋譜ナビゲーションを解放（phase に関係なく維持）
-      btnNext.disabled = !(
-        state.phase === 'reveal' ||
-        (state.phase === 'position' && state.cursor < state.plies.length)
-      );
-      btnPrev.disabled = state.cursor === 0 && state.phase === 'position';
-    } else {
-      btnNext.disabled = true;
-      btnPrev.disabled = true;
-    }
-  } else {
-    btnNext.textContent = bothReady ? '解決 →' : '次 →';
-    btnNext.disabled    = !(
-      bothReady ||
-      state.phase === 'reveal' ||
-      (state.phase === 'position' && !hasInput && state.cursor < state.plies.length)
-    );
-    btnPrev.disabled    = (
-      state.cursor === 0 && state.phase === 'position' && !hasInput && !state.promotionPending
-    );
-  }
+  const btnNext = document.getElementById('btn-next');
+  btnNext.textContent = b.next.text;
+  btnNext.disabled    = b.next.disabled;
+  document.getElementById('btn-prev').disabled = b.prev.disabled;
 
   const btnResign = document.getElementById('btn-resign');
   if (btnResign) {
-    btnResign.style.display = (state.onlineMode && !state.onlineGameOver) ? 'inline-block' : 'none';
-    btnResign.disabled      = state.onlineCommitted || state.onlineWaiting;
+    btnResign.style.display = b.resign.visible ? 'inline-block' : 'none';
+    btnResign.disabled      = b.resign.disabled;
   }
 
   const btnSave = document.getElementById('btn-save');
-  if (btnSave) {
-    const isOver = state.onlineMode ? state.onlineGameOver : !!gameOver;
-    btnSave.classList.toggle('highlight', isOver);
-  }
+  if (btnSave) btnSave.classList.toggle('highlight', b.save.highlight);
 
   // 観戦中は対局を始める系のボタンを封じ、代わりに「観戦をやめる」を出す。
   for (const id of ['btn-online', 'btn-load']) {
     const btn = document.getElementById(id);
-    if (btn) btn.disabled = state.watchMode;
+    if (btn) btn.disabled = b.startButtonsDisabled;
   }
   const btnLeaveWatch = document.getElementById('btn-leave-watch');
-  if (btnLeaveWatch) btnLeaveWatch.hidden = !state.watchMode;
+  if (btnLeaveWatch) btnLeaveWatch.hidden = b.leaveWatchHidden;
 
   const linkText = document.getElementById('watch-link-text');
   const linkBtn  = document.getElementById('btn-copy-watch-link');

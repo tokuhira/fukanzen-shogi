@@ -108,3 +108,46 @@ export function labelView(state, gameOverMsg) {
 
   return { phaseText, moveText, eventText, archiveInfo, step, total };
 }
+
+/**
+ * ボタンの表示状態を state（＋終局メッセージ gameOverMsg）から純粋に組む。
+ * wasm 非依存（gameOverMsg 注入）。ロジックは現行 render() のボタン節を一字一句移す。
+ */
+export function buttonView(state, gameOverMsg) {
+  const bothReady = !!(state.pendingSente && state.pendingGote);
+  const hasInput  = !!(state.inputStep || state.selectedFrom || state.pendingSente || state.pendingGote);
+  const atStart   = state.cursor === 0 && state.phase === 'position';
+  const canForward = state.phase === 'reveal' || (state.phase === 'position' && state.cursor < state.plies.length);
+
+  let next, prev;
+  if (state.watchMode) {
+    next = { text: '次 →', disabled: !canForward };
+    prev = { disabled: atStart };
+  } else if (state.onlineMode) {
+    if (state.onlineGameOver) {
+      next = { text: '次 →', disabled: !canForward };
+      prev = { disabled: atStart };
+    } else {
+      next = { text: '次 →', disabled: true };
+      prev = { disabled: true };
+    }
+  } else {
+    next = {
+      text: bothReady ? '解決 →' : '次 →',
+      disabled: !(bothReady || state.phase === 'reveal' ||
+                  (state.phase === 'position' && !hasInput && state.cursor < state.plies.length)),
+    };
+    prev = { disabled: state.cursor === 0 && state.phase === 'position' && !hasInput && !state.promotionPending };
+  }
+
+  const resign = {
+    visible: state.onlineMode && !state.onlineGameOver,
+    disabled: state.onlineCommitted || state.onlineWaiting,
+  };
+  const isOver = state.onlineMode ? state.onlineGameOver : !!gameOverMsg;
+  const save = { highlight: isOver };
+  const startButtonsDisabled = state.watchMode;   // btn-online, btn-load
+  const leaveWatchHidden = !state.watchMode;
+
+  return { next, prev, resign, save, startButtonsDisabled, leaveWatchHidden };
+}
