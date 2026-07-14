@@ -29,3 +29,26 @@ export function hotseatConfirmReduce(side, pending) {
   }
   return { pendingGote: pending, selectedFrom: null, legalTargets: null, promotionPending: null };
 }
+
+// オンライン対局で組手が揃ったときの「投了判断」を純粋に行う（ルール 5.3/5.4）。
+// 投了なら勝敗メッセージ・outcome・resultOverride を返す。投了でなければ
+// {kind:'live'}（合法性検証・通常 append は呼び出し側＝殻が担う）。
+// wasm 非依存（合法性・表示テキストは殻で扱う）。
+export function turnCompleteDecision(senteUsi, goteUsi, onlineSide) {
+  const sResign = senteUsi === 'resign';
+  const gResign = goteUsi  === 'resign';
+  if (!sResign && !gResign) return { kind: 'live' };
+
+  let msg, outcome;
+  if (sResign && gResign) {
+    msg = '引き分け（両者投了）';
+    outcome = 'draw';
+  } else if (sResign) {
+    msg = onlineSide === 'sente' ? '投了しました（後手の勝ち）' : '相手が投了しました（先手の勝ち）';
+    outcome = 'gote_wins';
+  } else {
+    msg = onlineSide === 'gote'  ? '投了しました（先手の勝ち）' : '相手が投了しました（後手の勝ち）';
+    outcome = 'sente_wins';
+  }
+  return { kind: 'resign', msg, outcome, resultOverride: { kind: 'resign', outcome } };
+}

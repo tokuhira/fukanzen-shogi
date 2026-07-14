@@ -36,7 +36,7 @@ import { usiToText as usiToTextPure } from './notation-view.js';
 import { emptyRecord, appendTurn, truncateTo, buildFromPlies } from './game-record.js';
 import { movesFromSquare, dropsOfKind, buildTargetMap, resolveTarget } from './move-input.js';
 import { navReduce } from './nav.js';
-import { resetOnlineReduce, hotseatConfirmReduce } from './reducers.js';
+import { resetOnlineReduce, hotseatConfirmReduce, turnCompleteDecision } from './reducers.js';
 import { viewModel } from './view-model.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -522,23 +522,11 @@ function endOnlineGame(msg) {
 function handleTurnComplete(senteUsi, goteUsi) {
   state.onlineCommitted = false;
 
-  // 投了の検出（ルール 5.3 / 5.4）
-  const sResign = senteUsi === 'resign';
-  const gResign = goteUsi  === 'resign';
-  if (sResign || gResign) {
-    let msg, outcome;
-    if (sResign && gResign) {
-      msg = '引き分け（両者投了）';
-      outcome = 'draw';
-    } else if (sResign) {
-      msg = state.onlineSide === 'sente' ? '投了しました（後手の勝ち）' : '相手が投了しました（先手の勝ち）';
-      outcome = 'gote_wins';
-    } else {
-      msg = state.onlineSide === 'gote'  ? '投了しました（先手の勝ち）' : '相手が投了しました（後手の勝ち）';
-      outcome = 'sente_wins';
-    }
-    state.resultOverride = { kind: 'resign', outcome };
-    endOnlineGame(msg);
+  // 投了判断（純粋 reduce・ルール 5.3 / 5.4）。
+  const d = turnCompleteDecision(senteUsi, goteUsi, state.onlineSide);
+  if (d.kind === 'resign') {
+    state.resultOverride = d.resultOverride;
+    endOnlineGame(d.msg);
     return;
   }
 
