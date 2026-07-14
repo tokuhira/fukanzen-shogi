@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { labelView, watchPhaseText, onlinePhaseText, archiveInfoText, buttonView } from "../view-model.js";
+import {
+  labelView, watchPhaseText, onlinePhaseText, archiveInfoText, buttonView,
+  overlay, cursorInteractive, viewModel,
+} from "../view-model.js";
 
 // labelView/buttonView が参照しうる全フィールドを持つ最小の base state。
 const S = (o = {}) => ({
@@ -352,5 +355,109 @@ describe("buttonView — ローカル・ホットシート", () => {
     expect(buttonView(S({ phase: 'position', cursor: 0 }), null).prev.disabled).toBe(true);
     const s = S({ phase: 'position', cursor: 3, plies: [1, 2, 3].map(() => ({ sText: 'a', gText: 'b' })) });
     expect(buttonView(s, null).next.disabled).toBe(true);
+  });
+});
+
+describe("overlay", () => {
+  it("reveal: revealOverlay の結果（board-view.js の純粋関数）", () => {
+    const s = S({
+      phase: 'reveal', cursor: 0,
+      plies: [{ sUsi: '7g7f', gUsi: '3c3d', sText: 'a', gText: 'b' }],
+    });
+    const ov = overlay(s);
+    expect(ov.board).toEqual([[7, 7], [7, 6], [3, 3], [3, 4]]);
+    expect(ov.selectedSquare).toBeNull();
+  });
+
+  it("reveal: 打ちを含む組手は sHand に反映され、to（着地マス）は board に残る", () => {
+    const s = S({
+      phase: 'reveal', cursor: 0,
+      plies: [{ sUsi: 'P*5e', gUsi: '3c3d', sText: 'a', gText: 'b' }],
+    });
+    const ov = overlay(s);
+    expect(ov.sHand).toEqual(new Set(['P']));
+    // 打ちは from が無いので board から除外されるが、to（着地マス）は残る
+    expect(ov.board).toEqual([[5, 5], [3, 3], [3, 4]]);
+  });
+
+  it("入力中（盤上選択）: inputOverlay の結果", () => {
+    const s = S({ phase: 'position', selectedFrom: { board: [5, 5] }, inputStep: 'sente' });
+    const ov = overlay(s);
+    expect(ov.selectedSquare).toEqual([5, 5]);
+  });
+
+  it("入力中（持ち駒選択・legalTargets 有り）: legalDots に反映", () => {
+    const legalTargets = new Map([['5,5', {}], ['5,4', {}]]);
+    const s = S({ phase: 'position', selectedFrom: { hand: 'P' }, inputStep: 'gote', legalTargets });
+    const ov = overlay(s);
+    expect(ov.gHand).toEqual(new Set(['P']));
+    expect(ov.legalDots).toEqual(new Set(['5,5', '5,4']));
+  });
+
+  it("入力なし: null", () => {
+    expect(overlay(S({ phase: 'position' }))).toBeNull();
+  });
+});
+
+describe("cursorInteractive", () => {
+  it("position・非終局・非観戦・非コミット: true", () => {
+    expect(cursorInteractive(S({ phase: 'position' }), null)).toBe(true);
+  });
+
+  it("reveal 局面: false", () => {
+    expect(cursorInteractive(S({ phase: 'reveal' }), null)).toBe(false);
+  });
+
+  it("gameOver 注入あり: false", () => {
+    expect(cursorInteractive(S({ phase: 'position' }), '先手の勝ち')).toBe(false);
+  });
+
+  it("観戦中: false", () => {
+    expect(cursorInteractive(S({ phase: 'position', watchMode: true }), null)).toBe(false);
+  });
+
+  it("オンライン対局中・着手確定済み: false", () => {
+    const s = S({ phase: 'position', onlineMode: true, onlineCommitted: true });
+    expect(cursorInteractive(s, null)).toBe(false);
+  });
+
+  it("オンライン対局中・未確定: true", () => {
+    const s = S({ phase: 'position', onlineMode: true, onlineCommitted: false });
+    expect(cursorInteractive(s, null)).toBe(true);
+  });
+});
+
+describe("viewModel（合成の透過性）", () => {
+  it("labelView/buttonView/overlay/cursorInteractive の個別呼びと一致する", () => {
+    const s = S({
+      pendingSente: { text: '☗７六歩' },
+      pendingGote: { text: '☖３四歩' },
+    });
+    const gameOverMsg = null;
+    const vm = viewModel(s, gameOverMsg);
+
+    const label = labelView(s, gameOverMsg);
+    expect(vm.phaseText).toBe(label.phaseText);
+    expect(vm.moveText).toBe(label.moveText);
+    expect(vm.eventText).toBe(label.eventText);
+    expect(vm.archiveInfo).toEqual(label.archiveInfo);
+    expect(vm.step).toBe(label.step);
+    expect(vm.total).toBe(label.total);
+
+    expect(vm.buttons).toEqual(buttonView(s, gameOverMsg));
+    expect(vm.overlay).toEqual(overlay(s));
+    expect(vm.cursorInteractive).toBe(cursorInteractive(s, gameOverMsg));
+  });
+
+  it("観戦・reveal・gameOver 注入ありの代表 state でも透過性が成り立つ", () => {
+    const s = S({
+      watchMode: true, phase: 'reveal', cursor: 0,
+      plies: [{ sUsi: '7g7f', gUsi: '3c3d', sText: 'a', gText: 'b' }],
+      events: ['normal'],
+    });
+    const vm = viewModel(s, '先手の勝ち（後手玉が取られた）');
+    expect(vm.overlay).toEqual(overlay(s));
+    expect(vm.cursorInteractive).toBe(false);
+    expect(vm.buttons).toEqual(buttonView(s, '先手の勝ち（後手玉が取られた）'));
   });
 });

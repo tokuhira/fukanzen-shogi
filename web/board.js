@@ -31,13 +31,13 @@ import { terminalMessageJa } from './result-view.js';
 import {
   CELL, BX, BY, BW, BH, SVG_W, SVG_H, PFS, KANJI, HAND_ORDER, countStr,
 } from './geometry.js';
-import { renderSvg, inputOverlay, revealOverlay } from './board-view.js';
+import { renderSvg } from './board-view.js';
 import { usiToText as usiToTextPure } from './notation-view.js';
 import { emptyRecord, appendTurn, truncateTo, buildFromPlies } from './game-record.js';
 import { movesFromSquare, dropsOfKind, buildTargetMap, resolveTarget } from './move-input.js';
 import { navReduce } from './nav.js';
 import { resetOnlineReduce, hotseatConfirmReduce } from './reducers.js';
-import { labelView, buttonView } from './view-model.js';
+import { viewModel } from './view-model.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -755,35 +755,26 @@ function goPrev() {
 // ── Render ────────────────────────────────────────────────────────────────────
 
 function render() {
-  const pos       = parseSfen(state.sfens[state.cursor]);
-  const hasInput  = !!(state.inputStep || state.selectedFrom || state.pendingSente || state.pendingGote);
-  const gameOver  = getGameOverMsg();
-
-  const overlay = state.phase === 'reveal'
-    ? revealOverlay(state.plies[state.cursor])
-    : (hasInput
-        ? inputOverlay({ selectedFrom: state.selectedFrom, inputStep: state.inputStep, legalTargets: state.legalTargets })
-        : null);
-
-  const { phaseText, moveText, eventText, archiveInfo, step, total } = labelView(state, gameOver);
+  const pos      = parseSfen(state.sfens[state.cursor]);   // wasm（注入用）
+  const gameOver = getGameOverMsg();                        // wasm＋メモ化（注入用）
+  const vm       = viewModel(state, gameOver);              // 純粋な表示値の束
 
   const svg = document.getElementById('board');
   svg.setAttribute('viewBox', `0 0 ${SVG_W} ${SVG_H}`);
-  svg.innerHTML = renderSvg(pos, overlay);
-  svg.style.cursor = (state.phase === 'position' && !gameOver && !state.watchMode && !(state.onlineMode && state.onlineCommitted))
-    ? 'pointer' : 'default';
+  svg.innerHTML = renderSvg(pos, vm.overlay);
+  svg.style.cursor = vm.cursorInteractive ? 'pointer' : 'default';
 
-  document.getElementById('phase-label').textContent  = phaseText;
-  document.getElementById('move-display').textContent = moveText;
-  document.getElementById('event-label').textContent  = eventText || ' ';
+  document.getElementById('phase-label').textContent  = vm.phaseText;
+  document.getElementById('move-display').textContent = vm.moveText;
+  document.getElementById('event-label').textContent  = vm.eventText || ' ';
 
   const archiveInfoEl = document.getElementById('archive-info');
-  archiveInfoEl.textContent = archiveInfo.text;
-  archiveInfoEl.classList.toggle('mismatch', archiveInfo.mismatch);
+  archiveInfoEl.textContent = vm.archiveInfo.text;
+  archiveInfoEl.classList.toggle('mismatch', vm.archiveInfo.mismatch);
 
-  document.getElementById('step-label').textContent = `${step} / ${total}`;
+  document.getElementById('step-label').textContent = `${vm.step} / ${vm.total}`;
 
-  const b = buttonView(state, gameOver);
+  const b = vm.buttons;
 
   const btnNext = document.getElementById('btn-next');
   btnNext.textContent = b.next.text;

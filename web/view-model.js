@@ -2,6 +2,7 @@
 // wasm を呼ばない——盤面から導く終局メッセージ（gameOverMsg）は呼び出し側が注入する。
 
 import { formatResult } from './result-view.js';
+import { inputOverlay, revealOverlay } from './board-view.js'; // 純粋（wasm 非依存）
 
 // 事象ラベル（表示定数）。board.js から移設。
 const EVENT_LABEL = {
@@ -150,4 +151,33 @@ export function buttonView(state, gameOverMsg) {
   const leaveWatchHidden = !state.watchMode;
 
   return { next, prev, resign, save, startButtonsDisabled, leaveWatchHidden };
+}
+
+/** overlay（reveal→開示 overlay／入力中→入力 overlay／それ以外→null）。純粋。 */
+export function overlay(state) {
+  if (state.phase === 'reveal') {
+    return revealOverlay(state.plies[state.cursor]);
+  }
+  const hasInput = !!(state.inputStep || state.selectedFrom || state.pendingSente || state.pendingGote);
+  return hasInput
+    ? inputOverlay({ selectedFrom: state.selectedFrom, inputStep: state.inputStep, legalTargets: state.legalTargets })
+    : null;
+}
+
+/** 盤の SVG カーソルがポインタ（操作可能）か。純粋。 */
+export function cursorInteractive(state, gameOverMsg) {
+  return state.phase === 'position'
+    && !gameOverMsg
+    && !state.watchMode
+    && !(state.onlineMode && state.onlineCommitted);
+}
+
+/** 描画に必要な表示値を一つの束に合成する（pos・gameOverMsg は wasm 依存なので呼び出し側が用意）。純粋。 */
+export function viewModel(state, gameOverMsg) {
+  return {
+    ...labelView(state, gameOverMsg),         // phaseText, moveText, eventText, archiveInfo, step, total
+    buttons: buttonView(state, gameOverMsg),  // next, prev, resign, save, startButtonsDisabled, leaveWatchHidden
+    overlay: overlay(state),
+    cursorInteractive: cursorInteractive(state, gameOverMsg),
+  };
 }
