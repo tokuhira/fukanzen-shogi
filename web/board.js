@@ -36,7 +36,7 @@ import { usiToText as usiToTextPure } from './notation-view.js';
 import { emptyRecord, appendTurn, truncateTo, buildFromPlies } from './game-record.js';
 import { movesFromSquare, dropsOfKind, buildTargetMap, resolveTarget } from './move-input.js';
 import { navReduce } from './nav.js';
-import { resetOnlineReduce, hotseatConfirmReduce, turnCompleteDecision, metaToLoadedMeta, archivedLinkFor } from './reducers.js';
+import { resetOnlineReduce, hotseatConfirmReduce, turnCompleteDecision, metaToLoadedMeta, archivedLinkFor, endGameReduce } from './reducers.js';
 import { viewModel } from './view-model.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -507,7 +507,7 @@ function endOnlineGame(msg) {
     // 終局後は WS を閉じる（intentional なので onlineMode は破棄しない）
     disconnectOnline();
   }
-  update({ onlineGameOver: true, onlineEndMsg: msg, onlineCommitted: false, onlineWaiting: false });
+  update(endGameReduce(msg));
 }
 
 function handleTurnComplete(senteUsi, goteUsi) {

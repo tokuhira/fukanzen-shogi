@@ -68,3 +68,14 @@ export function metaToLoadedMeta(version, result) {
 export function archivedLinkFor(id, archiveUrl) {
   return id ? { id, url: archiveUrl(id) } : null;
 }
+
+// オンライン対局の終局時の状態 patch。純粋（resetOnlineReduce の終局版）。
+// effect（spectate/record 送信・disconnect・記録係待ち）は呼び出し側＝殻が行う。
+export function endGameReduce(msg) {
+  return {
+    onlineGameOver: true,
+    onlineEndMsg: msg,
+    onlineCommitted: false,
+    onlineWaiting: false,
+  };
+}

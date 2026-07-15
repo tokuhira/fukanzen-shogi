@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resetOnlineReduce, hotseatConfirmReduce, turnCompleteDecision, metaToLoadedMeta, archivedLinkFor } from "../reducers.js";
+import { resetOnlineReduce, hotseatConfirmReduce, turnCompleteDecision, metaToLoadedMeta, archivedLinkFor, endGameReduce } from "../reducers.js";
 
 describe("resetOnlineReduce（オンライン状態の初期化）", () => {
   it("11 のオンライン関連キーをすべて初期値へ戻す", () => {
@@ -115,5 +115,25 @@ describe("archivedLinkFor（アーカイブ id → リンク情報、archiveUrl 
     expect(archivedLinkFor(null, archiveUrl)).toBe(null);
     expect(archivedLinkFor(undefined, archiveUrl)).toBe(null);
     expect(archivedLinkFor('', archiveUrl)).toBe(null);
+  });
+});
+
+describe("endGameReduce（オンライン対局の終局 patch）", () => {
+  it("msg を onlineEndMsg に反映し、固定フィールドを返す", () => {
+    expect(endGameReduce('引き分け（両者投了）')).toEqual({
+      onlineGameOver: true,
+      onlineEndMsg: '引き分け（両者投了）',
+      onlineCommitted: false,
+      onlineWaiting: false,
+    });
+  });
+
+  it("任意の msg で onlineEndMsg === msg、他3フィールドは固定", () => {
+    expect(endGameReduce('投了しました（後手の勝ち）')).toEqual({
+      onlineGameOver: true,
+      onlineEndMsg: '投了しました（後手の勝ち）',
+      onlineCommitted: false,
+      onlineWaiting: false,
+    });
   });
 });
