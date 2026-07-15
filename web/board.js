@@ -36,7 +36,7 @@ import { usiToText as usiToTextPure } from './notation-view.js';
 import { emptyRecord, appendTurn, truncateTo, buildFromPlies } from './game-record.js';
 import { movesFromSquare, dropsOfKind, buildTargetMap, resolveTarget } from './move-input.js';
 import { navReduce } from './nav.js';
-import { resetOnlineReduce, hotseatConfirmReduce, turnCompleteDecision } from './reducers.js';
+import { resetOnlineReduce, hotseatConfirmReduce, turnCompleteDecision, metaToLoadedMeta, archivedLinkFor } from './reducers.js';
 import { viewModel } from './view-model.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -340,15 +340,6 @@ function loadArchive(text) {
 
 // ── Watch mode（淀川第三歩・観戦） ───────────────────────────────────────────────
 
-function _metaToLoadedMeta(version, result) {
-  if (!version) return null;
-  return {
-    rule: version.rule, protocol: version.protocol, app: version.app,
-    sente: null, gote: null,
-    result: result ?? { kind: 'unfinished', outcome: 'none' },
-  };
-}
-
 // 観戦トークンで部屋へ読み取り専用接続し、第二歩の再生機構へ流し込む。
 function enterWatchMode(token) {
   if (state.onlineMode) { _resetOnlineState(); disconnectOnline(); }
@@ -368,7 +359,7 @@ function enterWatchMode(token) {
       }
       update({
         cursor: state.plies.length,  // 現局面（最新）まで追いつく
-        loadedMeta: _metaToLoadedMeta(version, result),
+        loadedMeta: metaToLoadedMeta(version, result),
       });
     },
     onMeta: ({ version, initial_sfen }) => {
@@ -376,7 +367,7 @@ function enterWatchMode(token) {
       resetToNew();
       update({
         sfens: [initial_sfen || INITIAL_SFEN],
-        loadedMeta: _metaToLoadedMeta(version, null),
+        loadedMeta: metaToLoadedMeta(version, null),
         recordStatusText: '',
         archivedLink: null,
       });
@@ -396,11 +387,11 @@ function enterWatchMode(token) {
     onRecordDisagreement: (idA, idB, id) => {
       update({
         recordStatusText: '記録が食い違いました（裁定はされません）',
-        archivedLink: id ? { id, url: archiveUrl(id) } : null,
+        archivedLink: archivedLinkFor(id, archiveUrl),
       });
     },
     onArchived: (id) => {
-      update({ recordStatusText: '記録されました', archivedLink: { id, url: archiveUrl(id) } });
+      update({ recordStatusText: '記録されました', archivedLink: archivedLinkFor(id, archiveUrl) });
     },
   });
 }

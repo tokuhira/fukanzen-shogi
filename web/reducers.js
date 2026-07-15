@@ -52,3 +52,19 @@ export function turnCompleteDecision(senteUsi, goteUsi, onlineSide) {
   }
   return { kind: 'resign', msg, outcome, resultOverride: { kind: 'resign', outcome } };
 }
+
+// 版タプルと結果から loadedMeta を組む。純粋（board.js の _metaToLoadedMeta を移設。
+// onInit・onMeta で共有）。
+export function metaToLoadedMeta(version, result) {
+  if (!version) return null;
+  return {
+    rule: version.rule, protocol: version.protocol, app: version.app,
+    sente: null, gote: null,
+    result: result ?? { kind: 'unfinished', outcome: 'none' },
+  };
+}
+
+// アーカイブ id からリンク情報を組む。id が無ければ null。純粋（archiveUrl 注入）。
+export function archivedLinkFor(id, archiveUrl) {
+  return id ? { id, url: archiveUrl(id) } : null;
+}
