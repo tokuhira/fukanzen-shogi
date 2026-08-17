@@ -135,6 +135,17 @@ pub fn opponent_attacks(pos: &Position, side: Side) -> Vec<Square> {
     attacks
 }
 
+/// side の駒が sq に利いている枚数を数える（v0.7 支え付き取得の利き数没収用）。
+/// 呼び出し側は sq を空けた盤を渡す（(b) 串刺し方式：resolve_independent 参照）。
+pub fn count_attackers(pos: &Position, sq: Square, side: Side) -> usize {
+    pos.board
+        .iter()
+        .filter(|(from, piece)| {
+            piece.side == side && piece_attacks(pos, *from, *piece).contains(&sq)
+        })
+        .count()
+}
+
 // -------------------------------------------------------------------------
 // 王手判定
 // -------------------------------------------------------------------------

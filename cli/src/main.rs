@@ -511,6 +511,7 @@ fn print_resolution(event: &ResolutionEvent, sente: Action, gote: Action) {
         ResolutionEvent::Normal {
             sente_capture,
             gote_capture,
+            ..
         } => {
             if let Some(k) = sente_capture {
                 println!("  先手が {} を取得", piece_kind_ja(k.unpromoted()));

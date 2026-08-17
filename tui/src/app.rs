@@ -736,6 +736,7 @@ fn build_resolution_text(
         ResolutionEvent::Normal {
             sente_capture,
             gote_capture,
+            ..
         } => {
             if let Some(k) = sente_capture {
                 if sente_musou {

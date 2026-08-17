@@ -3,6 +3,7 @@
 /// 不変条件: 同一マスの当事者となる駒は常に最大2枚（各プレイヤー1着手のみのため）。
 /// 3枚以上の衝突は構造的に発生しない。
 use crate::board::Position;
+use crate::movegen::count_attackers;
 use crate::types::{Action, Piece, PieceKind, Side};
 
 /// 衝突解決の結果
@@ -19,6 +20,10 @@ pub enum ResolutionEvent {
     Normal {
         sente_capture: Option<PieceKind>,
         gote_capture: Option<PieceKind>,
+        /// v0.7: 支え付き取得で没収された先手駒（相手駒台へ）
+        sente_forfeit: Option<PieceKind>,
+        /// v0.7: 支え付き取得で没収された後手駒（相手駒台へ）
+        gote_forfeit: Option<PieceKind>,
     },
     /// 同一マスまたはスワップによる相討ち（交換）
     Clash {
@@ -191,10 +196,14 @@ fn resolve_king_wins(
         Side::Sente => ResolutionEvent::Normal {
             sente_capture: Some(enemy_piece.kind),
             gote_capture: None,
+            sente_forfeit: None,
+            gote_forfeit: None,
         },
         Side::Gote => ResolutionEvent::Normal {
             sente_capture: None,
             gote_capture: Some(enemy_piece.kind),
+            sente_forfeit: None,
+            gote_forfeit: None,
         },
     };
 
@@ -279,6 +288,38 @@ fn resolve_independent(pos: &Position, sente: Action, gote: Action) -> Resolutio
     }
     next.board.set(tg, Some(gote_piece));
 
+    // 5. v0.7: 支え付き取得の利き数没収。玉が死んだターンは対象外（ゲーム終了・5.2 の領分）。
+    let mut sente_forfeit: Option<PieceKind> = None;
+    let mut gote_forfeit: Option<PieceKind> = None;
+    if !sente_king_died && !gote_king_died {
+        // (b) 串刺し方式: 取り合いマスを空けた盤で両側を数える（S の裏の後詰めを攻守とも計上）。
+        // 両側を先に評価してから適用（順序依存回避）。
+        let s_forfeit = if sente_cap.is_some() && sente_piece.kind != PieceKind::King {
+            let mut t = next.clone();
+            t.board.set(ts, None); // 取りに行った駒を透かす
+            count_attackers(&t, ts, Side::Gote) > count_attackers(&t, ts, Side::Sente)
+        } else {
+            false
+        };
+        let g_forfeit = if gote_cap.is_some() && gote_piece.kind != PieceKind::King {
+            let mut t = next.clone();
+            t.board.set(tg, None);
+            count_attackers(&t, tg, Side::Sente) > count_attackers(&t, tg, Side::Gote)
+        } else {
+            false
+        };
+        if s_forfeit {
+            next.board.set(ts, None);
+            next.hand_gote.add(sente_piece.kind.unpromoted());
+            sente_forfeit = Some(sente_piece.kind);
+        }
+        if g_forfeit {
+            next.board.set(tg, None);
+            next.hand_sente.add(gote_piece.kind.unpromoted());
+            gote_forfeit = Some(gote_piece.kind);
+        }
+    }
+
     next.move_number += 1;
 
     let event = match (sente_king_died, gote_king_died) {
@@ -288,6 +329,8 @@ fn resolve_independent(pos: &Position, sente: Action, gote: Action) -> Resolutio
         (false, false) => ResolutionEvent::Normal {
             sente_capture: sente_cap.map(|p| p.kind),
             gote_capture: gote_cap.map(|p| p.kind),
+            sente_forfeit,
+            gote_forfeit,
         },
     };
 
@@ -485,7 +528,8 @@ mod tests {
             res.event,
             ResolutionEvent::Normal {
                 sente_capture: Some(PieceKind::Silver),
-                gote_capture: None
+                gote_capture: None,
+                ..
             }
         ));
     }
@@ -664,7 +708,8 @@ mod tests {
             res.event,
             ResolutionEvent::Normal {
                 sente_capture: Some(PieceKind::Silver),
-                gote_capture: None
+                gote_capture: None,
+                ..
             }
         ));
     }
@@ -705,7 +750,8 @@ mod tests {
             res.event,
             ResolutionEvent::Normal {
                 sente_capture: None,
-                gote_capture: Some(PieceKind::Silver)
+                gote_capture: Some(PieceKind::Silver),
+                ..
             }
         ));
     }
@@ -819,7 +865,8 @@ mod tests {
             res.event,
             ResolutionEvent::Normal {
                 sente_capture: Some(PieceKind::Silver),
-                gote_capture: None
+                gote_capture: None,
+                ..
             }
         ));
     }
@@ -891,5 +938,264 @@ mod tests {
         // 龍→飛として先手の持ち駒へ
         assert_eq!(res.next.hand_sente.count(PieceKind::Rook), 1);
         assert_eq!(res.next.hand_sente.count(PieceKind::Dragon), 0);
+    }
+
+    // ── v0.7: 支え付き取得の利き数没収 ──────────────────────────────────────
+
+    /// テストv0.7-1: 支え一枚・後ろ盾なし（d=1, a=0）は没収
+    /// 後手飛 5e を後手銀 4d が支える（先手側の支えなし）→ 先手歩の取得が没収される
+    #[test]
+    fn forfeit_single_supporter_no_backup() {
+        let s5e = Square::new(5, 5);
+        let s5f = Square::new(5, 6);
+        let defender = Square::new(4, 4); // 後手銀 4d（5e を支える）
+        let pos = make_pos(&[
+            (s5f, Piece::new(PieceKind::Pawn, Side::Sente)),
+            (s5e, Piece::new(PieceKind::Rook, Side::Gote)),
+            (defender, Piece::new(PieceKind::Silver, Side::Gote)),
+            (Square::new(9, 9), Piece::new(PieceKind::King, Side::Sente)),
+            (Square::new(9, 1), Piece::new(PieceKind::King, Side::Gote)),
+        ]);
+        let sente_act = Action::Move {
+            from: s5f,
+            to: s5e,
+            promote: false,
+        };
+        let gote_act = Action::Move {
+            from: Square::new(9, 1),
+            to: Square::new(8, 1),
+            promote: false,
+        };
+        let res = resolve(&pos, sente_act, gote_act);
+
+        // 後手飛は先手の持ち駒へ（通常取得は成立）
+        assert_eq!(res.next.hand_sente.count(PieceKind::Rook), 1);
+        // 先手歩は没収され盤上から消え、後手の持ち駒へ
+        assert_eq!(res.next.board.get(s5e), None);
+        assert_eq!(res.next.hand_gote.count(PieceKind::Pawn), 1);
+        assert!(matches!(
+            res.event,
+            ResolutionEvent::Normal {
+                sente_forfeit: Some(PieceKind::Pawn),
+                gote_forfeit: None,
+                ..
+            }
+        ));
+    }
+
+    /// テストv0.7-2: 利き足しで没収されない（a≧d）
+    /// v0.7-1 に加えて先手が別の駒（金 4e）で 5e を支える（a=1, d=1）→ 没収されない
+    #[test]
+    fn no_forfeit_when_defended_enough() {
+        let s5e = Square::new(5, 5);
+        let s5f = Square::new(5, 6);
+        let gote_defender = Square::new(4, 4); // 後手銀 4d（5e を支える）
+        let sente_defender = Square::new(4, 5); // 先手金 4e（5e を支える）
+        let pos = make_pos(&[
+            (s5f, Piece::new(PieceKind::Pawn, Side::Sente)),
+            (s5e, Piece::new(PieceKind::Rook, Side::Gote)),
+            (gote_defender, Piece::new(PieceKind::Silver, Side::Gote)),
+            (sente_defender, Piece::new(PieceKind::Gold, Side::Sente)),
+            (Square::new(9, 9), Piece::new(PieceKind::King, Side::Sente)),
+            (Square::new(9, 1), Piece::new(PieceKind::King, Side::Gote)),
+        ]);
+        let sente_act = Action::Move {
+            from: s5f,
+            to: s5e,
+            promote: false,
+        };
+        let gote_act = Action::Move {
+            from: Square::new(9, 1),
+            to: Square::new(8, 1),
+            promote: false,
+        };
+        let res = resolve(&pos, sente_act, gote_act);
+
+        // 通常取得のまま——先手歩が 5e に残る
+        assert_eq!(
+            res.next.board.get(s5e),
+            Some(Piece::new(PieceKind::Pawn, Side::Sente))
+        );
+        assert_eq!(res.next.hand_sente.count(PieceKind::Rook), 1);
+        assert_eq!(res.next.hand_gote.count(PieceKind::Pawn), 0);
+        assert!(matches!(
+            res.event,
+            ResolutionEvent::Normal {
+                sente_forfeit: None,
+                gote_forfeit: None,
+                ..
+            }
+        ));
+    }
+
+    /// テストv0.7-3（判断1）: 玉が取った側は没収しない
+    /// 先手玉が 5四 で支え付き（後手飛 1四）の後手銀を取得（d=1, a=0）→ 玉は没収されない
+    #[test]
+    fn king_capturer_is_exempt_from_forfeit() {
+        let king_sq = Square::new(5, 5); // 先手玉 5五
+        let silver_sq = Square::new(5, 4); // 後手銀 5四（玉が取りに行く）
+        let backer_sq = Square::new(1, 4); // 後手飛 1四（5四 を横から支える）
+        let pos = make_pos(&[
+            (king_sq, Piece::new(PieceKind::King, Side::Sente)),
+            (silver_sq, Piece::new(PieceKind::Silver, Side::Gote)),
+            (backer_sq, Piece::new(PieceKind::Rook, Side::Gote)),
+            (Square::new(9, 1), Piece::new(PieceKind::King, Side::Gote)),
+        ]);
+        // 先手玉 5五→5四（銀を取得）、後手は無関係の手（玉を動かす）
+        let sente_act = Action::Move {
+            from: king_sq,
+            to: silver_sq,
+            promote: false,
+        };
+        let gote_act = Action::Move {
+            from: Square::new(9, 1),
+            to: Square::new(8, 1),
+            promote: false,
+        };
+        let res = resolve(&pos, sente_act, gote_act);
+
+        // 先手玉は 5四 に残る（没収されない・持ち駒に載らない）
+        assert_eq!(
+            res.next.board.get(silver_sq),
+            Some(Piece::new(PieceKind::King, Side::Sente))
+        );
+        assert_eq!(res.next.hand_gote.count(PieceKind::King), 0);
+        // 銀は通常どおり先手の持ち駒へ（没収ガードは取得そのものは妨げない）
+        assert_eq!(res.next.hand_sente.count(PieceKind::Silver), 1);
+        assert!(matches!(
+            res.event,
+            ResolutionEvent::Normal {
+                sente_forfeit: None,
+                ..
+            }
+        ));
+    }
+
+    /// テストv0.7-4: 同ターン双方の支え付き取得 → 双方没収（順序独立）
+    /// 先手歩が 5e の後手飛（後手銀 4d 支え）を、後手歩が 2e の先手飛（先手銀 1f 支え）を
+    /// それぞれ無支援で取得 → 両側とも d>a となり双方が没収される
+    #[test]
+    fn both_sides_forfeit_simultaneously() {
+        let a_ts = Square::new(5, 5); // 5e（先手が取る）
+        let a_from = Square::new(5, 6); // 5f
+        let a_defender = Square::new(4, 4); // 後手銀 4d
+        let b_tg = Square::new(2, 5); // 2e（後手が取る）
+        let b_from = Square::new(2, 4); // 2d
+        let b_defender = Square::new(1, 6); // 先手銀 1f
+        let pos = make_pos(&[
+            (Square::new(9, 9), Piece::new(PieceKind::King, Side::Sente)),
+            (Square::new(9, 1), Piece::new(PieceKind::King, Side::Gote)),
+            (a_from, Piece::new(PieceKind::Pawn, Side::Sente)),
+            (a_ts, Piece::new(PieceKind::Rook, Side::Gote)),
+            (a_defender, Piece::new(PieceKind::Silver, Side::Gote)),
+            (b_from, Piece::new(PieceKind::Pawn, Side::Gote)),
+            (b_tg, Piece::new(PieceKind::Rook, Side::Sente)),
+            (b_defender, Piece::new(PieceKind::Silver, Side::Sente)),
+        ]);
+        let sente_act = Action::Move {
+            from: a_from,
+            to: a_ts,
+            promote: false,
+        };
+        let gote_act = Action::Move {
+            from: b_from,
+            to: b_tg,
+            promote: false,
+        };
+        let res = resolve(&pos, sente_act, gote_act);
+
+        // 双方とも取った飛は正規に持ち駒へ
+        assert_eq!(res.next.hand_sente.count(PieceKind::Rook), 1);
+        assert_eq!(res.next.hand_gote.count(PieceKind::Rook), 1);
+        // 双方の取りに行った歩は没収され、相手の持ち駒へ
+        assert_eq!(res.next.board.get(a_ts), None);
+        assert_eq!(res.next.board.get(b_tg), None);
+        assert_eq!(res.next.hand_gote.count(PieceKind::Pawn), 1);
+        assert_eq!(res.next.hand_sente.count(PieceKind::Pawn), 1);
+        assert!(matches!(
+            res.event,
+            ResolutionEvent::Normal {
+                sente_forfeit: Some(PieceKind::Pawn),
+                gote_forfeit: Some(PieceKind::Pawn),
+                ..
+            }
+        ));
+    }
+
+    /// テストv0.7-5（(b) 串刺し）: 後詰めが攻守対称に効くと没収されない
+    /// S=5e の裏（file 5）に守り（後手香 5c）と攻め（先手香 5h）を対称に配置。
+    /// S を空けて数えるので d=a（ともに1）→ a≧d → 没収されない（攻めの後詰めが正当に効く）。
+    #[test]
+    fn backup_slider_symmetric_no_forfeit() {
+        let s5e = Square::new(5, 5); // S（取り合いマス）
+        let s5f = Square::new(5, 6); // 先手歩（取りに行く）
+        let defender_lance = Square::new(5, 3); // 後手香 5c（S の裏の守り後詰め）
+        let attacker_lance = Square::new(5, 8); // 先手香 5h（S の裏の攻め後詰め）
+        let pos = make_pos(&[
+            (Square::new(9, 9), Piece::new(PieceKind::King, Side::Sente)),
+            (Square::new(9, 1), Piece::new(PieceKind::King, Side::Gote)),
+            (s5f, Piece::new(PieceKind::Pawn, Side::Sente)),
+            (s5e, Piece::new(PieceKind::Gold, Side::Gote)),
+            (defender_lance, Piece::new(PieceKind::Lance, Side::Gote)),
+            (attacker_lance, Piece::new(PieceKind::Lance, Side::Sente)),
+        ]);
+        let sente_act = Action::Move {
+            from: s5f,
+            to: s5e,
+            promote: false,
+        };
+        let gote_act = Action::Move {
+            from: Square::new(9, 1),
+            to: Square::new(8, 1),
+            promote: false,
+        };
+        let res = resolve(&pos, sente_act, gote_act);
+
+        // 通常取得のまま——先手歩が 5e に残る（後詰めの香が透けて a に加算された）
+        assert_eq!(
+            res.next.board.get(s5e),
+            Some(Piece::new(PieceKind::Pawn, Side::Sente))
+        );
+        assert_eq!(res.next.hand_sente.count(PieceKind::Gold), 1);
+        assert_eq!(res.next.hand_gote.count(PieceKind::Pawn), 0);
+    }
+
+    /// テストv0.7-6（(b) 串刺し）: 守り側だけ後詰めが多いと没収される
+    /// v0.7-5 から先手の後詰め香を外す（d=1, a=0）→ 没収成立。
+    #[test]
+    fn backup_slider_asymmetric_forfeit() {
+        let s5e = Square::new(5, 5);
+        let s5f = Square::new(5, 6);
+        let defender_lance = Square::new(5, 3); // 後手香 5c（S の裏の守り後詰め）
+        let pos = make_pos(&[
+            (Square::new(9, 9), Piece::new(PieceKind::King, Side::Sente)),
+            (Square::new(9, 1), Piece::new(PieceKind::King, Side::Gote)),
+            (s5f, Piece::new(PieceKind::Pawn, Side::Sente)),
+            (s5e, Piece::new(PieceKind::Gold, Side::Gote)),
+            (defender_lance, Piece::new(PieceKind::Lance, Side::Gote)),
+        ]);
+        let sente_act = Action::Move {
+            from: s5f,
+            to: s5e,
+            promote: false,
+        };
+        let gote_act = Action::Move {
+            from: Square::new(9, 1),
+            to: Square::new(8, 1),
+            promote: false,
+        };
+        let res = resolve(&pos, sente_act, gote_act);
+
+        // 没収成立——先手歩は盤上から消え、後手の持ち駒へ
+        assert_eq!(res.next.board.get(s5e), None);
+        assert_eq!(res.next.hand_sente.count(PieceKind::Gold), 1);
+        assert_eq!(res.next.hand_gote.count(PieceKind::Pawn), 1);
+        assert!(matches!(
+            res.event,
+            ResolutionEvent::Normal {
+                sente_forfeit: Some(PieceKind::Pawn),
+                ..
+            }
+        ));
     }
 }

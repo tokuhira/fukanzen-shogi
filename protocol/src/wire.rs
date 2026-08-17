@@ -126,7 +126,7 @@ mod tests {
     fn byte_layout_matches_protocol_wasm() {
         let hello = WireMessage::Hello {
             rule_major: 0,
-            rule_minor: 6,
+            rule_minor: 7,
             proto_ver: 5,
             auth_hash: "ab".repeat(32),
             side: "sente".to_string(),
@@ -134,7 +134,7 @@ mod tests {
         assert_eq!(
             hello.to_json(),
             format!(
-                r#"{{"type":"hello","rule_major":0,"rule_minor":6,"proto_ver":5,"auth_hash":"{}","side":"sente"}}"#,
+                r#"{{"type":"hello","rule_major":0,"rule_minor":7,"proto_ver":5,"auth_hash":"{}","side":"sente"}}"#,
                 "ab".repeat(32)
             )
         );

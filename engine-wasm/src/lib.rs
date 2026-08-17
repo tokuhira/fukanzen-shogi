@@ -651,7 +651,7 @@ mod tests {
         let request = no_repeat_request(n);
         let req_v: serde_json::Value = serde_json::from_str(&request).unwrap();
         let archive_request = format!(
-            r#"{{"initial_sfen":{},"plies":{},"rule":"0.6","protocol":2,"app":"test","sente":null,"gote":null,"result":{{"kind":"unfinished","outcome":"none"}}}}"#,
+            r#"{{"initial_sfen":{},"plies":{},"rule":"0.7","protocol":2,"app":"test","sente":null,"gote":null,"result":{{"kind":"unfinished","outcome":"none"}}}}"#,
             req_v["initial_sfen"], req_v["plies"]
         );
         let archive = build_archive(&archive_request);
