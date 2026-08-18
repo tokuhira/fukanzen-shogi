@@ -157,6 +157,15 @@ docs/
 | IO2 — enterWatchModeの純粋部 | `_metaToLoadedMeta` を `metaToLoadedMeta` へ移設、`archivedLinkFor` を新設 | 0.12.7 |
 | IO3 — endOnlineGameの終局patch | 終局 patch を `endGameReduce` へ。アークの締め | 0.12.8 |
 
+**C-9. ルール v0.7 — 支え付き取得の討ち死にアーク（`archive/implementation/rule-v0.7-support-forfeit/`）** — 軸Aの最初の宗家前進。移動完了時点の利き数比較で守り側 d＞攻め側 a のとき取りに行った駒を没収（ノーテーション「討ち死に」）し、方針1（損得勘定）を回復・方針3（膠着打開）は利き優位の突破が担う（案A）。配布 v0.12.3→**v0.13.0**（版タプルの初の実 bump）、web `?v=` 0.12.8→0.13.0、`RULE_VERSION` 0.6→0.7。
+
+| 実装指示書 | 内容 | 版（目安） |
+|---|---|---|
+| アーク概観と段組 | 支え付き取得の利き数没収の設計・段組（一規則で方針1・方針3を担う） | — |
+| Step1 — engine核 | `count_attackers`・`ResolutionEvent` 拡張・`resolve_independent` の没収分岐（(b) 串刺し計数・非玉ガード）・`RULE_VERSION`→0.7 | — |
+| Step2 — 没収の表示 | TUI `build_resolution_text`／engine-wasm `event:"forfeit"`／web `EVENT_LABEL`「討ち死に」 | web `?v=`0.12.9 |
+| Step3 — ルール正本の版上げ＋deploy | `design/…ルール仕様_v0.7` 新設・v0.6 を `archive/rule-history/` へ、TUI リリース・wasm 再ビルド・wrangler 本番デプロイ、配布バイナリ版 bump | v0.13.0 |
+
 ---
 
 *索引は真実を持たない——各文書を指すだけ。生きた設計（`design/`）が変われば書き換え、歴史（`archive/`）は増えるだけで消さない。アークが区切れたら、完了記録は総括へ綴じ、この索引はそれを一行で指す。*
