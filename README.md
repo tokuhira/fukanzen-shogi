@@ -247,7 +247,7 @@ Web 盤を公開しています: **[fukanzen-shogi.tokuhira.net](https://fukanze
   - *順序* — 両者のコミットが揃うまでリビールを受理しない（後出し禁止）
   - *盤面ハッシュ相互検証* — 各リビールに `SHA-256(canonical_bytes(局面))` を含め、不一致はアボートにより即時処理
   - *Ack 同期* — 両者が互いのリビールを確認し合うまでターンを進めない（メッセージ順序差によるデシンクを防止）
-  - さらに再接続時の本人認証（対局開始時に交換した `SHA-256(パスワード)` との照合）と棋譜ハッシュ照合による再開点特定（RecoverySession）も実装済み。31 本のテストで全性質を保証。
+  - さらに再接続時の本人認証（対局開始時に交換した `SHA-256(パスワード)` との照合）と棋譜ハッシュ照合による再開点特定（RecoverySession）も実装済み。49 本のテストで全性質を保証。
   - *バージョン交渉*（v0.6.0）— TCP 接続直後に双方が `(ルール版, プロトコル版)` タプルを交換し、不一致を即座にアボートとして検出する。v0.6.0 以前のクライアントとは互換性がない。v0.7.0 でプロトコル版が 2 に上がり（投了の commit-reveal 対応追加）、v0.6.0 との対戦互換性もなくなる。v0.10.0 でプロトコル版がさらに 3 へ（観戦機能の追加。詳細は後述）——交渉ロジック自体は既にプロトコル版不一致を非互換として弾いていたため無改修。
 - **TCP 通信殻**（`tui/src/net.rs`）— 4 バイト big-endian 長さプレフィックス + serde_json ボディ。受信スレッドが `mpsc::Sender<NetEvent>` へ送り、TUI メインループが 50 ms ポーリングで `try_recv` する。
 - **オンライン状態機械**（`tui/src/online.rs`）— `OnlinePhase`（着手入力中 → コミット待ち → リビール待ち → Ack 待ち）を管理。プロトコルは自動進行（着手確定でコミット送信・両者コミットでリビール送信・リビール検証後に Ack 送信）。接続状態とプロトコルフェーズはステータスバーにリアルタイム表示される。TCP 切断時はバックグラウンドスレッドで非ブロッキング再接続を実行（Connect 側は 500 ms 間隔で最大 60 秒リトライ）。再接続成功時は 4 秒間のバナーを表示し、着手がロールバックされた場合はその旨を通知して再入力を促す。
@@ -366,7 +366,7 @@ Web 盤を公開しています: **[fukanzen-shogi.tokuhira.net](https://fukanze
 # Build all crates
 cargo build
 
-# Run all tests (engine: 62 tests, protocol: 49 tests, notation: 9 tests, engine-wasm: 15 tests, tui: 2 tests)
+# Run all tests (engine: 68 tests, protocol: 49 tests, notation: 9 tests, engine-wasm: 17 tests, tui: 12 tests)
 cargo test
 
 # Run the verification CLI (text I/O, machine-readable)
