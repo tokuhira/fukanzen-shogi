@@ -180,7 +180,7 @@ export function position_view(sfen) {
  * - sente_usi: 先手の USI 着手（例: "7g7f", "P*8f", "8h3c+"）
  * - gote_usi:  後手の USI 着手
  *
- * 成功: `{"ok":true,"sfen":"<次局面>","event":"normal|clash|sente_died|gote_died|both_died"}`
+ * 成功: `{"ok":true,"sfen":"<次局面>","event":"normal|forfeit|clash|sente_died|gote_died|both_died"}`
  * 失敗: `{"ok":false,"error":"<理由>"}`
  * @param {string} sfen
  * @param {string} sente_usi

@@ -6,7 +6,7 @@ use wasm_bindgen::prelude::*;
 /// - sente_usi: 先手の USI 着手（例: "7g7f", "P*8f", "8h3c+"）
 /// - gote_usi:  後手の USI 着手
 ///
-/// 成功: `{"ok":true,"sfen":"<次局面>","event":"normal|clash|sente_died|gote_died|both_died"}`
+/// 成功: `{"ok":true,"sfen":"<次局面>","event":"normal|forfeit|clash|sente_died|gote_died|both_died"}`
 /// 失敗: `{"ok":false,"error":"<理由>"}`
 #[wasm_bindgen]
 pub fn resolve_ply(sfen: &str, sente_usi: &str, gote_usi: &str) -> String {
@@ -42,7 +42,17 @@ pub fn resolve_ply(sfen: &str, sente_usi: &str, gote_usi: &str) -> String {
     let next_sfen = engine::serialize::position_to_sfen(&resolution.next);
 
     let event = match &resolution.event {
-        engine::resolve::ResolutionEvent::Normal { .. } => "normal",
+        engine::resolve::ResolutionEvent::Normal {
+            sente_forfeit,
+            gote_forfeit,
+            ..
+        } => {
+            if sente_forfeit.is_some() || gote_forfeit.is_some() {
+                "forfeit"
+            } else {
+                "normal"
+            }
+        }
         engine::resolve::ResolutionEvent::Clash { .. } => "clash",
         engine::resolve::ResolutionEvent::SenteDied => "sente_died",
         engine::resolve::ResolutionEvent::GoteDied => "gote_died",
@@ -723,5 +733,64 @@ mod tests {
     fn position_view_bad_sfen() {
         let v: serde_json::Value = serde_json::from_str(&position_view("not a sfen")).unwrap();
         assert_eq!(v["error"], "bad_sfen");
+    }
+
+    // ── resolve_ply の event（v0.7: 没収の cue） ────────────────────────────
+
+    /// 支え一枚・後ろ盾なし（d=1, a=0）は没収 → event は "forfeit"。
+    /// engine/src/resolve.rs の forfeit_single_supporter_no_backup と同一局面。
+    #[test]
+    fn resolve_ply_forfeit_event() {
+        use engine::board::{Board, Hand, Position};
+        use engine::types::{Action, Piece, PieceKind, Side, Square};
+
+        let s5e = Square::new(5, 5);
+        let s5f = Square::new(5, 6);
+        let defender = Square::new(4, 4); // 後手銀 4d（5e を支える）
+        let mut board = Board::empty();
+        board.set(s5f, Some(Piece::new(PieceKind::Pawn, Side::Sente)));
+        board.set(s5e, Some(Piece::new(PieceKind::Rook, Side::Gote)));
+        board.set(defender, Some(Piece::new(PieceKind::Silver, Side::Gote)));
+        board.set(
+            Square::new(9, 9),
+            Some(Piece::new(PieceKind::King, Side::Sente)),
+        );
+        board.set(
+            Square::new(9, 1),
+            Some(Piece::new(PieceKind::King, Side::Gote)),
+        );
+        let pos = Position {
+            board,
+            hand_sente: Hand::empty(),
+            hand_gote: Hand::empty(),
+            move_number: 1,
+        };
+        let sfen = engine::serialize::position_to_sfen(&pos);
+
+        let sente = Action::Move {
+            from: s5f,
+            to: s5e,
+            promote: false,
+        };
+        let gote = Action::Move {
+            from: Square::new(9, 1),
+            to: Square::new(8, 1),
+            promote: false,
+        };
+
+        let result = resolve_ply(&sfen, &sente.to_usi(), &gote.to_usi());
+        let v: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(v["ok"], true);
+        assert_eq!(v["event"], "forfeit");
+    }
+
+    /// 没収なしの通常局面は従来どおり event は "normal"。
+    #[test]
+    fn resolve_ply_normal_event_without_forfeit() {
+        let sfen = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1";
+        let result = resolve_ply(sfen, "7g7f", "3c3d");
+        let v: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(v["ok"], true);
+        assert_eq!(v["event"], "normal");
     }
 }

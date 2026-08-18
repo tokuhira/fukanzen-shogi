@@ -52,6 +52,15 @@ describe("labelView — reveal 局面", () => {
     expect(vm.eventText).toBe('（両玉相討ち）');
   });
 
+  it("event が forfeit（支え付き取得の没収）: 「討ち死に」ラベル", () => {
+    const s = S({
+      phase: 'reveal', cursor: 0,
+      plies: [{ sText: '☗５五歩', gText: '☖８四歩' }],
+      events: ['forfeit'],
+    });
+    expect(labelView(s, null).eventText).toBe('（討ち死に）');
+  });
+
   it("未知の event キーはキー自体をそのまま括弧に入れる", () => {
     const s = S({
       phase: 'reveal', cursor: 0,

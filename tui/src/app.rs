@@ -736,7 +736,8 @@ fn build_resolution_text(
         ResolutionEvent::Normal {
             sente_capture,
             gote_capture,
-            ..
+            sente_forfeit,
+            gote_forfeit,
         } => {
             if let Some(k) = sente_capture {
                 if sente_musou {
@@ -760,6 +761,18 @@ fn build_resolution_text(
             }
             if sente_capture.is_none() && gote_capture.is_none() {
                 lines.push("取得なし（逃げ・空き移動）".to_string());
+            }
+            if let Some(k) = sente_forfeit {
+                lines.push(format!(
+                    "先手の{}が討ち死に（支えに取り返され後手の持ち駒へ）",
+                    piece_kind_ja(k.unpromoted())
+                ));
+            }
+            if let Some(k) = gote_forfeit {
+                lines.push(format!(
+                    "後手の{}が討ち死に（支えに取り返され先手の持ち駒へ）",
+                    piece_kind_ja(k.unpromoted())
+                ));
             }
         }
         ResolutionEvent::Clash {
@@ -898,6 +911,59 @@ mod tests {
     fn max_turns_has_display_text() {
         let text = game_over_text(&GameOverKind::Draw(DrawReason::MaxTurns));
         assert!(!text.is_empty());
+    }
+
+    // ── build_resolution_text（v0.7: 没収の表示） ──────────────────────────
+
+    #[test]
+    fn build_resolution_text_shows_forfeit_lines() {
+        let pos = Position::initial();
+        let sente = Action::Move {
+            from: Square::new(7, 7),
+            to: Square::new(7, 6),
+            promote: false,
+        };
+        let gote = Action::Move {
+            from: Square::new(3, 3),
+            to: Square::new(3, 4),
+            promote: false,
+        };
+        let event = ResolutionEvent::Normal {
+            sente_capture: Some(PieceKind::Pawn),
+            gote_capture: None,
+            sente_forfeit: Some(PieceKind::Pawn),
+            gote_forfeit: Some(PieceKind::Silver),
+        };
+        let lines = build_resolution_text(&pos, sente, gote, &event);
+        assert!(lines
+            .iter()
+            .any(|l| l == "先手の歩が討ち死に（支えに取り返され後手の持ち駒へ）"));
+        assert!(lines
+            .iter()
+            .any(|l| l == "後手の銀が討ち死に（支えに取り返され先手の持ち駒へ）"));
+    }
+
+    #[test]
+    fn build_resolution_text_no_forfeit_lines_when_none() {
+        let pos = Position::initial();
+        let sente = Action::Move {
+            from: Square::new(7, 7),
+            to: Square::new(7, 6),
+            promote: false,
+        };
+        let gote = Action::Move {
+            from: Square::new(3, 3),
+            to: Square::new(3, 4),
+            promote: false,
+        };
+        let event = ResolutionEvent::Normal {
+            sente_capture: None,
+            gote_capture: None,
+            sente_forfeit: None,
+            gote_forfeit: None,
+        };
+        let lines = build_resolution_text(&pos, sente, gote, &event);
+        assert!(!lines.iter().any(|l| l.contains("討ち死に")));
     }
 
     // ── kifu_all_plies_legal（棋譜読込の安全弁） ────────────────────────────

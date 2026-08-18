@@ -10,6 +10,7 @@ const EVENT_LABEL = {
   sente_died: '先手玉が取られた',
   gote_died:  '後手玉が取られた',
   both_died:  '両玉相討ち',
+  forfeit:    '討ち死に',
 };
 
 export function watchPhaseText(state, gameOver) {
