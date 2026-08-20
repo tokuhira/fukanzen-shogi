@@ -17,6 +17,7 @@ docs/
     終局判定の単一正本化_総括_StepAからD.md   ← 終局判定の単一正本化アークの総括
     board.js_view純粋化_総括_View1からView3.md ← board.js view 純粋化アークの総括
     board.js_IO分解_総括_IO1からIO3.md   ← board.js I/O 分解アークの総括
+    ルールv0.7_支え付き取得の討ち死に_総括_Step1から3.md ← ルール v0.7 討ち死にアークの総括
     implementation/                  ← C. 完了した実装指示書
       board-split/                   ←   board.js 分割 第〇〜三段b-3（10 本）
       protocol-unification/          ←   通信核の一本化 概観＋第一〜四段（5 本）
@@ -55,6 +56,7 @@ docs/
 - [終局判定の単一正本化アーク 総括（Step A〜D）](archive/終局判定の単一正本化_総括_StepAからD.md) — TUI と web が別々に持っていた終局判定ロジック（盤面終局のマッピング・投了の勝敗判定）を `engine::terminate::terminal_to_result` と `protocol::game_result` へ一本化し、TUI に潜んでいた「最長手数500組手で終局しない」バグを構造的に塞いだ道のり。配布 v0.12.1→v0.12.2。既知の限界（TUI 先手のクラウド対局の観戦・記録係対応＝4b）は通信核の一本化アークから引き続き未着手のまま。
 - [board.js view 純粋化アーク 総括（View-1〜View-3）](archive/board.js_view純粋化_総括_View1からView3.md) — `render()` の「state → 表示値」の導出（ラベル・ボタン・overlay・cursor）を `web/view-model.js` の純粋関数群（`labelView`・`buttonView`・`overlay`・`cursorInteractive`・合成 `viewModel`）へ抜き出した道のり。board.js 1263→1130 行、web テスト 57→118 件。web `?v=` 0.12.3→0.12.5、配布据え置き。残る本丸「種類2＝I/O 分解」は I/O 分解アーク（下記）で解消済み。
 - [board.js I/O 分解アーク 総括（IO-1〜IO-3）](archive/board.js_IO分解_総括_IO1からIO3.md) — `handleTurnComplete`・`enterWatchMode`・`endOnlineGame` に埋め込まれた純粋な判断ロジック（投了判定・meta マッピング・archivedLink 導出・終局 patch）を `web/reducers.js` の純粋 reduce へ抜き出した道のり。本質的 I/O（wasm 呼び出し・WS 送信・disconnect・記録係待ちの setTimeout）は殻に残した。web テスト 118→131 件。web `?v=` 0.12.5→0.12.8、配布据え置き。board.js の残り本丸（view 純粋化＋I/O 分解）が尽きた。
+- [ルール v0.7 支え付き取得の討ち死にアーク 総括（Step 1〜3）](archive/ルールv0.7_支え付き取得の討ち死に_総括_Step1から3.md) — v0.6 が掲げながら同時着手化で空文になっていた方針1（損得勘定）を、4.1 取得で守り側の利き数が攻め側を上回るとき取りに行った駒を没収（ノーテーション「討ち死に」）することで回復した道のり。移動完了時点・(b) 串刺し計数・非玉ガード・一規則で方針3（膠着打開）も利き優位の突破として担う（案A）。配布 v0.12.3→**v0.13.0**（バージョン互換性方針の初の実タプル bump）、`RULE_VERSION` 0.6→0.7。上位設計を Claude Code 内 Opus へ寄せた初回のアーク。
 
 ---
 
