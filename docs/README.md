@@ -14,13 +14,16 @@ docs/
   archive/                           ← 完了記録・歴史（掘り起こすときだけ）
     board-split_総括_第零段から第三段b-3.md   ← board.js 分割アークの総括＋解決済み台帳
     protocol-unification_総括_第一段から第四段.md ← 通信核の一本化アークの総括
+    終局判定の単一正本化_総括_StepAからD.md   ← 終局判定の単一正本化アークの総括
     board.js_view純粋化_総括_View1からView3.md ← board.js view 純粋化アークの総括
+    board.js_IO分解_総括_IO1からIO3.md   ← board.js I/O 分解アークの総括
     implementation/                  ← C. 完了した実装指示書
       board-split/                   ←   board.js 分割 第〇〜三段b-3（10 本）
       protocol-unification/          ←   通信核の一本化 概観＋第一〜四段（5 本）
       terminal-unification/           ←   終局判定の単一正本化 概観＋Step A〜D（5 本）
       board-js-view-purification/     ←   board.js view 純粋化 概観＋View1〜3（4 本）
       board-js-io-decomposition/       ←   board.js I/O 分解 概観＋IO1〜3（4 本）
+      rule-v0.7-support-forfeit/       ←   ルール v0.7 討ち死に 概観＋Step1・Step2（3 本）
       （淀川・記録係・その他は implementation/ 直下または小分類）
     rule-history/                    ← B-1. ルール仕様 v0.1〜v0.6
     sengoku-musou/                   ← B-2. 実装変更指示 v0.3〜v0.5（戦国無双系）
@@ -157,7 +160,7 @@ docs/
 | IO2 — enterWatchModeの純粋部 | `_metaToLoadedMeta` を `metaToLoadedMeta` へ移設、`archivedLinkFor` を新設 | 0.12.7 |
 | IO3 — endOnlineGameの終局patch | 終局 patch を `endGameReduce` へ。アークの締め | 0.12.8 |
 
-**C-9. ルール v0.7 — 支え付き取得の討ち死にアーク（`archive/implementation/rule-v0.7-support-forfeit/`）** — 軸Aの最初の宗家前進。移動完了時点の利き数比較で守り側 d＞攻め側 a のとき取りに行った駒を没収（ノーテーション「討ち死に」）し、方針1（損得勘定）を回復・方針3（膠着打開）は利き優位の突破が担う（案A）。配布 v0.12.3→**v0.13.0**（版タプルの初の実 bump）、web `?v=` 0.12.8→0.13.0、`RULE_VERSION` 0.6→0.7。
+**C-9. ルール v0.7 — 支え付き取得の討ち死にアーク（`archive/implementation/rule-v0.7-support-forfeit/`）** — 軸Aの最初の宗家前進。移動完了時点の利き数比較で守り側 d＞攻め側 a のとき取りに行った駒を没収（ノーテーション「討ち死に」）し、方針1（損得勘定）を回復・方針3（膠着打開）は利き優位の突破が担う（案A）。配布 v0.12.3→**v0.13.0**（版タプルの初の実 bump）、web `?v=` 0.12.8→0.13.0、`RULE_VERSION` 0.6→0.7。指示書は概観＋Step1・Step2 の 3 本（Step3〔版上げ＋deploy〕は指示書化せず直接着地）。
 
 | 実装指示書 | 内容 | 版（目安） |
 |---|---|---|
