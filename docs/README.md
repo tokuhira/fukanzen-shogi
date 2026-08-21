@@ -25,6 +25,7 @@ docs/
       board-js-view-purification/     ←   board.js view 純粋化 概観＋View1〜3（4 本）
       board-js-io-decomposition/       ←   board.js I/O 分解 概観＋IO1〜3（4 本）
       rule-v0.7-support-forfeit/       ←   ルール v0.7 討ち死に 概観＋Step1・Step2（3 本）
+      recorder-seal/                   ←   記録係三段目（封蝋）概観と段組（1 本・**進行中**）
       （淀川・記録係・その他は implementation/ 直下または小分類）
     rule-history/                    ← B-1. ルール仕様 v0.1〜v0.6
     sengoku-musou/                   ← B-2. 実装変更指示 v0.3〜v0.5（戦国無双系）
@@ -48,6 +49,10 @@ docs/
 ## バックログ（開いている畝の索引・トップ）
 
 - [バックログ — 伏線と未決](不完全将棋_バックログ_伏線と未決.md) — 進行中・待ち・種の一覧。**開いているものだけを映す dashboard**（完了記録は総括へ逃がした）。本索引と姉妹。
+
+## 進行中のアーク
+
+- [記録係三段目（封蝋）— 概観と段組](archive/implementation/recorder-seal/不完全将棋_記録係三段目_封蝋アーク_概観と段組.md) — 二証人の上に**記録係署名＝完全性の封蝋**を重ねる（記録係二段目 §13 の申し送り）。封じるのは中身の完全性だけ（帰属・consent・裁定には及ばない）。Ed25519・行ベース正準化・鍵が無ければ封蝋を省いて従来どおり綴じる。段組は Seal-1〜4。**各段の実装指示書は Opus 待ち。**
 
 ## 総括（アークの俯瞰・`archive/`）
 
