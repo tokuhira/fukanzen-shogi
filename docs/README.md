@@ -25,7 +25,7 @@ docs/
       board-js-view-purification/     ←   board.js view 純粋化 概観＋View1〜3（4 本）
       board-js-io-decomposition/       ←   board.js I/O 分解 概観＋IO1〜3（4 本）
       rule-v0.7-support-forfeit/       ←   ルール v0.7 討ち死に 概観＋Step1・Step2（3 本）
-      recorder-seal/                   ←   記録係三段目（封蝋）概観と段組（1 本・**進行中**）
+      recorder-seal/                   ←   記録係三段目（封蝋）概観＋Seal1（2 本・**進行中**）
       （淀川・記録係・その他は implementation/ 直下または小分類）
     rule-history/                    ← B-1. ルール仕様 v0.1〜v0.6
     sengoku-musou/                   ← B-2. 実装変更指示 v0.3〜v0.5（戦国無双系）
