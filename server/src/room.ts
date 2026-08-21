@@ -8,6 +8,9 @@ import {
   shouldArchiveFragment,
   canAppendTurn,
   sha256Hex,
+  sealFinalized,
+  sealDisputed,
+  loadRecorderKey,
   type SpectateTurn,
   type SpectateResult,
   type SpectateRecord,
@@ -16,6 +19,7 @@ import {
 interface Env {
   SPECTATE_TOKENS: KVNamespace;
   ARCHIVES: KVNamespace;
+  RECORDER_SIGNING_KEY?: string;
 }
 
 interface Testimony {
@@ -335,7 +339,7 @@ export class GameRoom implements DurableObject {
         this._broadcastArchived(verdict.id);
       } else {
         // 不一致: 裁定しない（審判なし＝版図）。両証言を保存し surface する。
-        const id = await this._archiveDisputed([a.text, b.text]);
+        const id = await this._archiveDisputed([a.text, b.text], { a: verdict.idA, b: verdict.idB });
         await this.state.storage.put("archived", true);
         this._broadcastRecordDisagreement(verdict.idA, verdict.idB, id);
       }
@@ -370,19 +374,37 @@ export class GameRoom implements DurableObject {
   // （記録係二段目 §3）。
   private async _archiveFinalized(text: string, witnesses: number): Promise<string> {
     const id = await sha256Hex(text);
-    const envelope = buildFinalizedEnvelope(text, witnesses);
+    let envelope = buildFinalizedEnvelope(text, witnesses);
+    // 封蝋（記録係三段目 Seal-2）。鍵の読み込みごと try に入れる——壊れた Secret で
+    // loadRecorderKey が throw しても、下の put へ必ず到達させるため(実装指示書 §1)。
+    // 封蝋の失敗が記録の喪失に化けてはならない(概観 不変の原則 3)。
+    try {
+      envelope = await sealFinalized(envelope, id, await loadRecorderKey(this.env));
+    } catch (err) {
+      this.log(`seal failed (archiving unsealed) id=${id}: ${String(err)}`);
+    }
     await this.env.ARCHIVES.put(id, JSON.stringify(envelope));
-    this.log(`archived finalized id=${id} witnesses=${witnesses}`);
+    this.log(`archived finalized id=${id} witnesses=${witnesses} sealed=${!!envelope.seal}`);
     return id;
   }
 
   // 二証人が食い違った対局: 裁定せず、両証言を暫定 ID（ランダム UUID）で
   // 保存する。証拠は失わない（記録係二段目 §3）。
-  private async _archiveDisputed(texts: [string, string]): Promise<string> {
+  private async _archiveDisputed(
+    texts: [string, string],
+    hashes: { a: string; b: string },
+  ): Promise<string> {
     const id = crypto.randomUUID();
-    const envelope = buildDisputedEnvelope(texts);
+    let envelope = buildDisputedEnvelope(texts);
+    // 封じるのは「両言い分をこう受け取った」という受領の事実であって、
+    // どちらが正しいかではない（審判なし・記録係二段目 §14-2）。
+    try {
+      envelope = await sealDisputed(envelope, id, hashes, await loadRecorderKey(this.env));
+    } catch (err) {
+      this.log(`seal failed (archiving unsealed) id=${id}: ${String(err)}`);
+    }
     await this.env.ARCHIVES.put(id, JSON.stringify(envelope));
-    this.log(`archived disputed id=${id}`);
+    this.log(`archived disputed id=${id} sealed=${!!envelope.seal}`);
     return id;
   }
 
