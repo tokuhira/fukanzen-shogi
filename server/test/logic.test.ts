@@ -332,12 +332,24 @@ describe("sealFinalized / sealDisputed（署名 golden・一方向合成）", ()
     expect(sealed.seal?.sig).toBe(GOLDEN_SIG_DISPUTED);
   });
 
+  // 「今」ではありえない sentinel を置くのが要。buildFinalizedEnvelope が生成した
+  // ままの archived_at で比べると、nowIso() を呼び直すバグ実装でもテストが通って
+  // しまう——toISOString() はミリ秒解像度で、間に I/O が無い二度の生成は必ず同じ
+  // ミリ秒に落ちるから（実測 200/200 ですり抜けた）。sentinel なら 200/200 捕まえる。
+  const NOT_NOW = "1999-01-01T00:00:00.000Z";
+
   it("sealFinalized は envelope の archived_at をそのまま使う（概観 §2.1 の回帰固定）", async () => {
     const key = await loadRecorderKey({ RECORDER_SIGNING_KEY: JSON.stringify(TEST_JWK) });
-    const envelope = buildFinalizedEnvelope("本文", 2);
+    const envelope = { ...buildFinalizedEnvelope("本文", 2), archived_at: NOT_NOW };
     const sealed = await sealFinalized(envelope, "dummy-id", key);
-    const archivedAtLine = sealed.seal?.statement.split("\n").find(line => line.startsWith("archived_at "));
-    expect(archivedAtLine).toBe(`archived_at ${envelope.archived_at}`);
+    expect(sealed.seal?.statement.split("\n")).toContain(`archived_at ${NOT_NOW}`);
+  });
+
+  it("sealDisputed も envelope の archived_at をそのまま使う", async () => {
+    const key = await loadRecorderKey({ RECORDER_SIGNING_KEY: JSON.stringify(TEST_JWK) });
+    const envelope = { ...buildDisputedEnvelope(["A", "B"]), archived_at: NOT_NOW };
+    const sealed = await sealDisputed(envelope, "dummy-id", { a: "hashA", b: "hashB" }, key);
+    expect(sealed.seal?.statement.split("\n")).toContain(`archived_at ${NOT_NOW}`);
   });
 
   it("witnesses も envelope から読む（witnesses:1 の envelope は statement も witnesses 1）", async () => {
