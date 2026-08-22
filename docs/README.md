@@ -18,6 +18,7 @@ docs/
     board.js_view純粋化_総括_View1からView3.md ← board.js view 純粋化アークの総括
     board.js_IO分解_総括_IO1からIO3.md   ← board.js I/O 分解アークの総括
     ルールv0.7_支え付き取得の討ち死に_総括_Step1から3.md ← ルール v0.7 討ち死にアークの総括
+    recorder-seal_総括_Seal1からSeal4.md   ← 記録係三段目（封蝋）アークの総括
     implementation/                  ← C. 完了した実装指示書
       board-split/                   ←   board.js 分割 第〇〜三段b-3（10 本）
       protocol-unification/          ←   通信核の一本化 概観＋第一〜四段（5 本）
@@ -25,7 +26,7 @@ docs/
       board-js-view-purification/     ←   board.js view 純粋化 概観＋View1〜3（4 本）
       board-js-io-decomposition/       ←   board.js I/O 分解 概観＋IO1〜3（4 本）
       rule-v0.7-support-forfeit/       ←   ルール v0.7 討ち死に 概観＋Step1・Step2（3 本）
-      recorder-seal/                   ←   記録係三段目（封蝋）概観＋Seal1〜4（5 本・**進行中**）
+      recorder-seal/                   ←   記録係三段目（封蝋）概観＋Seal1〜4（5 本）
       （淀川・記録係・その他は implementation/ 直下または小分類）
     rule-history/                    ← B-1. ルール仕様 v0.1〜v0.6
     sengoku-musou/                   ← B-2. 実装変更指示 v0.3〜v0.5（戦国無双系）
@@ -50,10 +51,6 @@ docs/
 
 - [バックログ — 伏線と未決](不完全将棋_バックログ_伏線と未決.md) — 進行中・待ち・種の一覧。**開いているものだけを映す dashboard**（完了記録は総括へ逃がした）。本索引と姉妹。
 
-## 進行中のアーク
-
-- [記録係三段目（封蝋）— 概観と段組](archive/implementation/recorder-seal/不完全将棋_記録係三段目_封蝋アーク_概観と段組.md) — 二証人の上に**記録係署名＝完全性の封蝋**を重ねる（記録係二段目 §13 の申し送り）。封じるのは中身の完全性だけ（帰属・consent・裁定には及ばない）。Ed25519・行ベース正準化・鍵が無ければ封蝋を省いて従来どおり綴じる。段組は Seal-1〜4。**Seal-1〜3 着地・本番デプロイ済み（2026-08-22）。Seal-4 指示書まで着地、実装待ち。**
-
 ## 総括（アークの俯瞰・`archive/`）
 
 - [board.js 分割アーク 総括（第〇段〜第三段b-3）](archive/board-split_総括_第零段から第三段b-3.md) — 神ファイル 1531→1220 行、純粋モジュール 10 本、テスト 57 件までの道のり・確立した設計・次アーク。末尾に**解決済み台帳**（再燃防止の記録）。board.js 分割の完了記録の詳細はここが受け皿。
@@ -62,6 +59,7 @@ docs/
 - [board.js view 純粋化アーク 総括（View-1〜View-3）](archive/board.js_view純粋化_総括_View1からView3.md) — `render()` の「state → 表示値」の導出（ラベル・ボタン・overlay・cursor）を `web/view-model.js` の純粋関数群（`labelView`・`buttonView`・`overlay`・`cursorInteractive`・合成 `viewModel`）へ抜き出した道のり。board.js 1263→1130 行、web テスト 57→118 件。web `?v=` 0.12.3→0.12.5、配布据え置き。残る本丸「種類2＝I/O 分解」は I/O 分解アーク（下記）で解消済み。
 - [board.js I/O 分解アーク 総括（IO-1〜IO-3）](archive/board.js_IO分解_総括_IO1からIO3.md) — `handleTurnComplete`・`enterWatchMode`・`endOnlineGame` に埋め込まれた純粋な判断ロジック（投了判定・meta マッピング・archivedLink 導出・終局 patch）を `web/reducers.js` の純粋 reduce へ抜き出した道のり。本質的 I/O（wasm 呼び出し・WS 送信・disconnect・記録係待ちの setTimeout）は殻に残した。web テスト 118→131 件。web `?v=` 0.12.5→0.12.8、配布据え置き。board.js の残り本丸（view 純粋化＋I/O 分解）が尽きた。
 - [ルール v0.7 支え付き取得の討ち死にアーク 総括（Step 1〜3）](archive/ルールv0.7_支え付き取得の討ち死に_総括_Step1から3.md) — v0.6 が掲げながら同時着手化で空文になっていた方針1（損得勘定）を、4.1 取得で守り側の利き数が攻め側を上回るとき取りに行った駒を没収（ノーテーション「討ち死に」）することで回復した道のり。移動完了時点・(b) 串刺し計数・非玉ガード・一規則で方針3（膠着打開）も利き優位の突破として担う（案A）。配布 v0.12.3→**v0.13.0**（バージョン互換性方針の初の実タプル bump）、`RULE_VERSION` 0.6→0.7。上位設計を Claude Code 内 Opus へ寄せた初回のアーク。
+- [記録係三段目（封蝋）アーク 総括（Seal-1〜Seal-4）](archive/recorder-seal_総括_Seal1からSeal4.md) — 二証人の上に記録係署名（Ed25519 の封蝋）を重ね、公開鍵の口と CORS を開け、web が保存された現物を取りに行って検証するまでの道のり。実対局で `sealed=true`→`verified` を確認（2026-08-22 本番デプロイ済み）。RULE・PROTOCOL・アーカイブ書式版・配布版すべて据え置き、web `?v=` 0.13.0→0.13.1。実測で見つかった罠（`archived_at` の二重生成・CORS・node と workerd の JWK 不一致・歯の無いテスト二件）と、封蝋が塞がない穴（削除・鍵を持つ運営者の捏造）を末尾に。
 
 ---
 
