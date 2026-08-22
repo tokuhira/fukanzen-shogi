@@ -305,6 +305,7 @@ it("平文 witnesses を書き換えても statement は witnesses 2 のまま�
 
 - **Seal-3**: `GET /recorder/keys` は `loadRecorderKey(env)` で鍵を読み、`toBase64Url(key.rawPublicKey)` を返す。鍵未設定なら `{ "keys": [] }`。**`/archive/:id` と `/recorder/keys` の両方に CORS**（`Access-Control-Allow-Origin: *`）。本番鍵を生成して `wrangler secret put`、その後 `wrangler deploy`。デプロイ後は `wrangler tail` で `sealed=true` を確認できる（本書 §3 のログ）。
 - **Seal-4**: `verifySeal` は署名の正しさしか見ない（`seal.alg` も見ていない）。`sealVerdict` 側で `alg !== "Ed25519"` を `unsupported` として弾き、statement と平文フィールドの突き合わせ（本書 §6.3-h の食い違い検知）を担うこと。
+- **Seal-4 — disputed のハッシュ順序を構造的に守る（Seal-2 のレビューで判明した穴）**: `_handleTestimony` が `_archiveDisputed` へ `{ a: verdict.idA, b: verdict.idB }` を渡す**呼び出し側の 1 行は、どのテストも通っていない**。仮に `a`/`b` が入れ替わっても Seal-2 の 10 件は全て通る（実装は正しいことを確認済み——`evaluateTestimonies(a.text, b.text)` が `idA = sha256(a.text)` を返し、`texts[0] = a.text` と対応する）。DO の証言フローを組み立てるテストは割高なので、**`sealVerdict` が `text_a` を `sha256(texts[0])` と、`text_b` を `sha256(texts[1])` と突き合わせる**ことで構造的に守ること。そうすれば入れ替わりは `tampered` として必ず露見する。
 
 ---
 

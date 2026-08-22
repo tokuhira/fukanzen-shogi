@@ -56,6 +56,17 @@ describe("_archiveFinalized（封蝋の配線）", () => {
     expect(await verifySeal(RAW_PUB, stored.seal)).toBe(true);
   });
 
+  // 封蝋の最も重要な約束——署名が「その中身」に結びついていること。これが無いと、
+  // 署名は有効なのに別物を指している封蝋が作れてしまう（テスト a は alg/kid/署名の
+  // 有効性しか見ないので、誤った id を渡しても通ってしまう）。
+  it("a-2. statement の id が綴じられた本文の SHA-256（＝KV キー）と一致する", async () => {
+    setSecret(TEST_JWK);
+    const id = await runInDurableObject(room("seal-binds-content"), async (i: any) =>
+      await i._archiveFinalized(SAMPLE_TEXT, 2));
+    const stored = await readArchive(id);
+    expect(stored.seal.statement.split("\n")).toContain(`id ${id}`);
+  });
+
   it("b. 鍵なしで従来どおりの envelope（degradation・seal なし）", async () => {
     setSecret(null);
     const id = await runInDurableObject(room("seal-finalized-nokey"), async (i: any) =>
