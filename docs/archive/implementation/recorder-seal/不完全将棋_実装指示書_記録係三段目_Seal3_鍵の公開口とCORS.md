@@ -281,11 +281,15 @@ curl -s https://fukanzen-shogi-ws.tokuhira.workers.dev/recorder/keys
 ### 7-4. CORS を確認
 
 ```bash
-curl -sI https://fukanzen-shogi-ws.tokuhira.workers.dev/recorder/keys | grep -i access-control
-curl -sI https://fukanzen-shogi-ws.tokuhira.workers.dev/archive/does-not-exist | grep -i access-control
+curl -s -D- -o /dev/null https://fukanzen-shogi-ws.tokuhira.workers.dev/recorder/keys \
+  | grep -iE '^HTTP|access-control|cache-control'
+curl -s -D- -o /dev/null https://fukanzen-shogi-ws.tokuhira.workers.dev/archive/does-not-exist \
+  | grep -iE '^HTTP|access-control'
 ```
 
-両方に `access-control-allow-origin: *` が出ること（**404 の側も**）。
+両方に `access-control-allow-origin: *` が出ること（**404 の側も**）。`/recorder/keys` には `cache-control: public, max-age=300` も。
+
+> **`curl -sI` を使わないこと。** `-I` は HEAD リクエストを送るが、`/recorder/keys` も `/archive/:id` も `request.method === "GET"` で判定しているため **HEAD は 404 になる**（既存 `/archive/:id` からの一貫した挙動で、ブラウザの `fetch()` は HEAD を使わないので実害は無い）。ヘッダを見るときは GET のまま `-D-` でヘッダだけ取り出す。実際に 2026-08-22 のデプロイでこれに引っかかった。
 
 ### 7-5. 実際に封蝋が押されることを確認
 
