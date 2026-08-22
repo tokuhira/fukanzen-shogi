@@ -2,13 +2,13 @@ import { describe, it, expect } from "vitest";
 import { resetOnlineReduce, hotseatConfirmReduce, turnCompleteDecision, metaToLoadedMeta, archivedLinkFor, endGameReduce } from "../reducers.js";
 
 describe("resetOnlineReduce（オンライン状態の初期化）", () => {
-  it("11 のオンライン関連キーをすべて初期値へ戻す", () => {
+  it("12 のオンライン関連キーをすべて初期値へ戻す", () => {
     const p = resetOnlineReduce();
     expect(p).toEqual({
       onlineMode: false, onlineSide: null, onlineGameOver: false, onlineEndMsg: '',
       onlineCommitted: false, onlineWaiting: false, onlineWaitingMsg: '',
       resultOverride: null, recordInviteAsked: false, recordStatusText: '',
-      archivedLink: null, _pendingRecordDisconnect: false,
+      archivedLink: null, sealStatusText: '', _pendingRecordDisconnect: false,
     });
   });
   it("呼ぶたびに独立した新しいオブジェクトを返す（共有しない）", () => {

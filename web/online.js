@@ -523,6 +523,12 @@ export function archiveUrl(id) {
   return `${httpBase}/archive/${encodeURIComponent(id)}`;
 }
 
+/** 記録係の公開鍵の取り出し URL（GET /recorder/keys・記録係三段目 Seal-3）。 */
+export function recorderKeysUrl() {
+  const httpBase = WS_BASE_URL.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
+  return `${httpBase}/recorder/keys`;
+}
+
 // 対局用の ws とは別系統（読み取り専用・commit-reveal に関与しない）。
 let spectateWs = null;
 let _specCbs   = null;

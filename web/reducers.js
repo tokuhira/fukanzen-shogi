@@ -16,6 +16,7 @@ export function resetOnlineReduce() {
     recordInviteAsked: false,
     recordStatusText: '',
     archivedLink: null,
+    sealStatusText: '',
     _pendingRecordDisconnect: false,
   };
 }

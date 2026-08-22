@@ -23,7 +23,7 @@ import {
   reconnectOnline, hasReconnectableSession, debugState,
   sendSpectateMeta, sendSpectateResult, connectSpectate, disconnectSpectate,
   sendRecordInvite, sendRecordAccept, sendRecordDecline, sendRecordTestimony,
-  isRecording, archiveUrl,
+  isRecording, archiveUrl, recorderKeysUrl,
 } from './online.js';
 
 import { parseUsi } from './usi.js';
@@ -38,10 +38,20 @@ import { movesFromSquare, dropsOfKind, buildTargetMap, resolveTarget } from './m
 import { navReduce } from './nav.js';
 import { resetOnlineReduce, hotseatConfirmReduce, turnCompleteDecision, metaToLoadedMeta, archivedLinkFor, endGameReduce } from './reducers.js';
 import { viewModel } from './view-model.js';
+import { sealVerdict } from './seal-verify.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const INITIAL_SFEN = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1";
+
+// 封蝋の判定ごとの表示（記録係三段目 Seal-4 §2）。「検証不可」と「改竄」を混同しない。
+const SEAL_TEXT = {
+  verified:    '封蝋を確認しました（綴じられた時のままです）',
+  unsealed:    '封蝋なし（封蝋の導入前に綴じられた記録です）',
+  tampered:    '⚠️ 封蝋と中身が一致しません',
+  unknown_key: '未知の鍵で封じられています（検証できません）',
+  unsupported: 'この環境では封蝋を検証できません',
+};
 
 // 読込を受け付けるアーカイブテキストの最大バイト数（安全弁）。
 // 500組手の正当なアーカイブは概算 13〜14KB（着手行 500×24B＋ヘッダ約1.2KB）。
@@ -140,6 +150,7 @@ const state = {
   recordInviteAsked: false,        // このゲームで招待の可否を既に尋ねたか（二重prompt防止）
   recordStatusText: '',            // 記録係の状態表示用テキスト（最小 surface。§5）
   archivedLink: null,              // { id, url } 直近の archived 通知（GET /archive/:id へのリンク）
+  sealStatusText: '',              // 封蝋の検証結果表示（記録係三段目 Seal-4）
   _pendingRecordDisconnect: false, // 証言送信後、綴じ結果を受け取るまで切断を待っているか
 };
 
@@ -262,6 +273,29 @@ function buildArchiveText() {
   return text;
 }
 
+// 綴じられた記録を取りに行き、封蝋を検証して表示へ流す（記録係三段目 Seal-4）。
+// このプロジェクト初のクロスオリジン fetch——サーバ側の CORS は Seal-3 で開けてある。
+// 独自ヘッダを付けないこと（付けると preflight が要る。Seal-3 は OPTIONS を持たない）。
+async function verifyArchivedSeal(id) {
+  if (!id) return;
+  update({ sealStatusText: '封蝋を検証中…' });
+  try {
+    const [archRes, keysRes] = await Promise.all([
+      fetch(archiveUrl(id)),
+      fetch(recorderKeysUrl()),
+    ]);
+    if (!archRes.ok) {
+      update({ sealStatusText: '検証できません（記録を取得できませんでした）' });
+      return;
+    }
+    const envelope = await archRes.json();
+    const keys = keysRes.ok ? ((await keysRes.json()).keys ?? []) : [];
+    update({ sealStatusText: SEAL_TEXT[await sealVerdict(id, envelope, keys)] ?? '' });
+  } catch {
+    update({ sealStatusText: '検証できません（通信に失敗しました）' });
+  }
+}
+
 function archiveFilename() {
   const now = new Date();
   const pad = n => String(n).padStart(2, '0');
@@ -344,7 +378,7 @@ function loadArchive(text) {
 function enterWatchMode(token) {
   if (state.onlineMode) { _resetOnlineState(); disconnectOnline(); }
   resetToNew();
-  update({ watchMode: true, watchStatusText: '', recordStatusText: '', archivedLink: null });
+  update({ watchMode: true, watchStatusText: '', recordStatusText: '', archivedLink: null, sealStatusText: '' });
 
   connectSpectate(token, {
     onStatus: (statusText) => {
@@ -370,6 +404,7 @@ function enterWatchMode(token) {
         loadedMeta: metaToLoadedMeta(version, null),
         recordStatusText: '',
         archivedLink: null,
+        sealStatusText: '',
       });
     },
     onTurn: (sUsi, gUsi) => {
@@ -389,9 +424,11 @@ function enterWatchMode(token) {
         recordStatusText: '記録が食い違いました（裁定はされません）',
         archivedLink: archivedLinkFor(id, archiveUrl),
       });
+      verifyArchivedSeal(id);
     },
     onArchived: (id) => {
       update({ recordStatusText: '記録されました', archivedLink: archivedLinkFor(id, archiveUrl) });
+      verifyArchivedSeal(id);
     },
   });
 }
@@ -399,7 +436,7 @@ function enterWatchMode(token) {
 function leaveWatchMode() {
   disconnectSpectate();
   resetToNew();
-  update({ watchMode: false, recordStatusText: '', archivedLink: null, watchStatusText: '' });
+  update({ watchMode: false, recordStatusText: '', archivedLink: null, sealStatusText: '', watchStatusText: '' });
 }
 
 // ── Input management ──────────────────────────────────────────────────────────
@@ -803,6 +840,10 @@ function render() {
       recordBtn.hidden = true;
     }
   }
+
+  // 封蝋の検証結果（記録係三段目 Seal-4）。記録係の状態とは別の行に出す。
+  const sealText = document.getElementById('seal-info-text');
+  if (sealText) sealText.textContent = state.sealStatusText;
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -1012,10 +1053,12 @@ document.addEventListener('DOMContentLoaded', async () => {
           alert('二人の証言が一致しませんでした。改竄検知として記録し、裁定はしません。');
           if (state._pendingRecordDisconnect) { state._pendingRecordDisconnect = false; disconnectOnline(); }
           render();
+          verifyArchivedSeal(id);
         },
         onArchived: (id) => {
           if (state._pendingRecordDisconnect) { state._pendingRecordDisconnect = false; disconnectOnline(); }
           update({ recordStatusText: '記録されました', archivedLink: { id, url: archiveUrl(id) } });
+          verifyArchivedSeal(id);
         },
         getSfens:        () => state.sfens,
         onResumeAt:      (resumeSfen) => {
